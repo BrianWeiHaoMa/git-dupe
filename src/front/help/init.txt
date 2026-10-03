@@ -1,0 +1,19 @@
+usage: git dupe init [-b BRANCH | --initial-branch=BRANCH]
+
+Attaches a private repository to this clone: an empty Git repository at
+.git/dupe, inside the project's own .git directory, whose working tree is
+the project's. Git prints its own line for it. The working tree is recorded
+relative to .git/dupe, so the clone stays attached when it is moved.
+
+The initial branch is BRANCH, else the branch the project's HEAD names,
+else Git's own default. user.name and user.email are copied from the
+project's local configuration where they are set there, and the private
+repository gets status.showUntrackedFiles=no and advice.statusHints=false.
+Nothing is made private.
+
+Unlike "git init", it takes no directory and no other option, and run
+again it does not reinitialize: it completes whatever an interrupted init
+left undone, changes nothing else, and says so in a hint.
+
+It is refused in a linked worktree, in a submodule checkout, where the
+clone's .git is not a directory, and in a project that tracks .gitdupe.

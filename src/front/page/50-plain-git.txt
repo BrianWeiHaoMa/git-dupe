@@ -1,0 +1,20 @@
+Plain git is not guarded: git-dupe never sees it. To plain git, a private
+file is a file the project ignores, and it does to private files what it does
+to any ignored file:
+
+  git clean -x        deletes them; git dupe clean spares them
+  git stash -a        stashes them, and removes them from disk
+  git add -f          stages them in the project, which then tracks them
+  a pull or checkout  overwrites one where it brings a file there
+
+A pull or checkout that brings a file of the project's to a path the private
+repository tracks overwrites the private file without a word, whether or not
+the project's .gitignore names the path. Both repositories then track the
+path, and every git dupe command warns of it until one of them stops tracking
+it. Checking out a branch without the file deletes it again.
+
+What comes back is what the private repository holds: run from the root, git
+dupe restore . brings back every privately tracked file as last staged, the
+committed content or, where an edit was staged, the staged one. An edit never
+staged is gone. git dupe status shows what differs. Commit private work
+before a public pull or checkout, and before git clean -x.

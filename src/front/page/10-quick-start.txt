@@ -1,0 +1,38 @@
+Make your own files of a project private, with a history of their own, and
+bring them to a second machine. In a clone of the project where notes/ holds
+notes of yours and .env.local your settings, a file the project's .gitignore
+ignores, run from the root:
+
+    $ git dupe init
+    $ git dupe add notes/
+    $ git dupe add -f .env.local
+    $ git dupe commit -m "Private files"
+
+git dupe init attaches an empty private repository, .git/dupe, on the branch
+the project is on. git dupe add notes/ hides the directory notes from the
+project's Git and stages the files in it. Like git add, git dupe add adds a
+file the project ignores only with -f. The commit is private: git status
+lists none of these files, git log shows no private commit, and the project's
+repository never holds them.
+
+Then make an empty repository of your own for the private history, on a host
+or a disk you trust, with the project's branch as its default branch:
+git dupe clone checks that branch out on the second machine, and refuses,
+naming -b, while the default names a branch the repository lacks. On a disk,
+git init --bare -b BRANCH makes one, BRANCH being the project's branch.
+<private-url> below stands for its URL; git-dupe refuses a URL of the
+project's own repository. Push to it:
+
+    $ git dupe remote add origin <private-url>
+    $ git dupe push -u origin HEAD
+
+HEAD is the branch you are on, the project's branch, which git dupe init took.
+
+On a second machine, clone the project as usual, and from its root run:
+
+    $ git dupe clone <private-url>
+
+The files committed privately on the first machine appear where they stood
+there, .gitdupe among them, so that the same paths are hidden. A file already
+in place is kept as it is, and named in a warning when it differs. From then
+on, git dupe pull and git dupe push move private work between the two.

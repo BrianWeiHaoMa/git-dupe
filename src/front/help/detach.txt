@@ -1,0 +1,22 @@
+usage: git dupe detach [--force]
+
+Removes the private repository, .git/dupe, and the managed region of
+.git/info/exclude, whose rules kept the project's Git ignoring the hidden
+paths; the rest of .git/info/exclude stays as it is. Every file stays on disk,
+.gitdupe included, and a warning names each formerly hidden path that the
+project's Git can now see; a last hint counts them.
+
+Without --force it refuses, changing nothing, while the private repository
+has a change not committed (to a file it tracks, or a staged addition or
+deletion), while a commit on a private branch, tag, or stash entry is on no
+remote-tracking branch (with no remote configured, every commit counts), and
+while the private repository cannot be read: commit, push, or run
+"git dupe init" to complete an interrupted init first.
+
+--force detaches all the same. History removed by "git dupe detach --force"
+is gone; git-dupe keeps no copy. It also completes an interrupted detach.
+
+With or without --force it refuses while .git/info is a symbolic link and
+the region stands in the file read through it: make .git/info a directory
+again first. It takes no other option and no operand. There is no Git
+command of this name.

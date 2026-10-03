@@ -1,0 +1,26 @@
+git dupe stash, in its push, save, and bare forms, is refused when a word
+before -- is -u, --include-untracked, -a, or --all, in full, as a prefix, or
+in a bundle, as Git reads it. In the private repository every file of the
+project is untracked, so these would stash, and remove from disk, every
+untracked file they cover. Add the files to stash first, with git dupe add,
+then run git dupe stash. Every other form of stash is Git's.
+
+git dupe push, pull, fetch, remote, and clone are refused, sending, fetching,
+and configuring nothing, when a word after the command, or the part of a word
+after its first =, names the project's repository: a URL the project's
+repository gives one of its remotes, with the same host and path whatever the
+scheme, user, port, .git suffix, or trailing slashes; or a working tree of the
+project, the root or a linked worktree, its .git, or its Git directory, by an
+absolute path, a path from ~, or a path relative to the root. push, pull, and
+fetch are also refused when a URL that the private repository's configuration
+gives any of its remotes names such a place, the refusal naming that remote
+and git dupe remote remove, and, given no repository, when the default remote
+Git takes in its place is a URL or path that names one: for push, the first
+set of branch.<name>.pushRemote, remote.pushDefault, and branch.<name>.remote,
+and for pull and fetch, branch.<name>.remote.
+
+The refusal names the place, and git dupe git for a destination you mean:
+git dupe git push runs Git's push unguarded. This is a comparison of names,
+not a proof that a destination is private: a URL Git rewrites through
+url.<base>.insteadOf, a path beginning with ~ and a user's name, and a remote
+defined by a file in a remotes or branches directory are not seen through.

@@ -1,0 +1,22 @@
+usage: git dupe clone URL [-b BRANCH]
+
+Attaches a private repository to this clone of the project from an existing
+one at URL, as on a second machine: it makes .git/dupe as "git dupe init"
+does, adds URL as the remote origin, fetches it, and checks out BRANCH, else
+the remote's default branch, as a local branch tracking origin.
+
+It writes every private file missing from the working tree, .gitdupe among
+them, so that the hidden paths are hidden here too. A file or directory
+already present is kept as it is: a warning names each one that differs,
+and "git dupe status" shows it modified; "git dupe commit -a" keeps it, and
+"git dupe restore" replaces it. Below a file or symbolic link that stands
+where the private repository has a directory, nothing is written.
+
+Unlike "git clone", it makes no new directory, takes no option but -b, and
+never overwrites a file. It is refused in a workspace already attached,
+where "git dupe init" is refused, and when a word names the project's
+repository, a working tree, or a remote of it. When the remote has no
+branch yet, it attaches with origin configured and no commit. After any
+other failure the workspace stays attached: "git dupe detach", or
+"git dupe detach --force" where it refuses, as after an interrupted clone,
+then "git dupe clone" start over.

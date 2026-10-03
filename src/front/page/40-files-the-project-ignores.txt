@@ -1,0 +1,12 @@
+git dupe add is Git's add against the private repository, and the project's
+.gitignore, the global excludes, and .git/dupe/info/exclude apply to it as to
+any repository. A file the project ignores, such as .env.local, is added only
+with -f, as git add adds one: git dupe add .env.local is refused by Git, with
+Git's own message and status, and git dupe add -f .env.local stages it.
+
+The -f is needed once per file. Once the private repository tracks the file,
+git dupe add ., git dupe add -A, git dupe add -u, and git dupe commit -a take
+its changes without -f, as Git takes the changes of any file it tracks. A new
+file the project ignores needs -f again, even below a hidden directory:
+git dupe status lists it among the ignored files until git dupe add -f adds
+it.

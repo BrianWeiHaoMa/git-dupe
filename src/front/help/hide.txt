@@ -1,0 +1,23 @@
+usage: git dupe hide PATH...
+
+Hides each PATH from the project's Git: lists it in .gitdupe, the file at
+the root that names the hidden paths, and stages .gitdupe in the private
+repository. Git ignores a hidden path through rules git-dupe keeps in
+.git/info/exclude, whatever stands at it: a file, a directory with all
+below it, or nothing yet. A PATH already listed, or below a listed path,
+is left as it is. A hint names each path newly hidden; hiding does not
+version a path, which "git dupe add" does.
+
+A PATH is literal, relative to the current directory or absolute, and
+cleaned of ".", "..", and repeated or trailing slashes. It takes no option;
+a PATH beginning with "-" goes after "--". The root, a path outside the
+working tree, and a PATH holding *, ?, or [ or beginning with : are usage
+errors.
+
+It refuses, changing nothing, a PATH the project's Git tracks, or one with
+such paths below it, naming their count. Such a path becomes private one
+file at a time: "git rm --cached <path>" first, a deletion from the project
+that every other clone receives once pushed, then "git dupe add <path>",
+with -f where the project ignores it. It also refuses while the project
+tracks .gitdupe and the private repository does not. There is no Git
+command of this name; "git dupe unhide" undoes it.

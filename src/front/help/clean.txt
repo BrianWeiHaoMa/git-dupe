@@ -1,0 +1,23 @@
+usage: git dupe clean [<options>] [--] [<pathspec>...]
+
+Runs Git's own clean of the project, in the project's repository, from the
+current directory, with your words, and never deletes a hidden path, what lies
+below one, or an untracked nested repository that holds one. The rest is
+deleted, kept, listed, and reported as Git's clean does it, with Git's exit
+status. Under -X, a directory that holds a hidden path and that Git would take
+as ignored as a whole is opened to Git, its hidden paths excluded, each nested
+repository in it and each ignored directory there holding no hidden path taken
+whole: with -d, from the top and without a pathspec, its other ignored files
+are deleted; otherwise those Git reaches from the current directory and
+pathspecs are, and, without -d or a pathspec, a directory holding only these,
+hidden directories, and ignored files is kept whole. -X with -e is refused, as
+is every form while a hidden path lies beyond a symbolic link.
+
+Options, each meaning what it means to Git:
+  -n, --dry-run  -f, --force  -i, --interactive  -q, --quiet  -d  -x  -X
+  -e <pattern>, --exclude=<pattern>, the value attached or the next word
+
+Pathspecs are Git's own, read as Git reads them. Any other option and an
+abbreviation are usage errors. "git dupe git clean ..." is not this command
+with more options: it is Git's clean in the private repository, where every
+file of the project is untracked, and it deletes the project's files.

@@ -1,0 +1,165 @@
+# Publishes the GitHub Release of a pushed tag v<version>, as RELEASING.md describes.
+# Before any check runs, the tag is refused unless it is v followed by the version
+# Cargo.toml and Cargo.lock name, annotated, and on the default branch, and unless
+# CHANGELOG.md has the version's section; then the checks of ci.yml run, and the Release is published only
+# when they pass, with the archive the checks made, its checksum, and that section as
+# its notes.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      # Cargo.lock is read here because every cargo command below but the archive's build
+      # would bring a stale one along silently, and the tag's own sources would then not
+      # build with --locked.
+      - name: Check that the tag is v followed by the version Cargo.toml and Cargo.lock name
+        run: |
+          version=$(sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"$/\1/p' Cargo.toml)
+          if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Cargo.toml's version, '$version', is not <major>.<minor>.<patch>" >&2
+            exit 1
+          fi
+          if [[ $GITHUB_REF_NAME != "v$version" ]]; then
+            echo "the tag $GITHUB_REF_NAME is not v followed by Cargo.toml's version $version; a release tag is v$version" >&2
+            exit 1
+          fi
+          locked=$(awk '$0 == "name = \"git-dupe\"" { getline; print; exit }' Cargo.lock) || true
+          if [[ $locked != "version = \"$version\"" ]]; then
+            echo "Cargo.lock's entry for git-dupe says '$locked' where Cargo.toml says $version; run cargo update -w and commit Cargo.lock with Cargo.toml" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Check that the tag is annotated and on the default branch
+        run: |
+          tag=refs/tags/$GITHUB_REF_NAME
+          git fetch --no-tags origin "+$tag:$tag"
+          if [[ $(git cat-file -t "$tag") != tag ]]; then
+            echo "the tag $GITHUB_REF_NAME is not annotated; a release tag is made with: git tag -a $GITHUB_REF_NAME -m \"git-dupe $VERSION\"" >&2
+            exit 1
+          fi
+          if [[ $(git rev-parse "$tag^{commit}") != "$GITHUB_SHA" ]]; then
+            echo "the tag $GITHUB_REF_NAME no longer names the commit $GITHUB_SHA this run was started for" >&2
+            exit 1
+          fi
+          branch=$(git ls-remote --symref origin HEAD | sed -n 's|^ref: refs/heads/\([^\t]*\)\tHEAD$|\1|p')
+          if [[ -z $branch ]]; then
+            echo "cannot read the default branch of origin" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "refs/remotes/origin/$branch"; then
+            echo "the tag $GITHUB_REF_NAME names $GITHUB_SHA, which is not on the default branch $branch; a release tag is on $branch" >&2
+            exit 1
+          fi
+
+      - name: Cut the version's section out of CHANGELOG.md as the notes
+        run: |
+          status=0
+          awk -v heading="## [$VERSION] - " '
+            index($0, "## ") == 1 {
+              if (inside) exit
+              rest = substr($0, length(heading) + 1)
+              inside = index($0, heading) == 1 && rest ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/
+              if (inside) found = 1
+              next
+            }
+            !inside { next }
+            /^[ \t]*$/ { if (started) blank++; next }
+            { while (blank > 0) { print ""; blank-- }; print; started = 1 }
+            END { if (!found) exit 1 }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md" || status=$?
+          if (( status != 0 )); then
+            echo "CHANGELOG.md has no section headed '## [$VERSION] - <YYYY-MM-DD>'" >&2
+            exit 1
+          fi
+          if [[ ! -s $RUNNER_TEMP/notes.md ]]; then
+            echo "CHANGELOG.md's section for $VERSION is empty" >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Install the toolchain rust-toolchain.toml pins
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+
+      - name: Install man and the zlib headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends man-db zlib1g-dev
+
+      - name: Read the oldest and the newest listed Git release
+        id: releases
+        run: |
+          selection=$(sed -n '/pub const LISTED/,/^];/p' tests/scenarios/harness/releases.rs \
+            | grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' | tr -d '"' | sed -n '1p;$p' | paste -sd, -) || true
+          if ! [[ $selection =~ ^[0-9]+\.[0-9]+\.[0-9]+,[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "cannot read the oldest and the newest release of LISTED in tests/scenarios/harness/releases.rs: '$selection'" >&2
+            exit 1
+          fi
+          echo "selection=$selection"
+          echo "selection=$selection" >> "$GITHUB_OUTPUT"
+          # Cache keys forbid commas; the scenario selection requires them.
+          echo "cache-selection=${selection//,/-}" >> "$GITHUB_OUTPUT"
+
+      # The same key as ci.yml's: a tag's run restores what a run on the default branch
+      # saved.
+      - name: Restore the built Git releases
+        uses: actions/cache@v6
+        with:
+          path: gits
+          key: gits-ubuntu-22.04-${{ runner.arch }}-${{ steps.releases.outputs.cache-selection }}-${{ hashFiles('tests/scenarios/harness/releases.rs', 'tests/scenarios/harness/provision.rs') }}
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Lints
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit checks
+        run: cargo test --bin git-dupe
+
+      # As in ci.yml: every scenario but `scale`, whose counted Git runs among 100,000
+      # files and one-second bound the delivery check runs before the tag. Its
+      # `release_archive` scenarios make target/release/git-dupe-<version>.tar.
+      - name: Scenarios under the oldest and the newest listed release
+        env:
+          GIT_DUPE_CHECK_RELEASES: ${{ steps.releases.outputs.selection }}
+        run: cargo test --test scenarios -- --skip scale
+
+      - name: Write the archive's checksum
+        run: |
+          cd target/release
+          archive=git-dupe-$VERSION.tar
+          if [[ ! -f $archive ]]; then
+            echo "the scenarios left no archive at target/release/$archive" >&2
+            exit 1
+          fi
+          sha256sum "$archive" > "$archive.sha256"
+          sha256sum -c "$archive.sha256"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "target/release/git-dupe-$VERSION.tar" "target/release/git-dupe-$VERSION.tar.sha256"

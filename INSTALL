@@ -1,0 +1,16 @@
+Installing git-dupe
+
+Git runs git-dupe for `git dupe ...` when the executable git-dupe stands in a
+directory on PATH. Its manual page, git-dupe.1, is shown by `man git-dupe`, and
+by `git dupe --help` while Git's help format is man, its default, when it
+stands in the man1 directory of a manual path. Installing is those two copies,
+into directories the first line makes where they are missing. From the
+directory that holds this note, with ~/.local/bin on PATH and ~/.local/share/man
+on the manual path, run:
+
+    $ mkdir -p ~/.local/bin ~/.local/share/man/man1
+    $ cp git-dupe ~/.local/bin/
+    $ cp git-dupe.1 ~/.local/share/man/man1/
+
+Any other directory on PATH, and the man1 directory of any other manual path,
+serve the same. `git dupe help` needs the executable alone.

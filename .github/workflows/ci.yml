@@ -1,0 +1,77 @@
+# The checks of CONTRIBUTING.md in their focused form, on every push to main and every
+# pull request. The delivery check, `cargo test`, is run before every release
+# (RELEASING.md); this workflow is not it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checks:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install the toolchain rust-toolchain.toml pins
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+
+      - name: Install man and the zlib headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends man-db zlib1g-dev
+
+      - name: Read the oldest and the newest listed Git release
+        id: releases
+        run: |
+          selection=$(sed -n '/pub const LISTED/,/^];/p' tests/scenarios/harness/releases.rs \
+            | grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' | tr -d '"' | sed -n '1p;$p' | paste -sd, -) || true
+          if ! [[ $selection =~ ^[0-9]+\.[0-9]+\.[0-9]+,[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "cannot read the oldest and the newest release of LISTED in tests/scenarios/harness/releases.rs: '$selection'" >&2
+            exit 1
+          fi
+          echo "selection=$selection"
+          echo "selection=$selection" >> "$GITHUB_OUTPUT"
+          # Cache keys forbid commas; the scenario selection requires them.
+          echo "cache-selection=${selection//,/-}" >> "$GITHUB_OUTPUT"
+
+      # Saved only when the job succeeds, so a set built while a check failed is never
+      # kept; a changed list or build gives a new key. The image is in the key: a Git
+      # built on one image may not run on an older image's C library.
+      - name: Restore the built Git releases
+        uses: actions/cache@v6
+        with:
+          path: gits
+          key: gits-ubuntu-22.04-${{ runner.arch }}-${{ steps.releases.outputs.cache-selection }}-${{ hashFiles('tests/scenarios/harness/releases.rs', 'tests/scenarios/harness/provision.rs') }}
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Lints
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit checks
+        run: cargo test --bin git-dupe
+
+      # Every scenario but `scale`, under the oldest and the newest listed release. `scale`
+      # counts the Git runs of six commands among 100,000 files and holds each command
+      # under one second; on a shared runner, whose speed and load decide that second as
+      # much as git-dupe does, it is left out, and with it the counted runs at that size.
+      # The delivery check before every release tag runs it, under every listed release.
+      - name: Scenarios under the oldest and the newest listed release
+        env:
+          GIT_DUPE_CHECK_RELEASES: ${{ steps.releases.outputs.selection }}
+        run: cargo test --test scenarios -- --skip scale

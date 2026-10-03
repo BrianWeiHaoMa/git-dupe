@@ -1,0 +1,31 @@
+A hidden path is one the project's Git ignores, through rules git-dupe keeps
+in .git/info/exclude: .gitdupe, every path .gitdupe lists, and every file the
+private repository tracks. A private file is one the private repository
+tracks. Every private file is hidden, but being hidden versions nothing.
+
+git dupe hide scratch/ lists scratch in .gitdupe and stages .gitdupe: the
+path is hidden whatever stands at it, a file, a directory with everything
+below it, or nothing yet, and nothing at it is staged. git dupe add notes/
+hides the directory notes the same way, then stages what Git's add takes
+under it: never a file only the project's Git tracks, and a file the project
+ignores only with -f. git dupe add docs/notes.md hides that file alone, by
+tracking it, and .gitdupe does not list it. .gitdupe can also be edited by
+hand, one literal path per line.
+
+git dupe unhide notes takes notes off .gitdupe; the files under it that the
+private repository tracks stay hidden. git dupe rm --cached docs/notes.md
+stops tracking the file privately and leaves it on disk; unless .gitdupe
+lists it or a path above it, it is no longer hidden. Where public Git can then
+see a path that was hidden, a warning names it, and names git dupe hide, run
+from the root, where that command would hide it again.
+
+A path is tracked by one repository or the other. A file the project's Git
+tracks stays visible to it under a hidden directory, because ignore rules do
+not apply to a tracked file. git dupe add never stages a file only the
+project's Git tracks, and git dupe hide, like git dupe add of a directory not
+yet hidden, refuses it and every directory that holds one. Such a file
+becomes private one file at a time, by two commands run from the root: git
+rm --cached README.md, which stages its deletion from the project, a deletion
+every other clone receives once it is committed and pushed, and then git dupe
+add README.md, with -f where the project ignores it, which tracks it
+privately. git-dupe runs neither for you.

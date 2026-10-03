@@ -1,0 +1,15 @@
+usage: git dupe git <command> [<args>]
+
+Runs Git with <command> and <args> exactly as typed, against the private
+repository, guarded by nothing: no table, no refusal, no word changed. It is
+the route to an option a table of git-dupe does not hold, as in "git dupe git
+add -i" or "git dupe git status --porc", and to a form git-dupe refuses that
+you mean, as in "git dupe git stash -u". Output, pager, editor, prompts,
+aliases, and the exit status are Git's, and git-dupe keeps the project's Git
+ignoring the hidden paths after it, as after every command.
+
+Only the first word is read: -h or --help there prints this text, and any
+other word beginning with "-" is a usage error, because Git's own options go
+before "dupe", as in "git -C <dir> dupe git log". Every later word is Git's:
+"git dupe git log -h" shows Git's usage of log. It needs a workspace with a
+private repository attached.

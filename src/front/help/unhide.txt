@@ -1,0 +1,17 @@
+usage: git dupe unhide PATH...
+
+Stops hiding each PATH: removes every line of .gitdupe that names PATH once
+cleaned, and stages .gitdupe in the private repository. A line naming a
+path below PATH stays, and files the private repository tracks stay hidden
+wherever they are. A PATH that .gitdupe does not list changes nothing. One
+hint per PATH, listed or not, says whether a line was removed and what
+still hides it; a warning names a path that stands on disk and is now
+visible to the project's Git.
+
+PATH is read as "git dupe hide" reads it: literal, relative to the current
+directory or absolute, and cleaned. It takes no option; a PATH beginning
+with "-" goes after "--". The root, a path outside the working tree, and a
+PATH holding *, ?, or [ or beginning with : are usage errors.
+
+It refuses, changing nothing, while the project tracks .gitdupe and the
+private repository does not. There is no Git command of this name.

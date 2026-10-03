@@ -1,0 +1,8 @@
+[package]
+name = "git-dupe"
+version = "0.1.0"
+edition = "2024"
+description = "Keeps a developer's private files under version control inside a project shared through Git, without those files ever entering the project's repository"
+license = "MIT"
+repository = "https://github.com/BrianWeiHaoMa/git-dupe"
+publish = false

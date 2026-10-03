@@ -1,0 +1,51 @@
+A day of work, from the root of the project of the quick start. Since then
+you edited .env.local and wrote notes/today.md; new beside them are
+.vscode/settings.json, which the project's .gitignore ignores, docs/notes.md,
+and src/new.py, and a build left build/out.js.
+
+Make more of your files private: one file among the project's own, a
+directory the project ignores, which takes -f, and a directory before
+anything is in it:
+
+    $ git dupe add docs/notes.md
+    $ git dupe add -f .vscode/
+    $ git dupe hide scratch/
+
+A directory is hidden by its line in .gitdupe, and a file by being tracked
+privately, so docs/notes.md alone is hidden and the rest of docs/ stays the
+project's. Whatever is written in scratch/ later is hidden too.
+
+See what changed under the hidden paths, stage all of it, and commit:
+
+    $ git dupe status
+    $ git dupe add -A
+    $ git dupe commit -m "Notes of the day"
+
+git dupe status shows changes under the hidden paths alone, so src/new.py,
+which nothing hides, is left for git add or git dupe add to take. git dupe
+add -A stages every change under the hidden paths and nothing else, from any
+directory of the project.
+
+Take what your other machines pushed, and send what this one committed:
+
+    $ git dupe pull
+    $ git dupe push
+
+Reset the working tree. git dupe clean -fdx deletes the project's untracked
+files, those its .gitignore ignores included, such as build/out.js and
+src/new.py here, as git clean -fdx does, and keeps every hidden path and
+everything below one:
+
+    $ git dupe clean -fdx
+
+In a script, or for an agent: git dupe status --porcelain lists the changes,
+and the untracked and ignored files, under the hidden paths alone, and prints
+nothing here, where all of it is committed; -m keeps git dupe commit from
+opening an editor; a refusal of git-dupe's own exits 128, and a usage error
+129.
+
+    $ git dupe status --porcelain
+
+The help of one command, which needs nothing but the executable:
+
+    $ git dupe help add

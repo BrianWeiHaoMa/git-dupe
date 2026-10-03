@@ -1,0 +1,23 @@
+usage: git dupe status [<options>] [--] [<path>...]
+
+Shows Git's own status of the private repository, confined to the hidden
+paths and the paths whose deletion is staged. It asks Git for untracked
+files, and for ignored ones in Git's ignored section, unless your own -u or
+--ignored says otherwise. It lists nothing untracked elsewhere, but what
+stands where a deletion is staged, and no file the project's Git tracks
+unless the private repository tracks it, or a file below it, or stages its
+deletion. With paths, it is confined further to what lies at or below them.
+A hint names "git dupe add" while nothing but .gitdupe is hidden.
+
+Options, each meaning what it means to Git, with its value attached:
+  -v, --verbose    -s, --short     -b, --branch     --long
+  -z, --null       --show-stash    --ahead-behind   --no-ahead-behind
+  --porcelain[=<version>]          -u[<mode>], --untracked-files[=<mode>]
+  --ignored[=<mode>]               --ignore-submodules[=<when>]
+  --column[=<options>], --no-column
+  --renames, --no-renames          -M[<n>], --find-renames[=<n>]
+
+A path is literal, relative to the current directory or absolute, and ":/"
+begins one at the root. Any other option, an abbreviation, and a path that
+holds *, ?, or [, or begins with ":" other than ":/", are usage errors.
+"git dupe git status ..." runs any of them as Git's own status, unconfined.

@@ -1,0 +1,23 @@
+usage: git dupe add [<options>] [--] [<path>...]
+
+Git's add, against the private repository. ".", "./", the root (":/" or its
+absolute path), and -A or --all without a path act on the hidden paths: all
+of them, or those at or below the current directory. They never hide a new
+path, and with nothing hidden there they run nothing and say so. Any other
+path is literal: a directory not yet hidden is hidden first, as "git dupe
+hide" would hide it, or only named under -n; a file becomes private once Git
+adds it. A path only the project's Git tracks is never staged: named as a
+file it is refused, and under a hidden path it is skipped, counted in a warning.
+
+Options, each meaning what it means to Git:
+  -n, --dry-run   -v, --verbose   -p, --patch       -e, --edit
+  -f, --force     -u, --update    -N, --intent-to-add
+  -A, --all       --no-all        --ignore-removal  --no-ignore-removal
+  --renormalize   --refresh       --ignore-errors   --ignore-missing
+  --sparse        --chmod=(+|-)x, or --chmod (+|-)x
+
+A path is literal, relative to the current directory or absolute, and ":/"
+begins one at the root. Any other option, an abbreviation, -i, and
+--pathspec-from-file are usage errors, as is a path that holds *, ?, or [,
+or begins with ":" other than ":/".
+"git dupe git add ..." runs any of them as Git's own add, unguarded.
