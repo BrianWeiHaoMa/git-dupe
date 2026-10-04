@@ -1,6 +1,8 @@
 # git-dupe
 
 [![CI](https://github.com/BrianWeiHaoMa/git-dupe/actions/workflows/ci.yml/badge.svg)](https://github.com/BrianWeiHaoMa/git-dupe/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/BrianWeiHaoMa/git-dupe)](https://github.com/BrianWeiHaoMa/git-dupe/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/BrianWeiHaoMa/git-dupe)](LICENSE)
 
 git-dupe keeps the files in a checkout that are yours and not the project's — `.env.local`,
 notes, plans, scratch scripts, editor settings, your own instructions file for a coding
@@ -13,6 +15,8 @@ codes.
 "Dupe" as in a duplicate of your checkout that only you see; it has nothing to do with
 duplicate files. Linux only, Git 2.43.0 or newer below 3.0.0, and young: what it does not
 do yet is under [Limits](#limits), and `git dupe detach` takes it back out.
+
+<img src="docs/demo.png" width="880" alt="A terminal transcript. git status --short lists CLAUDE.md and notes/ as untracked. After git dupe init, git dupe add notes/ CLAUDE.md, git dupe add -f .env.local, and git dupe commit -m 'my private files', git status --short prints nothing, and git dupe log --oneline shows the one private commit.">
 
 ## Quick start
 

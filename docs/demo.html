@@ -1,0 +1,126 @@
+<!doctype html>
+<!--
+  docs/demo.html is the source of docs/demo.png (README) and docs/social-preview.png
+  (GitHub social preview, 1280x640). Open it as-is for the README panel, or with
+  ?social appended for the social-preview variant (adds the title block and sizes
+  the panel to exactly 1280x640).
+
+  The transcript is real git-dupe v0.1.0 output under Git 2.43.0, reproduced
+  byte for byte; the only edit is the shortened directory in the "Initialized" line.
+
+  Rendered from the repository root with Node 22 and Playwright (Chromium), with
+  `node` on PATH and the playwright package resolvable by require() (a local
+  node_modules, or NODE_PATH pointing at one):
+
+    node -e '
+      const {chromium} = require("playwright");
+      (async () => {
+        const b = await chromium.launch();
+        const u = "file://" + process.cwd() + "/docs/demo.html";
+        let p = await b.newPage({viewport: {width: 1100, height: 800}, deviceScaleFactor: 2});
+        await p.goto(u);
+        await p.locator(".panel").screenshot({path: "docs/demo.png", omitBackground: true});
+        p = await b.newPage({viewport: {width: 1280, height: 640}, deviceScaleFactor: 1});
+        await p.goto(u + "?social");
+        await p.screenshot({path: "docs/social-preview.png"});
+        await b.close();
+      })();
+    '
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>git-dupe demo</title>
+<script>
+  if (location.search.slice(1).split('&').includes('social')) {
+    document.documentElement.classList.add('social');
+  }
+</script>
+<style>
+  html, body { margin: 0; padding: 0; }
+  html { color-scheme: dark; }
+  html.social { background: #1e1e2e; }
+
+  .panel {
+    box-sizing: border-box;
+    width: 1100px;
+    padding: 28px;
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 10px;
+    color: #cdd6f4;
+    font-family: "DejaVu Sans Mono", monospace;
+    font-size: 17px;
+    line-height: 1.5;
+  }
+
+  .hero { display: none; }
+  .hero h1 {
+    margin: 0;
+    font-size: 30px;
+    line-height: 1.2;
+    font-weight: bold;
+    color: #cdd6f4;
+  }
+  .hero p {
+    margin: 6px 0 0;
+    font-size: 18px;
+    line-height: 1.4;
+    color: #a6adc8;
+  }
+
+  .transcript {
+    margin: 0;
+    font: inherit;
+    color: #a6adc8;
+    white-space: pre-wrap;
+  }
+  .ps1 { color: #a6e3a1; }
+  .cmd { color: #cdd6f4; font-weight: bold; }
+  .untracked { color: #f38ba8; }
+  .hl { color: #f9e2af; }
+  .comment { color: #6c7086; font-style: italic; }
+
+  /* ?social: 1280x640 social preview, title block above the transcript */
+  .social .panel {
+    width: 1280px;
+    height: 640px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow: hidden;
+    font-size: 16px;
+  }
+  .social .hero { display: block; margin: 0 0 22px; }
+</style>
+</head>
+<body>
+<div class="panel">
+  <header class="hero">
+    <h1>git-dupe</h1>
+    <p>A second Git repo inside .git for the files that are yours, not the project's.</p>
+  </header>
+<pre class="transcript"><span class="ps1">$ </span><span class="cmd">git status --short</span>
+<span class="untracked">?? CLAUDE.md</span>
+<span class="untracked">?? notes/</span>
+
+<span class="ps1">$ </span><span class="cmd">git dupe init</span>
+Initialized empty Git repository in /home/brian/code/project/.git/dupe/
+<span class="ps1">$ </span><span class="cmd">git dupe add notes/ CLAUDE.md</span>
+<span class="hl">hint:</span> notes is now hidden from the project's Git; run from the root, 'git dupe unhide -- notes' stops hiding it
+<span class="ps1">$ </span><span class="cmd">git dupe add -f .env.local</span>
+<span class="ps1">$ </span><span class="cmd">git dupe commit -m "my private files"</span>
+[main (root-commit) 6ece80b] my private files
+ 4 files changed, 4 insertions(+)
+ create mode 100644 .env.local
+ create mode 100644 .gitdupe
+ create mode 100644 CLAUDE.md
+ create mode 100644 notes/todo.md
+
+<span class="ps1">$ </span><span class="cmd">git status --short</span>              <span class="comment"># the project: nothing</span>
+<span class="ps1">$ </span><span class="cmd">git dupe log --oneline</span>          <span class="comment"># your files</span>
+<span class="hl">6ece80b</span> my private files</pre>
+</div>
+</body>
+</html>
