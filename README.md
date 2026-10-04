@@ -240,6 +240,16 @@ Git 2.43.0 and 2.56.0, the oldest and the newest release it lists
 each release under every minor release between them, fourteen at this writing, each
 built from source.
 
+**How it was built.** I wrote the product specification and own every decision in it:
+the command surface, what is refused, what is left to plain Git, and the tradeoffs
+behind each. Coding agents wrote most of the Rust and the scenarios, to those two
+documents and under my direction, and I reviewed each change against them before it
+landed. The rules they worked under are the ones in [`CONTRIBUTING.md`](CONTRIBUTING.md):
+one directory of code per part of the technical specification's `Composition`; code,
+checks, and documents citing the lines they serve by label; a change of behavior
+amending the specification before it touches the code; and no check weakened or skipped
+to get to green. The first commit is a squash of the history before the tag.
+
 Read the specification beside the code and judge for yourself whether git-dupe keeps
 what it promises inside its `Operating envelope`. When something you ran does not go as
 a line says, [`CONTRIBUTING.md`](CONTRIBUTING.md) says how to report it, and the issue
