@@ -27,9 +27,11 @@ cp git-dupe ~/.local/bin/
 cp git-dupe.1 ~/.local/share/man/man1/
 ```
 
-The release's executable is for x86-64 Linux with the GNU C library 2.34 or newer, as
-Ubuntu 22.04, Debian 12, and RHEL 9 have; on another machine, or where it does not start,
-install from source.
+The release's executable is for x86-64 Linux with the GNU C library 2.34 or newer; on
+another machine, or where it does not start, install from source. Check the Git before
+the library: `git --version` must say 2.43.0 or newer. Ubuntu 24.04 ships 2.43.0;
+Ubuntu 22.04 ships 2.34 and Debian 12 ships 2.39, so there a newer Git comes first, from
+a backport, a PPA such as Ubuntu's `git-core`, or a build from source.
 
 **From source.** In a clone of this repository, with Rust installed through rustup, which
 installs the toolchain the repository pins on first use:
