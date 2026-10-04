@@ -10,7 +10,8 @@ it has another name, read that name for `main` in them (`Set once`, below).
 
 - **The version**, `<major>.<minor>.<patch>`, is set in one place, `version` in
   `Cargo.toml`, which `Cargo.lock` follows (step 3): `git dupe --version` prints it, and
-  the archive is named by it. The README names no version, so a release never edits it.
+  the archive is named by it. The README names no version of git-dupe, so setting one
+  never edits it.
 - **The tag** is an annotated tag `v<version>` on a commit of the default branch,
   `main`.
 - **The GitHub Release** of that tag is titled with the tag. Its notes are the version's
@@ -93,7 +94,8 @@ release and as a change of its own; `<new>` is the newest of them:
    the opening of `Substrate assumptions`, and an assumption bounded "through `<old>`",
    as S11 is; in `PRODUCT_SPECIFICATION.md`, F4's newest "at this writing"; in
    [`CONTRIBUTING.md`](CONTRIBUTING.md), the examples of the `Checks` table and the
-   count of releases the paragraph after it gives. This lists every line that names
+   count of releases the paragraph after it gives; in `README.md`, the newest release
+   and the count under `Built to a specification`. This lists every line that names
    `<old>`, to read one by one:
 
    ```console

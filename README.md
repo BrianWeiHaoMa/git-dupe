@@ -118,19 +118,22 @@ private work between machines.
 
 ## Built to a specification
 
-**git-dupe is new, and a tool that touches your files has to earn your trust.** So
-everything here was built toward one document,
-[`PRODUCT_SPECIFICATION.md`](PRODUCT_SPECIFICATION.md): in numbered lines, what git-dupe
-does, the guarantees it keeps, and what it never does. Every line of code was written to
-it and reviewed against it, and
+git-dupe is new, and a tool that writes inside `.git` has to earn trust, so it is held to
+one document. [`PRODUCT_SPECIFICATION.md`](PRODUCT_SPECIFICATION.md) says, in numbered
+lines, what git-dupe does, the guarantees it keeps, and what it never does;
 [`TECHNICAL_SPECIFICATION.md`](TECHNICAL_SPECIFICATION.md) says how each guarantee holds.
-`cargo test` runs every scenario of the suite, the specification's own `Done when` among
-them, under every minor Git release from 2.43.0 to the newest the repository lists.
+The code follows both, and a change of behavior amends the specification first. The
+scenario suite, the specification's own `Done when` among it, runs under Git 2.43.0 and
+2.56.0, the oldest and the newest release it lists, on every push
+([CI](https://github.com/BrianWeiHaoMa/git-dupe/actions/workflows/ci.yml)), and before a
+release under every minor release between them, fourteen at this writing, each built
+from source, so that a change in Git shows up as a failing release before it shows up
+as a bug report.
 
-**You are welcome to check it.** Read the specification beside the code, on your own or
-with a strong model, and judge whether git-dupe keeps what it promises under the conditions of
-its `Operating envelope`. When something you ran does not go as a line says,
-[`CONTRIBUTING.md`](CONTRIBUTING.md) says how to report it.
+Read the specification beside the code and judge for yourself whether git-dupe keeps
+what it promises inside its `Operating envelope`. When something you ran does not go as
+a line says, [`CONTRIBUTING.md`](CONTRIBUTING.md) says how to report it, and the issue
+form asks for exactly that.
 
 ## Read more
 
