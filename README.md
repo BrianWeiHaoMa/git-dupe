@@ -158,6 +158,53 @@ archive, installed as its `INSTALL` says.
   never truncated. Files below a hidden directory are not counted: a `notes/` with
   thousands of files is one path.
 
+## Compared with what you may already use
+
+- **`.git/info/exclude` by hand, or `git update-index --skip-worktree`.** Hides a path
+  from the project and does nothing else: no history, and nothing on the next machine.
+  git-dupe maintains that exclude file for you and adds the history and the sync.
+- **The bare-repository dotfiles trick, vcsh, yadm, chezmoi.** The first two are the same
+  mechanism as git-dupe's, a Git directory kept elsewhere with a working tree it does not
+  own, and all four are built for `$HOME`: none knows about a project's exclude file or
+  its remotes. git-dupe is that pattern scoped to one project and kept inside its `.git`,
+  with the exclude rules maintained for you, `status` and `add` confined to your files,
+  and the forms that would stash the whole project or push to the project's remote
+  refused. If the trick already works for you, keep it.
+- **git-crypt, sops, age.** Encrypt files that stay in the team's repository. git-dupe
+  keeps files out of it, and encrypts nothing. The private repository is an ordinary one,
+  so a tool like these could run inside it, untested.
+- **A submodule.** Its gitlink and `.gitmodules` are committed, so the project sees it,
+  and it holds a subdirectory, never a file at the root such as `.env.local`.
+- **A gitignored folder, or symlinks from a dotfiles repository.** Hidden only where the
+  team's `.gitignore` happens to name it, versioned only if the dotfiles repository knows
+  every project, and gone from every fresh clone until you set it up again.
+
+## Questions
+
+- **Does the private repository come along when someone clones the project?** No. `.git`
+  is not part of a clone, so a clone holds neither `.git/dupe`, `.gitdupe`, nor the
+  exclude rules: nothing of yours is in the project. In a fresh clone you run
+  `git dupe clone <private-url>`, which writes the files that are missing and keeps,
+  naming each, any that are already there.
+- **Two people on the same project?** Each clone has its own `.git/dupe`, its own
+  `.gitdupe`, and its own private remote. Nothing shows in the project for anyone else.
+- **My agent runs `git add -A` all day.** Anything that finds files through the ignore
+  rules, `add -A`, `add .`, `commit -a`, `status`, never picks up a hidden path. What
+  writes the index from an explicit tree or patch can: `add -f`, or a merge, rebase, or
+  patch that brings a file to that path. The path is then tracked by both repositories,
+  stays hidden, and every git-dupe command warns until one side lets go.
+- **What if the team's `.gitignore` has a `!` rule for my path?** `.gitignore` outranks
+  `info/exclude`, so the path is exposed. git-dupe names it, and the deciding rule with
+  its file and line, after every command until the rule or the path changes. Nothing is
+  lost.
+- **What if the project later adds a file at my path?** A public pull or checkout
+  overwrites yours. Commit private work first; `git dupe restore` brings it back; then
+  one repository has to give the path up.
+- **How do I get out?** `git dupe detach`: it removes `.git/dupe` and the exclude rules,
+  leaves every file on disk, `.gitdupe` included, and warns which paths the project can
+  now see. Without `--force` it refuses while anything is uncommitted or on no remote.
+  Then delete the executable.
+
 ## Built to a specification
 
 git-dupe is new, and a tool that writes inside `.git` has to earn trust, so it is held to
