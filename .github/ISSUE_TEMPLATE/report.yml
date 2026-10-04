@@ -1,0 +1,52 @@
+name: Something did not go as the specification says
+description: A command whose result differs from a line of PRODUCT_SPECIFICATION.md, or a line that can be read two ways.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The most useful one starts from use: something you ran that did not go as
+        [`PRODUCT_SPECIFICATION.md`](https://github.com/BrianWeiHaoMa/git-dupe/blob/main/PRODUCT_SPECIFICATION.md) says. Its guarantees hold inside its
+        `Operating envelope`: Linux, a local case-sensitive filesystem, Git 2.43.0 or newer below 3.0.0, and the
+        main working tree of an ordinary clone. A report from outside it is still welcome; say so, and it becomes
+        a conversation about the envelope rather than a defect.
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands that show it, from an empty directory
+      description: Every command from `git init` on, so that the same thing happens on another machine. Names and contents of files can be made up as long as the result is the same.
+      render: sh
+      placeholder: |
+        git init -b main project && cd project
+        git commit --allow-empty -m init
+        git dupe init
+        ...
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: The output as printed, and the exit status if you have it (`echo $?`).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and the line you expected it from
+      description: The label of the line in `PRODUCT_SPECIFICATION.md`, such as `G16`, when you have one. If the line itself seems unclear, or reads two ways, say how you read it.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: The output of `git --version` and `git dupe --version`.
+      placeholder: git version 2.43.0, git-dupe 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Distribution and filesystem
+      description: Optional. For example "Ubuntu 24.04, ext4" or "Fedora 42, btrfs". A network or case-insensitive filesystem is outside the envelope and worth naming.

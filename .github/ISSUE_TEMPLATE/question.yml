@@ -1,0 +1,17 @@
+name: A question or a suggestion
+description: How to do something with git-dupe, a case it should handle, or a design you would want instead.
+body:
+  - type: textarea
+    id: situation
+    attributes:
+      label: What you are trying to do
+      description: The project, the files that are yours, and where they live, in a few lines. Commands are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: wanted
+    attributes:
+      label: What you would want git-dupe to do
+      description: If it is something git-dupe refuses or leaves to plain Git today, say what you did instead. `PRODUCT_SPECIFICATION.md` lists under `Non-goals` what it leaves alone on purpose, and under `Left open` what is still undecided.
+    validations:
+      required: true
