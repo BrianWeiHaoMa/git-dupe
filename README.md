@@ -146,7 +146,8 @@ files, or `cargo uninstall git-dupe` after an install from source.
 - **Linux only, for now.** The specification promises behavior on Linux, on a local,
   case-sensitive filesystem, and that is what the suite runs under. Nothing known rules
   macOS out, but its default filesystem is case-insensitive, outside the envelope, so a
-  port is more than a rebuild; say so in an issue if you want one.
+  port is more than a rebuild. If you want one, say so in
+  [issue #1](https://github.com/BrianWeiHaoMa/git-dupe/issues/1).
 - **Git 2.43.0 or newer, below 3.0.0.** No single feature needs it; it is the floor the
   suite covers, and Ubuntu 24.04's stock Git. [Install](#install) says what older
   distributions ship.
@@ -166,8 +167,9 @@ files, or `cargo uninstall git-dupe` after an install from source.
 - **The main working tree only.** `git dupe` in a linked worktree is refused and names
   the main one. The exclude rules apply in every worktree, since `.git/info/exclude` is
   shared, but private versioning exists in the main one only. Whether linked worktrees
-  should share one private repository or each get their own is undecided; say so in an
-  issue if you need them.
+  should share one private repository or each get their own is undecided; if you need
+  them, say how you would want them to behave in
+  [issue #2](https://github.com/BrianWeiHaoMa/git-dupe/issues/2).
 - **Up to 1,000 hidden paths, a few thousand private files.** That is the envelope the
   suite covers. The hidden paths not below another one are passed to Git on one command
   line; a list that does not fit is refused, naming the count, never truncated. Files
