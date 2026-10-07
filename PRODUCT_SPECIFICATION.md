@@ -58,7 +58,7 @@ Behavior outside the assumptions below is not promised.
 - **E5.** The `git` on `PATH` is a supported version (F4). The private remote is a destination the user chose for private content, reached through Git's own transports and credentials.
 - **E6.** A command may be interrupted or killed at any point and run again.
 - **E7.** The filesystem accepts every write git-dupe makes under `.git` and to `.gitdupe`.
-- **E8.** In each worktree, the hidden paths not below another hidden path number at most 1,000, and their paths together take at most 128,000 bytes, the budget from which its region and the path lists git-dupe gives Git on one command line are built; git-dupe runs with a stack size limit of at least 8 MiB, Linux's default, and an environment small enough that such a list fits on one command line beside it, as any environment under 1 MiB, counting eight bytes for each variable, is.
+- **E8.** In each worktree, the hidden paths not below another hidden path number at most 1,000, and their paths together take at most 128,000 bytes, and so do the paths of the other worktrees' regions that stand in it and that it does not hide: the budget from which its region and the path lists git-dupe gives Git on one command line are built; git-dupe runs with a stack size limit of at least 8 MiB, Linux's default, and an environment small enough that such a list fits on one command line beside it, as any environment under 1 MiB, counting eight bytes for each variable, is.
 - **E9.** A linked worktree is one `git worktree add` made, its Git directory directly under `.git/worktrees/`; worktrees are added, moved, and removed through `git worktree`, and not while a git-dupe command runs in them.
 
 ## Fixed decisions
