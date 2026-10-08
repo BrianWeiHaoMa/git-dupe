@@ -415,11 +415,11 @@ pub fn route_to_private(path: Option<&[u8]>) -> Vec<u8> {
         receives once it is committed and pushed";
     match path {
         Some(path) => {
-            let pathspec = shell_word(&pathspec::offered(path));
+            let removal = pathspec::offered_command(b"rm --cached", path);
             let operand = shell_word(&operand::offered(path));
             [
-                &b"run from the root, 'git rm --cached -- "[..],
-                &pathspec,
+                &b"run from the root, '"[..],
+                &removal,
                 b"' first, ",
                 DELETION,
                 b", then 'git dupe add -- ",

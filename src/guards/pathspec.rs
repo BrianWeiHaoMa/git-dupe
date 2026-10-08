@@ -3,6 +3,8 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
+use super::quoted::shell_word;
+
 /// `:(top,literal)<path>`: exactly the root-relative `path`, and everything below it,
 /// whatever bytes it holds, from any directory.
 pub fn top_literal(path: &[u8]) -> OsString {
@@ -35,20 +37,28 @@ pub fn top_glob_exclude_exact(path: &[u8]) -> OsString {
     OsString::from_vec(written)
 }
 
-/// The root-relative `path` as a line offers it to be typed, from the root, as a pathspec
-/// of a command Git runs: as it stands, or `:(literal)<path>` where Git would read a
-/// leading `:` as magic, or `*`, `?`, `[`, or `\` as a pattern that names other paths too,
-/// so that the command acts on that path alone (G25).
-pub fn offered(path: &[u8]) -> Vec<u8> {
+/// The command a line offers to be typed, from the root, to run Git's `words` on the
+/// root-relative `path` alone (G25): `git <words> -- <path>`, the path written as a shell
+/// reads it back as one word. Where Git would read a leading `:` as magic, or `*`, `?`,
+/// `[`, or `\` as a pattern that names other paths too, the path is `:(literal)<path>`, and
+/// `--no-literal-pathspecs` goes before the words, because a developer's own
+/// `GIT_LITERAL_PATHSPECS` governs what they type (G19) and would read that magic as part of
+/// the path; a glob setting yields to `literal`. A plain path needs neither, and a literal
+/// setting reads it as it stands.
+pub fn offered_command(words: &[u8], path: &[u8]) -> Vec<u8> {
     let read_otherwise = path.starts_with(b":")
         || path
             .iter()
             .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b'\\'));
-    if read_otherwise {
-        [&b":(literal)"[..], path].concat()
+    let (global, pathspec): (&[u8], Vec<u8>) = if read_otherwise {
+        (
+            b"--no-literal-pathspecs ",
+            [&b":(literal)"[..], path].concat(),
+        )
     } else {
-        path.to_vec()
-    }
+        (b"", path.to_vec())
+    };
+    [b"git ", global, words, b" -- ", &shell_word(&pathspec)].concat()
 }
 
 #[cfg(test)]
@@ -58,9 +68,17 @@ mod tests {
 
     #[test]
     fn an_offered_pathspec_is_literal_only_where_git_would_read_it_otherwise() {
-        for plain in [&b"notes"[..], b"two $words/a b", b"-x", b"a:b", b"caf\xe9"] {
-            assert_eq!(offered(plain), plain);
+        let offered = |path: &[u8]| offered_command(b"rm --cached", path);
+        for plain in [&b"notes"[..], b"-x", b"a:b", b"caf\xe9"] {
+            assert_eq!(
+                offered(plain),
+                [&b"git rm --cached -- "[..], plain].concat()
+            );
         }
+        assert_eq!(
+            offered(b"two $words/a b"),
+            b"git rm --cached -- \"two \\$words/a b\""
+        );
         for read_otherwise in [
             &b":(exclude)keep"[..],
             b":x",
@@ -71,9 +89,17 @@ mod tests {
         ] {
             assert_eq!(
                 offered(read_otherwise),
-                [&b":(literal)"[..], read_otherwise].concat()
+                [
+                    &b"git --no-literal-pathspecs rm --cached -- "[..],
+                    &shell_word(&[&b":(literal)"[..], read_otherwise].concat()),
+                ]
+                .concat()
             );
         }
+        assert_eq!(
+            offered_command(b"dupe restore", b"star*.txt"),
+            b"git --no-literal-pathspecs dupe restore -- \":(literal)star*.txt\""
+        );
     }
 
     #[test]

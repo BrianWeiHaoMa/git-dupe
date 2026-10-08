@@ -12,7 +12,9 @@
 //! one and is present, released as settle releases a path of the starting region (G9);
 //! one public listing under the same paths names those public Git tracks, which it does
 //! not ignore whatever the question answers (`Holds/G3`). A listing that fails is one
-//! warning, as a question that fails is.
+//! warning, as a question that fails is, and, as a failed question names no path as still
+//! hidden, no path is then named as one public Git ignores because another worktree hides
+//! it: whether public Git tracks it, and so sees it, is not known (G7).
 
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsStr;
@@ -70,10 +72,11 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
             };
             (path, released)
         });
-    let asked: Vec<(&[u8], Asked)> = left.chain(released).collect();
+    let mut asked: Vec<(&[u8], Asked)> = left.chain(released).collect();
     let mut warnings: Vec<Vec<u8>> = deleted.warning.into_iter().collect();
     let mut refused = None;
     let mut killed = None;
+    let mut listing_failed = false;
     let query: Vec<Vec<u8>> = asked.iter().map(|(path, _)| path.to_vec()).collect();
     let tracked = if query.is_empty() {
         BTreeSet::new()
@@ -86,18 +89,27 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
                         [
                             b"cannot list what public Git tracks under the hidden paths (",
                             &failed.cause()[..],
-                            b"); a path it tracks is visible to it and may not be named",
+                            b"); a path it tracks is visible to it and may not be named, \
+                              and none is named as hidden by another worktree",
                         ]
                         .concat(),
                     );
                     if let Failed::Exited(End::Signal(_)) = failed {
                         killed = Some(failed);
                     }
+                    listing_failed = true;
                 }
             }
             BTreeSet::new()
         })
     };
+    if listing_failed {
+        for (_, kind) in &mut asked {
+            if let Asked::Left { owners } | Asked::Released { owners, .. } = kind {
+                owners.clear();
+            }
+        }
+    }
     let answered = exposure::warnings(workspace, &asked, &tracked, &mut HashMap::new());
     warnings.extend(answered.warnings);
     Ok(Answered {

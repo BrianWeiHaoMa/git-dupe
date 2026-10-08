@@ -37,7 +37,8 @@ Every change a user of git-dupe would notice, newest first, in the form of
   the path it names alone when typed as shown. A path holding a space, a quote, `$`, or
   `!` is quoted for the shell, where it was split or expanded; one beginning with `:`, or
   holding `*`, `?`, `[`, or `\`, is written so that neither Git nor git-dupe reads it as
-  a pattern or pathspec magic, where `git dupe restore` could overwrite other files.
+  a pattern or pathspec magic, where `git dupe restore` could overwrite other files, and
+  a Git command offered for such a path works with `GIT_LITERAL_PATHSPECS` exported.
   The alias name in the `git dupe git` command offered for an alias Git releases read
   differently is quoted the same way.
 

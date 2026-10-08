@@ -5,7 +5,8 @@
 //! `$`, which a shell would split or expand if written raw, `hide`'s also for one holding
 //! `!` and `'`, which an interactive shell would expand inside double quotes, and, where
 //! the command reads a pathspec or an operand, for paths whose leading `:` or `*`, `?`,
-//! `[`, or `\` the command would read as magic or a pattern if written as they stand.
+//! `[`, or `\` the command would read as magic or a pattern if written as they stand. A
+//! pathspec Git reads is offered and typed under each of `SETTINGS`.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -23,16 +24,54 @@ const SPACED: &str = "two $words";
 /// quotes, and whose `'` ends single quotes.
 const BANGED: &str = "it's x!!y";
 
+/// A developer's own pathspec setting, exported where git-dupe runs and where its offer is
+/// typed: none, or `GIT_LITERAL_PATHSPECS`, under which Git reads every pathspec the
+/// developer types as a literal path (G19), an offered one included.
+const SETTINGS: [Option<&str>; 2] = [None, Some("GIT_LITERAL_PATHSPECS")];
+
+/// `git` with `words` from `root`, under `setting`.
+fn git_under(s: &Scenario, words: &[&str], root: &Path, setting: Option<&str>) -> Output {
+    let git = s.git(words).from(root);
+    match setting {
+        Some(name) => git.variable(name, "1").run(),
+        None => git.run(),
+    }
+}
+
 /// Runs `command`, as a line offers it, through `/bin/sh` from `root`.
 fn run_as_offered(s: &Scenario, root: &Path, command: &[u8]) -> Output {
+    run_as_offered_under(s, root, command, None)
+}
+
+/// `run_as_offered` with `setting` exported.
+fn run_as_offered_under(
+    s: &Scenario,
+    root: &Path,
+    command: &[u8],
+    setting: Option<&str>,
+) -> Output {
     let command = std::str::from_utf8(command).expect("a UTF-8 command");
-    s.program("/bin/sh", ["-c", command]).from(root).run()
+    let shell = s.program("/bin/sh", ["-c", command]).from(root);
+    match setting {
+        Some(name) => shell.variable(name, "1").run(),
+        None => shell.run(),
+    }
 }
 
 /// `run_as_offered`, which must exit 0.
 fn runs_as_offered(s: &Scenario, root: &Path, command: &[u8]) -> Output {
-    let output = run_as_offered(s, root, command);
-    assert_eq!(output.end, End::Code(0), "{output:?}");
+    runs_as_offered_under(s, root, command, None)
+}
+
+/// `run_as_offered_under`, which must exit 0.
+fn runs_as_offered_under(
+    s: &Scenario,
+    root: &Path,
+    command: &[u8],
+    setting: Option<&str>,
+) -> Output {
+    let output = run_as_offered_under(s, root, command, setting);
+    assert_eq!(output.end, End::Code(0), "{setting:?} {output:?}");
     output
 }
 
@@ -49,69 +88,76 @@ fn hidden_decoy(s: &Scenario, root: &Path) {
 
 /// Runs the offered `add`, which must leave the private index holding what it held and
 /// `path`, and nothing else.
-fn adds_alone(s: &Scenario, root: &Path, add: &[u8], path: &str) {
+fn adds_alone(s: &Scenario, root: &Path, add: &[u8], path: &str, setting: Option<&str>) {
     let set = |paths: Vec<Vec<u8>>| paths.into_iter().collect::<BTreeSet<_>>();
     let mut expected = set(privately_tracked(s, root));
     expected.insert(path.as_bytes().to_vec());
-    runs_as_offered(s, root, add);
+    runs_as_offered_under(s, root, add, setting);
     assert_eq!(set(privately_tracked(s, root)), expected, "{path}");
 }
 
 #[test]
 fn clones_restore_offers_take_a_kept_path_and_an_obstruction_alone() {
     under_each_release(|s| {
-        let machines = s.second_machine("project");
-        let first = &machines.first.root;
-        let spaced = format!("{SPACED}.txt");
-        let obstruction = format!("{SPACED} dir");
-        let below = format!("{obstruction}/f.txt");
-        // Each kept path, and what a pathspec written as it stands would also name.
-        let kept = [spaced.as_str(), ":(exclude)keep", "star*.txt"];
-        let near = ["keep", "other", "starX.txt"];
-        for path in kept.iter().chain(&near).chain([&below.as_str()]) {
-            write(first, path, b"private\n");
-            s.private(first)
-                .git(["add", "-f", "--", &format!(":(literal){path}")])
-                .succeeds();
-        }
-        private_commit(s, first);
-        s.private(first)
-            .git(["push", "-q", "origin", "main"])
-            .succeeds();
-
-        let second = &machines.root;
-        for path in kept.iter().chain(&near) {
-            write(second, path, b"mine\n");
-        }
-        write(second, &obstruction, b"a file\n");
-        let remote = machines.first.private_remote.to_str().unwrap();
-        let cloned = s.git(["dupe", "clone", remote]).from(second).run();
-        assert_eq!(cloned.end, End::Code(0), "{cloned:?}");
-        let warnings = cloned.lines("warning");
-        let line = |start: &str| {
-            *warnings
-                .iter()
-                .find(|line| line.starts_with(start.as_bytes()))
-                .unwrap_or_else(|| panic!("no line for {start}: {cloned:?}"))
-        };
-
-        let blocked = line(&format!("{obstruction} was kept: it is a file"));
-        let restore = offered(blocked, b"then '", b"' run from the root writes them");
-        fs::rename(second.join(&obstruction), second.join("aside")).unwrap();
-        runs_as_offered(s, second, restore);
-        assert_eq!(fs::read(second.join(&below)).unwrap(), b"private\n");
-
-        for (at, path) in kept.iter().enumerate() {
-            let differs = line(&format!("{path} was kept as it was and differs"));
-            let restore = offered(differs, b"keeps it, '", b"' run from the root replaces it");
-            runs_as_offered(s, second, restore);
-            assert_eq!(fs::read(second.join(path)).unwrap(), b"private\n");
-            // Restored alone: every other kept file is still the second machine's.
-            for other in kept[at + 1..].iter().chain(&near) {
-                assert_eq!(fs::read(second.join(other)).unwrap(), b"mine\n", "{other}");
-            }
+        for (at, setting) in SETTINGS.into_iter().enumerate() {
+            clone_restores(s, &format!("project-{at}"), setting);
         }
     });
+}
+
+/// `clone`'s restore offers on a second machine named `name`, typed under `setting`.
+fn clone_restores(s: &Scenario, name: &str, setting: Option<&str>) {
+    let machines = s.second_machine(name);
+    let first = &machines.first.root;
+    let spaced = format!("{SPACED}.txt");
+    let obstruction = format!("{SPACED} dir");
+    let below = format!("{obstruction}/f.txt");
+    // Each kept path, and what a pathspec written as it stands would also name.
+    let kept = [spaced.as_str(), ":(exclude)keep", "star*.txt"];
+    let near = ["keep", "other", "starX.txt"];
+    for path in kept.iter().chain(&near).chain([&below.as_str()]) {
+        write(first, path, b"private\n");
+        s.private(first)
+            .git(["add", "-f", "--", &format!(":(literal){path}")])
+            .succeeds();
+    }
+    private_commit(s, first);
+    s.private(first)
+        .git(["push", "-q", "origin", "main"])
+        .succeeds();
+
+    let second = &machines.root;
+    for path in kept.iter().chain(&near) {
+        write(second, path, b"mine\n");
+    }
+    write(second, &obstruction, b"a file\n");
+    let remote = machines.first.private_remote.to_str().unwrap();
+    let cloned = git_under(s, &["dupe", "clone", remote], second, setting);
+    assert_eq!(cloned.end, End::Code(0), "{cloned:?}");
+    let warnings = cloned.lines("warning");
+    let line = |start: &str| {
+        *warnings
+            .iter()
+            .find(|line| line.starts_with(start.as_bytes()))
+            .unwrap_or_else(|| panic!("no line for {start}: {cloned:?}"))
+    };
+
+    let blocked = line(&format!("{obstruction} was kept: it is a file"));
+    let restore = offered(blocked, b"then '", b"' run from the root writes them");
+    fs::rename(second.join(&obstruction), second.join("aside")).unwrap();
+    runs_as_offered_under(s, second, restore, setting);
+    assert_eq!(fs::read(second.join(&below)).unwrap(), b"private\n");
+
+    for (at, path) in kept.iter().enumerate() {
+        let differs = line(&format!("{path} was kept as it was and differs"));
+        let restore = offered(differs, b"keeps it, '", b"' run from the root replaces it");
+        runs_as_offered_under(s, second, restore, setting);
+        assert_eq!(fs::read(second.join(path)).unwrap(), b"private\n");
+        // Restored alone: every other kept file is still the second machine's.
+        for other in kept[at + 1..].iter().chain(&near) {
+            assert_eq!(fs::read(second.join(other)).unwrap(), b"mine\n", "{other}");
+        }
+    }
 }
 
 #[test]
@@ -132,7 +178,7 @@ fn hides_offers_to_add_and_unhide_take_the_path_alone() {
             let hint = hidden.only_line("hint");
 
             let add = offered(hint, b"run from the root, '", b"' versions it");
-            adds_alone(s, &root, add, &file);
+            adds_alone(s, &root, add, &file, None);
 
             let unhide = offered(hint, b"versions it, and '", b"' stops hiding it");
             runs_as_offered(s, &root, unhide);
@@ -144,38 +190,45 @@ fn hides_offers_to_add_and_unhide_take_the_path_alone() {
 #[test]
 fn the_route_to_private_offered_for_a_publicly_tracked_path_takes_it_alone() {
     under_each_release(|s| {
-        let root = s.dir().join("project");
-        s.attached_project(&root);
-        let spaced = format!("{SPACED}.md");
-        let routed = [spaced.as_str(), ":colon.md", "back\\slash.md"];
-        // What `:colon.md` and `back\slash.md`, read as Git reads a pathspec, also name.
-        let near = ["colon.md", "backslash.md"];
-        for path in routed.iter().chain(&near) {
-            write(&root, path, b"shared\n");
-        }
-        s.git(["add", "-A"]).from(&root).succeeds();
-        s.commit_public(&root);
-        hidden_decoy(s, &root);
-
-        for path in routed {
-            let word = format!("./{path}");
-            let refused = s.git(["dupe", "add", "--", &word]).from(&root).run();
-            assert_eq!(refused.end, End::Code(128), "{refused:?}");
-            let line = refused.only_line("fatal");
-
-            let removal = offered(line, b"run from the root, '", b"' first, ");
-            runs_as_offered(s, &root, removal);
-            let public = publicly_tracked(s, &root);
-            assert!(!tracked(&public, path), "{path}");
-            for other in near {
-                assert!(tracked(&public, other), "{other} after {path}");
-            }
-
-            let addition = offered(line, b", then '", b"' makes it private");
-            adds_alone(s, &root, addition, path);
-            assert_eq!(fs::read(root.join(path)).unwrap(), b"shared\n");
+        for (at, setting) in SETTINGS.into_iter().enumerate() {
+            routes_to_private(s, &format!("project-{at}"), setting);
         }
     });
+}
+
+/// The route to private offered in a project named `name`, typed under `setting`.
+fn routes_to_private(s: &Scenario, name: &str, setting: Option<&str>) {
+    let root = s.dir().join(name);
+    s.attached_project(&root);
+    let spaced = format!("{SPACED}.md");
+    let routed = [spaced.as_str(), ":colon.md", "back\\slash.md"];
+    // What `:colon.md` and `back\slash.md`, read as Git reads a pathspec, also name.
+    let near = ["colon.md", "backslash.md"];
+    for path in routed.iter().chain(&near) {
+        write(&root, path, b"shared\n");
+    }
+    s.git(["add", "-A"]).from(&root).succeeds();
+    s.commit_public(&root);
+    hidden_decoy(s, &root);
+
+    for path in routed {
+        let word = format!("./{path}");
+        let refused = git_under(s, &["dupe", "add", "--", &word], &root, setting);
+        assert_eq!(refused.end, End::Code(128), "{refused:?}");
+        let line = refused.only_line("fatal");
+
+        let removal = offered(line, b"run from the root, '", b"' first, ");
+        runs_as_offered_under(s, &root, removal, setting);
+        let public = publicly_tracked(s, &root);
+        assert!(!tracked(&public, path), "{path}");
+        for other in near {
+            assert!(tracked(&public, other), "{other} after {path}");
+        }
+
+        let addition = offered(line, b", then '", b"' makes it private");
+        adds_alone(s, &root, addition, path, setting);
+        assert_eq!(fs::read(root.join(path)).unwrap(), b"shared\n");
+    }
 }
 
 #[test]

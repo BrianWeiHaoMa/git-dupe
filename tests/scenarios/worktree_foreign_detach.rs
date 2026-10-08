@@ -7,8 +7,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 use crate::harness::{
-    End, Output, Point, Scenario, Tree, Worktree, holds, names, names_number, now_visible, records,
-    unchanged, under_each_release, warnings, write,
+    End, ForwardEffect, Output, Point, Scenario, Tree, Worktree, holds, names, names_number,
+    now_visible, records, unchanged, under_each_release, warnings, write,
 };
 
 struct Attached {
@@ -202,6 +202,66 @@ fn foreign_detach_with_corrupt_index_attributes_disk_and_region_paths() {
         fixture.detached();
         unchanged(&files, &wt.root);
         assert!(public.changed_in(&wt.public_git()).is_empty());
+    });
+}
+
+#[test]
+fn foreign_detach_with_a_failed_public_listing_names_no_path_as_hidden_elsewhere() {
+    under_each_release(|s| {
+        // `docs/a.md` is tracked by both repositories here and lies below the main
+        // worktree's `docs`: public Git sees it, though the main region's rule matches it.
+        let track_publicly = |fixture: &Attached| {
+            s.git(["add", "-f", "--", "docs/a.md"])
+                .from(&fixture.linked.root)
+                .succeeds();
+        };
+        let listed = attached(s, "listed");
+        track_publicly(&listed);
+        let output = s
+            .git(["dupe", "detach", "--force"])
+            .from(&listed.linked.root)
+            .succeeds();
+        warnings(
+            &output,
+            vec![
+                attributed(".gitdupe"),
+                attributed("notes"),
+                now_visible("docs/a.md"),
+                now_visible("notes-old"),
+                now_visible("tracked"),
+            ],
+        );
+        listed.detached();
+
+        // Without the listing, whether public Git tracks a path is not known, so no path is
+        // named as one it ignores because another worktree hides it (G3, G7, G25).
+        let unlisted = attached(s, "unlisted");
+        track_publicly(&unlisted);
+        let wt = &unlisted.linked;
+        let files = Tree::of(&wt.root);
+        let forwarded = s.forwarded(
+            "listing-control",
+            &["detach", "--force"],
+            false,
+            &["ls-files", "-z", "--full-name", "--"],
+            ForwardEffect::Exit(71),
+        );
+        let output = forwarded.run(&wt.root);
+        assert_eq!(output.end, End::Code(0), "{output:?}");
+        assert!(output.stdout.is_empty(), "{output:?}");
+        warnings(
+            &output,
+            vec![
+                b"cannot list what public Git tracks under the hidden paths (git exited with \
+                  71); a path it tracks is visible to it and may not be named, and none is \
+                  named as hidden by another worktree"
+                    .to_vec(),
+                now_visible("notes-old"),
+                now_visible("tracked"),
+            ],
+        );
+        unlisted.detached();
+        unchanged(&files, &wt.root);
     });
 }
 

@@ -21,7 +21,6 @@ use super::outcome::{self, Outcome};
 use super::places;
 use crate::attachment::{self, Cloned, Kept, NotCloned, Standing, Written};
 use crate::guards::pathspec;
-use crate::guards::quoted::shell_word;
 use crate::runner::locate::Workspace;
 
 /// What `clone`'s words ask for.
@@ -136,8 +135,7 @@ pub fn run(
 
 /// One `warning:` per path the write step left as it was: each obstruction, then each
 /// kept file, in byte order. A path is relative to the root, as Git listed it, and so is
-/// the command each line names, wherever `clone` was run; the command's operand is
-/// `restore_operand`.
+/// the command each line names, wherever `clone` was run, which is `restore_command`.
 fn warn(written: &Written) {
     for (path, standing) in &written.obstructions {
         lines::write(Level::Warning, &obstructed(path, *standing));
@@ -153,17 +151,17 @@ fn obstructed(path: &[u8], standing: Standing) -> Vec<u8> {
         Standing::SymbolicLink => {
             b" was kept: it is a symbolic link, which Git does not \
             write through, so the private files below it were not written; move it aside, \
-            then 'git dupe restore -- "
+            then '"
         }
         Standing::File => {
             b" was kept: it is a file, not a directory, so the private files \
-            below it were not written; move it aside, then 'git dupe restore -- "
+            below it were not written; move it aside, then '"
         }
     };
     [
         path,
         what,
-        &restore_operand(path),
+        &restore_command(path),
         b"' run from the root writes them",
     ]
     .concat()
@@ -175,16 +173,16 @@ fn kept(path: &[u8], why: &Kept) -> Vec<u8> {
         Kept::Differs => [
             path,
             b" was kept as it was and differs from the private repository's version; \
-              'git dupe commit -a' keeps it, 'git dupe restore -- ",
-            &restore_operand(path),
+              'git dupe commit -a' keeps it, '",
+            &restore_command(path),
             b"' run from the root replaces it",
         ]
         .concat(),
         Kept::Directory => [
             path,
             b" was kept: it is a directory where the private repository has a file; \
-              move it aside, then 'git dupe restore -- ",
-            &restore_operand(path),
+              move it aside, then '",
+            &restore_command(path),
             b"' run from the root writes the file",
         ]
         .concat(),
@@ -192,18 +190,17 @@ fn kept(path: &[u8], why: &Kept) -> Vec<u8> {
             path,
             b" was kept: it lies beyond the symbolic link ",
             link,
-            b", where Git does not look; move the link aside, then 'git dupe restore -- ",
-            &restore_operand(link),
+            b", where Git does not look; move the link aside, then '",
+            &restore_command(link),
             b"' run from the root writes the private files below it",
         ]
         .concat(),
     }
 }
 
-/// `path` as `git dupe restore`, which Git runs, takes it as that path alone, typed as a
-/// shell reads it back as one word (G25).
-fn restore_operand(path: &[u8]) -> Vec<u8> {
-    shell_word(&pathspec::offered(path))
+/// `git dupe restore` of `path` alone, which Git runs, as a line offers it (G25).
+fn restore_command(path: &[u8]) -> Vec<u8> {
+    pathspec::offered_command(b"dupe restore", path)
 }
 
 #[cfg(test)]
