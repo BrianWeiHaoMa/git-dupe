@@ -110,6 +110,7 @@ mod worktree_filesystems;
 mod worktree_foreign_detach;
 mod worktree_foreign_paths;
 mod worktree_foreign_runs;
+mod worktree_lifetime;
 mod worktree_move;
 mod worktree_regions;
 mod worktree_runs;
