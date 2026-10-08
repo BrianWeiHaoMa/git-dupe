@@ -10,6 +10,12 @@
 //!   written once and runs once per release: it names no release and branches on none.
 //! - It reaches git-dupe only as `s.git(["dupe", …])`, so that Git's own dispatch is part
 //!   of every observation, and writes only inside `s.dir()`.
+//! - A file it later has run — a hook, an editor, a `git-<word>` program, a `git` in place
+//!   of the release's — is written by `write_executable`, never by `fs::write`,
+//!   `files::write`, or `fs::copy`: the scenarios run on many threads of one process, and a
+//!   file this process opens to write can fail to run with `ETXTBSY` in another thread's
+//!   child (the doc of `harness/executable.rs`). No check can tell the two apart; only
+//!   reading the scenario can.
 //! - It asserts git-dupe's own lines, exit statuses, and effects, never the text of a Git
 //!   message. Where Git's own answer is the required result, it runs that Git command
 //!   itself, under the same release and in the same place, and compares.
