@@ -1,6 +1,7 @@
 //! The warning of a path no longer hidden that public Git can see (G9), and the command it
 //! names where there is one (G25): `git dupe hide` where `hide` would hide the path again
-//! (G11, F5), nothing where `hide` would refuse it, `.gitdupe` unreadable among the causes,
+//! (G11, F5), a path beginning with `:` written `./<path>` so that `hide` reads it as that
+//! path, and nothing where `hide` would refuse it, `.gitdupe` unreadable among the causes,
 //! or read it as a usage error.
 
 use std::fs;
@@ -41,7 +42,12 @@ fn released_warning<'a>(output: &'a Output, path: &str, hideable: bool) -> &'a [
         .collect();
     assert_eq!(found.len(), 1, "{path}: {output:?}");
     let expected = if hideable {
-        format!("{beginning}; run from the root, 'git dupe hide -- {path}' hides it again")
+        // A leading `:` would be read as magic: the operand that resolves to the path.
+        let operand = match path.strip_prefix(':') {
+            Some(_) => format!("./{path}"),
+            None => path.to_owned(),
+        };
+        format!("{beginning}; run from the root, 'git dupe hide -- {operand}' hides it again")
     } else {
         beginning
     };
@@ -172,7 +178,7 @@ fn a_released_star_path_names_no_hide_command() {
 }
 
 #[test]
-fn a_released_colon_path_names_no_hide_command() {
+fn a_released_colon_path_names_hide_with_its_dot_slash_operand() {
     under_each_release(|s| {
         let dir = workspace(s);
         write(&dir, ":colon.txt", b"private\n");
@@ -192,7 +198,8 @@ fn a_released_colon_path_names_no_hide_command() {
             ])
             .from(&dir)
             .succeeds();
-        released_warning(&output, ":colon.txt", false);
+        let line = released_warning(&output, ":colon.txt", true);
+        follow_warning(s, &dir, line, ":colon.txt");
     });
 }
 

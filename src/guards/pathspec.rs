@@ -35,10 +35,46 @@ pub fn top_glob_exclude_exact(path: &[u8]) -> OsString {
     OsString::from_vec(written)
 }
 
+/// The root-relative `path` as a line offers it to be typed, from the root, as a pathspec
+/// of a command Git runs: as it stands, or `:(literal)<path>` where Git would read a
+/// leading `:` as magic, or `*`, `?`, `[`, or `\` as a pattern that names other paths too,
+/// so that the command acts on that path alone (G25).
+pub fn offered(path: &[u8]) -> Vec<u8> {
+    let read_otherwise = path.starts_with(b":")
+        || path
+            .iter()
+            .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b'\\'));
+    if read_otherwise {
+        [&b":(literal)"[..], path].concat()
+    } else {
+        path.to_vec()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::ffi::OsStrExt;
+
+    #[test]
+    fn an_offered_pathspec_is_literal_only_where_git_would_read_it_otherwise() {
+        for plain in [&b"notes"[..], b"two $words/a b", b"-x", b"a:b", b"caf\xe9"] {
+            assert_eq!(offered(plain), plain);
+        }
+        for read_otherwise in [
+            &b":(exclude)keep"[..],
+            b":x",
+            b"star*.txt",
+            b"a?b",
+            b"[x]",
+            b"a\\b",
+        ] {
+            assert_eq!(
+                offered(read_otherwise),
+                [&b":(literal)"[..], read_otherwise].concat()
+            );
+        }
+    }
 
     #[test]
     fn a_path_is_written_after_the_magic_byte_for_byte() {

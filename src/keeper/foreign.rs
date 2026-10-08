@@ -126,7 +126,7 @@ pub fn still_hidden(path: &[u8], owners: &[&Owner], hideable: bool) -> Vec<u8> {
         // Root-relative, as the released path's own remedy is; `--` keeps a path
         // beginning with `-` a path, and the shell takes it as one word.
         line.extend_from_slice(b"; run from the root, 'git dupe hide -- ");
-        line.extend_from_slice(&shell_word(path));
+        line.extend_from_slice(&shell_word(&operand::offered(path)));
         line.extend_from_slice(b"' hides it here too");
     }
     line

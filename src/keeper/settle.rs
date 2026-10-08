@@ -162,7 +162,8 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
 }
 
 /// Whether `git dupe hide -- <path>`, run from the root, would hide the released `path`
-/// again: a word `hide` reads as a literal path, a `.gitdupe` the keeper can rewrite,
+/// again: a path whose offered operand `hide` reads as that literal path
+/// (`operand::offered`), a `.gitdupe` the keeper can rewrite,
 /// which one that cannot be read as a file is not (`edit`), and none of `hide`'s refusals
 /// over the listings settle took, which hold the path and `.gitdupe` (F5, G11).
 fn hideable(
@@ -171,7 +172,7 @@ fn hideable(
     privately_tracked: &BTreeSet<Vec<u8>>,
     publicly_tracked: &BTreeSet<Vec<u8>>,
 ) -> bool {
-    operand::literal(path).is_ok()
+    operand::literal(&operand::offered(path)).is_ok()
         && !matches!(gitdupe, Source::Unreadable(_))
         && decision::refusal(
             &[path.to_vec()],

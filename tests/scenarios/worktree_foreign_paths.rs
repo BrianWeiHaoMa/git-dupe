@@ -1,7 +1,7 @@
 //! Another worktree's region hides files here without adopting them (G27, In use 11).
 //! Git decides exposure; a shared exclude file is only maintained where G6 allows it.
 
-use crate::harness::{End, Output, Scenario, Tree, Worktree, under_each_release, write};
+use crate::harness::{End, Output, Scenario, Tree, Worktree, offered, under_each_release, write};
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
@@ -671,25 +671,16 @@ fn foreign_paths_are_not_named_when_the_region_cannot_be_maintained() {
     });
 }
 
-/// The command a warning offers, between `run from the root, '` and its closing quote.
-fn offered<'o>(line: &'o [u8], ending: &[u8]) -> &'o [u8] {
-    const OPENING: &[u8] = b"run from the root, '";
-    let at = line
-        .windows(OPENING.len())
-        .position(|part| part == OPENING)
-        .expect("a command offered")
-        + OPENING.len();
-    line[at..].strip_suffix(ending).expect("the offer's ending")
-}
-
 #[test]
-fn foreign_and_released_hide_remedies_take_a_path_with_spaces_and_quotes_whole() {
+fn foreign_and_released_hide_remedies_take_their_path_whole() {
     under_each_release(|s| {
         let main = main_worktree(s, "project");
         let wt = linked(s, &main, OsStr::new("agent"));
-        let paths = ["it's $HOME", "two words"];
+        // Quotes and `$` a shell reads, and a leading `:` that `hide` reads as magic
+        // unless it is typed `./:colon`.
+        let paths = [":colon", "it's $HOME", "two words"];
         for path in paths {
-            s.git(["dupe", "hide", "--", path])
+            s.git(["dupe", "hide", "--", &format!("./{path}")])
                 .from(&main.root)
                 .succeeds();
             write(&wt.root, path, b"here\n");
@@ -699,7 +690,7 @@ fn foreign_and_released_hide_remedies_take_a_path_with_spaces_and_quotes_whole()
         assert_eq!(lines.len(), paths.len(), "{output:?}");
         for line in lines {
             // The command as the line shows it, run by a shell as typed (G25).
-            let command = offered(line, b"' hides it here too");
+            let command = offered(line, b"run from the root, '", b"' hides it here too");
             let shell = std::str::from_utf8(command).unwrap();
             s.program("/bin/sh", ["-c", shell])
                 .from(&wt.root)
@@ -707,7 +698,7 @@ fn foreign_and_released_hide_remedies_take_a_path_with_spaces_and_quotes_whole()
         }
         assert_eq!(
             fs::read(wt.root.join(".gitdupe")).unwrap(),
-            b"it's $HOME\ntwo words\n"
+            b":colon\nit's $HOME\ntwo words\n"
         );
         let settled = s.git(["dupe", "status"]).from(&wt.root).succeeds();
         assert!(settled.lines("warning").is_empty(), "{settled:?}");
@@ -728,13 +719,13 @@ fn foreign_and_released_hide_remedies_take_a_path_with_spaces_and_quotes_whole()
             released[0].starts_with(b"own words is no longer hidden and is visible to public Git"),
             "{unhidden:?}"
         );
-        let command = offered(released[0], b"' hides it again");
+        let command = offered(released[0], b"run from the root, '", b"' hides it again");
         s.program("/bin/sh", ["-c", std::str::from_utf8(command).unwrap()])
             .from(&wt.root)
             .succeeds();
         assert_eq!(
             fs::read(wt.root.join(".gitdupe")).unwrap(),
-            b"it's $HOME\ntwo words\nown words\n"
+            b":colon\nit's $HOME\ntwo words\nown words\n"
         );
         let settled = s.git(["dupe", "status"]).from(&wt.root).succeeds();
         assert!(settled.lines("warning").is_empty(), "{settled:?}");

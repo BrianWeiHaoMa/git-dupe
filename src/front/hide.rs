@@ -18,6 +18,8 @@ use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
 use crate::guards::hide::{self as decision, Refusal};
 use crate::guards::operand::{self, Cleaned, NotLiteral};
+use crate::guards::pathspec;
+use crate::guards::quoted::shell_word;
 use crate::keeper::{self, Edited, GITDUPE, Hidden, NotEdited};
 use crate::runner::locate::Workspace;
 
@@ -208,10 +210,12 @@ pub fn hide_paths(
 /// The `hint:` naming a newly hidden path and `git dupe unhide`. Under `hide` it also
 /// names `git dupe add`, which versions the path, and says when nothing stands there yet,
 /// which only `absent` asks; a path the private repository tracks is listed, not newly
-/// hidden. Each command names the path, root-relative here, and so is to be run from the
+/// hidden. Each command names the path, root-relative here, as an operand that resolves
+/// to it, written as a shell reads it back as one word, and so is to be run from the
 /// root, as `clone`'s lines say of theirs.
 fn newly_hidden(path: &[u8], tracked: bool, hiding: Hiding, absent: impl Fn() -> bool) -> Vec<u8> {
-    let unhide = [b"'git dupe unhide -- ", path, b"'"].concat();
+    let operand = shell_word(&operand::offered(path));
+    let unhide = [b"'git dupe unhide -- ", &operand[..], b"'"].concat();
     if tracked {
         return [
             path,
@@ -222,7 +226,7 @@ fn newly_hidden(path: &[u8], tracked: bool, hiding: Hiding, absent: impl Fn() ->
         ]
         .concat();
     }
-    let add = [b"'git dupe add -- ", path, b"'"].concat();
+    let add = [b"'git dupe add -- ", &operand[..], b"'"].concat();
     let and: Vec<u8> = match hiding {
         Hiding::Hide if absent() => [
             b", though nothing stands there yet; run from the root, ",
@@ -404,23 +408,28 @@ fn edited(
 /// one repository or the other (N9); a file the project's ignore rules name, which the
 /// project's Git can track all the same, then needs `-f` (G15). git-dupe runs neither
 /// for the developer (G5). Given a path, root-relative, the commands are written whole,
-/// to be run from the root.
+/// to be run from the root, the path as each command takes it alone, written as a shell
+/// reads it back as one word.
 pub fn route_to_private(path: Option<&[u8]>) -> Vec<u8> {
     const DELETION: &[u8] = b"a deletion from the project that every other clone \
         receives once it is committed and pushed";
     match path {
-        Some(path) => [
-            &b"run from the root, 'git rm --cached -- "[..],
-            path,
-            b"' first, ",
-            DELETION,
-            b", then 'git dupe add -- ",
-            path,
-            b"' makes it private, or 'git dupe add -f -- ",
-            path,
-            b"' where the project ignores it",
-        ]
-        .concat(),
+        Some(path) => {
+            let pathspec = shell_word(&pathspec::offered(path));
+            let operand = shell_word(&operand::offered(path));
+            [
+                &b"run from the root, 'git rm --cached -- "[..],
+                &pathspec,
+                b"' first, ",
+                DELETION,
+                b", then 'git dupe add -- ",
+                &operand,
+                b"' makes it private, or 'git dupe add -f -- ",
+                &operand,
+                b"' where the project ignores it",
+            ]
+            .concat()
+        }
         None => [
             &b"such a path becomes private one file at a time: 'git rm --cached' of it \
                first, "[..],

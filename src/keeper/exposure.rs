@@ -204,7 +204,7 @@ fn exposed_line(path: &[u8], seen: &Seen, kind: &Asked) -> Option<Vec<u8>> {
             path,
             b" is no longer hidden and is visible to public Git; run from the root, \
               'git dupe hide -- ",
-            &shell_word(path),
+            &shell_word(&operand::offered(path)),
             b"' hides it again",
         ]
         .concat(),

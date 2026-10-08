@@ -70,6 +70,17 @@ pub fn rooted_or_literal(word: &[u8]) -> Result<(), NotLiteral> {
     }
 }
 
+/// The root-relative `path` as a line offers it to be typed, from the root, as an operand
+/// of `hide`, `unhide`, or `add`: as it stands, or after `./` where a leading `:` would make
+/// it no literal path, so that the operand resolves to that path (G25). A path holding a
+/// pattern byte has no such form: `literal` still refuses what this returns for it.
+pub fn offered(path: &[u8]) -> Vec<u8> {
+    if path.starts_with(b":") {
+        return [&b"./"[..], path].concat();
+    }
+    path.to_vec()
+}
+
 fn holds_a_pattern_byte(word: &[u8]) -> bool {
     word.iter().any(|byte| matches!(byte, b'*' | b'?' | b'['))
 }
@@ -186,6 +197,20 @@ mod tests {
 
     fn inside(path: &[u8]) -> Cleaned {
         Cleaned::Inside(path.to_vec())
+    }
+
+    #[test]
+    fn an_offered_operand_resolves_to_its_path_and_a_pattern_stays_refused() {
+        let root = Path::new("/r");
+        for path in [&b"notes"[..], b":x", b":/x", b"-x", b"two $words", b"a\\b"] {
+            let offered = offered(path);
+            assert_eq!(literal(&offered), Ok(()), "{}", path.escape_ascii());
+            assert_eq!(rooted_or_literal(&offered), Ok(()));
+            assert_eq!(resolve(&offered, b"", root), inside(path));
+            assert_eq!(resolve_rooted(&offered, b"", root), inside(path));
+        }
+        assert_eq!(offered(b":x"), b"./:x");
+        assert_eq!(literal(&offered(b"star*")), Err(NotLiteral::Pattern));
     }
 
     #[test]

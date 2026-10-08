@@ -77,6 +77,23 @@ pub fn holds(text: &[u8], part: &[u8]) -> bool {
     text.windows(part.len()).any(|window| window == part)
 }
 
+/// The command `line` offers: the bytes after its first `opening` and before the first
+/// `closing` after that, to be run as the line shows it (G25).
+pub fn offered<'l>(line: &'l [u8], opening: &[u8], closing: &[u8]) -> &'l [u8] {
+    let at = |from: usize, part: &[u8]| {
+        line[from..]
+            .windows(part.len())
+            .position(|window| window == part)
+            .map(|found| from + found)
+    };
+    let start = at(0, opening)
+        .unwrap_or_else(|| panic!("{} offers no command", line.escape_ascii()))
+        + opening.len();
+    let end = at(start, closing)
+        .unwrap_or_else(|| panic!("{} does not close its offer", line.escape_ascii()));
+    &line[start..end]
+}
+
 /// `line` names `part`: it holds it as a run of its bytes.
 pub fn names(line: &[u8], part: &[u8]) {
     assert!(

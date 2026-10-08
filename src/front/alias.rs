@@ -34,6 +34,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 use super::commands::{self, Command};
 use super::outcome::{self, Outcome};
+use crate::guards::quoted::shell_word;
 use crate::runner::records;
 use crate::runner::{Against, End, Run};
 use expansion::Link;
@@ -84,7 +85,7 @@ pub fn ambiguous(reached: &[u8], typed: &[u8]) -> Vec<u8> {
         b" supported Git releases read differently, and one reading leads to a command \
           git-dupe adds, changes, or guards; 'git dupe git ",
     );
-    line.extend_from_slice(typed);
+    line.extend_from_slice(&shell_word(typed));
     line.extend_from_slice(b"' runs it as this Git reads it");
     line
 }

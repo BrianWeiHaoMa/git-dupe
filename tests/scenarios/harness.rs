@@ -48,8 +48,8 @@ pub use man::{
     shown_under, text_present, texts_present,
 };
 pub use output::{
-    End, Output, holds, lines_in_order, names, names_number, names_the_route_to_private, records,
-    warnings_in_any_order,
+    End, Output, holds, lines_in_order, names, names_number, names_the_route_to_private, offered,
+    records, warnings_in_any_order,
 };
 pub use public::{
     EVERY_OBJECT, held_publicly, leaving_public_git, privately_tracked, public_git,
@@ -64,4 +64,6 @@ pub use stash::{refused_stash_untracked, stash_refusal_first, stash_untracked_li
 pub use sweep::{GITDUPE, Killed, Sweep, Version, copied, files, lived_in, outside};
 pub use trace::{Runs, run_traced};
 pub use tree::{Tree, changed_since, unchanged};
-pub use worktrees::Worktree;
+pub use worktrees::{
+    Worktree, worktree_clone, worktree_dupe, worktree_private_head, worktree_public_clean,
+};

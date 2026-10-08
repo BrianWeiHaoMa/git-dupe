@@ -102,3 +102,51 @@ impl Worktree {
         Tree::of(&self.common_directory).without(&written.each_ref().map(PathBuf::as_path))
     }
 }
+
+/// `git dupe <words>` from the worktree's root, which must exit 0 and leave the public
+/// repository, the other worktrees' private repositories among it, as `public_git` reads
+/// it. A transfer that writes another worktree's private repository on purpose is run
+/// without it.
+pub fn worktree_dupe(s: &Scenario, wt: &Worktree, words: &[&str]) -> super::output::Output {
+    let before = wt.public_git();
+    let output = s
+        .git(["dupe"].iter().chain(words))
+        .from(&wt.root)
+        .succeeds();
+    let changed = before.changed_in(&wt.public_git());
+    assert!(changed.is_empty(), "{output:?}: changed {changed:?}");
+    output
+}
+
+/// `git dupe clone <remote>` in the unattached worktree, which must succeed without a
+/// warning and print what this release's own `git init` prints for the private
+/// repository's path: a reference repository made there by that `init` and removed
+/// before the clone.
+pub fn worktree_clone(s: &Scenario, wt: &Worktree, remote: &Path) -> super::output::Output {
+    assert!(!wt.private_directory().exists());
+    let init = s
+        .git(["init", "--initial-branch=main"])
+        .from(&wt.root)
+        .variable("GIT_DIR", wt.private_directory())
+        .variable("GIT_WORK_TREE", &wt.root)
+        .succeeds();
+    fs::remove_dir_all(wt.private_directory()).unwrap();
+    let output = worktree_dupe(s, wt, &["clone", remote.to_str().unwrap()]);
+    assert_eq!(output.stdout, init.stdout);
+    assert!(output.lines("warning").is_empty(), "{output:?}");
+    output
+}
+
+/// Public `git status` in the worktree lists nothing: no change, and no untracked file.
+pub fn worktree_public_clean(s: &Scenario, wt: &Worktree) {
+    let output = s
+        .git(["status", "--porcelain", "--untracked-files=all"])
+        .from(&wt.root)
+        .succeeds();
+    assert!(output.stdout.is_empty(), "{output:?}");
+}
+
+/// The commit a worktree's private HEAD names, read with Git itself.
+pub fn worktree_private_head(s: &Scenario, wt: &Worktree) -> Vec<u8> {
+    wt.private(s).git(["rev-parse", "HEAD"]).succeeds().stdout
+}
