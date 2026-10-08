@@ -8,64 +8,18 @@
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
-use std::fs::{self, File};
+use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::harness::{
-    End, Output, Point, Scenario, region, region_rules, under_each_release, write,
+    End, Output, Point, Scenario, commands_wait_for_the_lock, hold_the_lock, lock_is_free, region,
+    region_rules, under_each_release, write,
 };
 
-/// How long a command is given to be seen waiting for the lock, and to end once it is let
-/// go.
+/// How long a command is given to end once the lock is let go.
 const LIMIT: Duration = Duration::from_secs(30);
-
-/// Takes the lock on the common Git directory `common`, as another worktree's command
-/// takes it, until the descriptor returned is dropped.
-fn hold(common: &Path) -> File {
-    let directory = File::open(common).unwrap();
-    directory.lock().unwrap();
-    directory
-}
-
-/// Whether nobody holds the lock on `common`: another descriptor takes it at once.
-fn lock_is_free(common: &Path) -> bool {
-    File::open(common).unwrap().try_lock().is_ok()
-}
-
-/// Waits, `LIMIT` at most, until a `git-dupe` process waits for the lock on `common`: a
-/// blocked request in `/proc/locks`, `-> FLOCK` followed by the process and the
-/// directory's device and inode.
-fn a_command_waits_for_the_lock(common: &Path) {
-    let inode = fs::metadata(common).unwrap().ino().to_string();
-    let deadline = Instant::now() + LIMIT;
-    loop {
-        let locks = fs::read_to_string("/proc/locks").unwrap();
-        let waiting = locks.lines().any(|line| {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            fields.get(1..3) == Some(&["->", "FLOCK"])
-                && fields
-                    .get(6)
-                    .and_then(|file| file.rsplit(':').next())
-                    .is_some_and(|number| number == inode)
-                && fields.get(5).is_some_and(|process| {
-                    fs::read_to_string(format!("/proc/{process}/comm"))
-                        .is_ok_and(|name| name.trim_end() == "git-dupe")
-                })
-        });
-        if waiting {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "no git-dupe waited for the lock on {}: {locks}",
-            common.display()
-        );
-        thread::sleep(Duration::from_millis(5));
-    }
-}
 
 /// The device and inode of `path`, by `lstat`.
 fn identity(path: &Path) -> (u64, u64) {
@@ -93,10 +47,10 @@ fn a_replacement_and_a_deletion_wait_while_another_holds_the_lock() {
         let common = dir.join(".git");
         let exclude = common.join("info/exclude");
 
-        let held = hold(&common);
+        let held = hold_the_lock(&common);
         let as_it_was = fs::read(&exclude).unwrap();
         let mut hiding = s.git(["dupe", "hide", "x"]).from(&dir).start();
-        a_command_waits_for_the_lock(&common);
+        commands_wait_for_the_lock(&common, 1);
         assert!(!hiding.finished());
         assert_eq!(fs::read(&exclude).unwrap(), as_it_was);
         drop(held);
@@ -104,9 +58,9 @@ fn a_replacement_and_a_deletion_wait_while_another_holds_the_lock() {
         assert_eq!(hidden.end, End::Code(0), "{hidden:?}");
         assert_eq!(region_rules(&dir), [&b"/.gitdupe"[..], b"/x"]);
 
-        let held = hold(&common);
+        let held = hold_the_lock(&common);
         let mut detaching = s.git(["dupe", "detach", "--force"]).from(&dir).start();
-        a_command_waits_for_the_lock(&common);
+        commands_wait_for_the_lock(&common, 1);
         assert!(!detaching.finished());
         assert!(region(&dir).is_some() && common.join("dupe/HEAD").is_file());
         drop(held);

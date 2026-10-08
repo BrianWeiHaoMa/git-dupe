@@ -4,7 +4,9 @@
 
 mod attached;
 mod clean;
+mod concurrent;
 mod detach;
+mod exclude_lock;
 mod files;
 mod fresh;
 mod front;
@@ -31,9 +33,11 @@ pub use attached::{
     region, region_in, region_rules, staged_gitdupe,
 };
 pub use clean::{EVERY_KIND_SPARED, Twin, hidden_path_of_every_kind};
+pub use concurrent::started_together;
 pub use detach::{
     daily_warnings, detached, now_visible, stale_file_timestamp, stale_timestamp, warnings,
 };
+pub use exclude_lock::{commands_wait_for_the_lock, hold_the_lock, lock_is_free};
 pub use files::{copy, write};
 pub use fresh::FreshDirectory;
 pub use front::{general_text, usage_line};

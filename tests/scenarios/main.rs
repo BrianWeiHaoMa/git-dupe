@@ -100,6 +100,7 @@ mod version;
 mod workspace;
 mod workspace_lifetime;
 mod worktree_clone;
+mod worktree_concurrency;
 mod worktree_detach;
 mod worktree_filesystems;
 mod worktree_move;

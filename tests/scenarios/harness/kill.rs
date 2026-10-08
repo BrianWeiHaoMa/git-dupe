@@ -29,6 +29,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::output::{End, Output};
 use super::running::Running;
@@ -246,6 +247,17 @@ impl KilledRun<'_> {
     /// Waits for the run: fails unless git-dupe itself was killed at its point, and
     /// returns what it printed once no process of the run is left.
     pub fn wait(self) -> Output {
+        self.checked(Running::wait)
+    }
+
+    /// Waits as `wait` does, `limit` at most, as `Running::wait_within` bounds it: past
+    /// that, the scenario fails, and the run is killed and reaped.
+    pub fn wait_within(self, limit: Duration) -> Output {
+        self.checked(|running| running.wait_within(limit))
+    }
+
+    /// The run waited for by `wait`, then checked: git-dupe itself was killed at its point.
+    fn checked(self, wait: impl FnOnce(Running) -> Output) -> Output {
         let KilledRun {
             killing,
             point,
@@ -253,7 +265,7 @@ impl KilledRun<'_> {
             running,
             started,
         } = self;
-        let output = running.wait();
+        let output = wait(running);
         let killed = killing.record();
         let (signal, record) = match expected {
             Some(expected) => (SIGKILL, Some(format!("{expected} git-dupe\n"))),

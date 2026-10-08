@@ -16,7 +16,10 @@ Every change a user of git-dupe would notice, newest first, in the form of
   its own hidden paths and history, and its own region of `.git/info/exclude`, where
   `git dupe` in a linked worktree was refused before. Private work moves between
   worktrees as between machines, and `git dupe init` run after `git worktree move`
-  records the new place for plain Git.
+  records the new place for plain Git. Commands in different worktrees may run at the
+  same time: each waits for another's write of `.git/info/exclude` to finish, so that
+  no worktree's region update is lost, and one killed while it writes the file holds
+  up none.
 
 ## [0.1.0] - 2026-10-03
 
