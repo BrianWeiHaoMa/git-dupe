@@ -94,6 +94,7 @@ pub fn refuse_to_attach(workspace: &Workspace, refusal: Refusal) -> Outcome {
               worktree",
         ]
         .concat(),
+        Refusal::Obstructed(path) => return obstructed(&path),
         Refusal::TracksGitdupe => b"this project tracks .gitdupe, the file that holds \
               git-dupe's hidden paths; git-dupe cannot be attached to it"
             .to_vec(),
@@ -101,13 +102,13 @@ pub fn refuse_to_attach(workspace: &Workspace, refusal: Refusal) -> Outcome {
     refuse(&line)
 }
 
-/// Something that is not a directory standing where this worktree's private repository
-/// goes: a refusal naming it, before anything was written through it or in its place.
+/// Something that is not a directory standing where a private repository goes: a refusal
+/// naming it, before anything was run or written through it or in its place.
 pub fn obstructed(path: &Path) -> Outcome {
     let line = [
         path.as_os_str().as_bytes(),
-        b" is not a directory, and this worktree's private repository goes there; \
-          git-dupe writes nothing through it: move it away first",
+        b" is not a directory, and a private repository goes there; git-dupe runs and \
+          writes nothing through it: move it away first",
     ]
     .concat();
     refuse(&line)

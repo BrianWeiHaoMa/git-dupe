@@ -156,6 +156,13 @@ impl Workspace {
         fs::symlink_metadata(self.private_directory()).is_ok_and(|found| found.is_dir())
     }
 
+    /// The private Git directory's path where something other than a directory stands
+    /// there by `lstat` (`obstructed`).
+    pub fn obstruction(&self) -> Option<PathBuf> {
+        let private = self.private_directory();
+        obstructed(&private).then_some(private)
+    }
+
     /// The root: the working tree's top directory, absolute.
     pub fn root(&self) -> &Path {
         &self.root
@@ -263,6 +270,16 @@ fn private_directory(git_directory: &Path) -> PathBuf {
     git_directory.join("dupe")
 }
 
+/// Whether something other than a directory stands at a private Git directory's path by
+/// `lstat`: a symbolic link, wherever it leads, or a file. Such a worktree is not
+/// attached, and no Git run is made against that path, because Git would follow it to
+/// whatever repository it names, the public one or another worktree's private one (G5,
+/// G28): `init` and `clone` make no repository there, no alias is looked up there, and a
+/// help request runs nothing.
+pub fn obstructed(private_directory: &Path) -> bool {
+    fs::symlink_metadata(private_directory).is_ok_and(|found| !found.is_dir())
+}
+
 /// Where a destination is compared from (`Holds/G18`), all absolute: the root a relative
 /// destination is read from, the common Git directory that holds `worktrees/`, and the
 /// user's directory where a relative destination is also read from when it lies outside
@@ -333,6 +350,17 @@ impl Unlocated {
             git_directory: private_directory(Path::new(OsStr::from_bytes(git_directory))),
             common_directory: PathBuf::from(OsStr::from_bytes(common_directory)),
         })
+    }
+
+    /// Inside a Git directory, its private Git directory's path where something other
+    /// than a directory stands there (`obstructed`): no run is made against it.
+    pub fn obstruction(&self) -> Option<&Path> {
+        match self {
+            Unlocated::Outside => None,
+            Unlocated::InGitDirectory { git_directory, .. } => {
+                obstructed(git_directory).then_some(git_directory.as_path())
+            }
+        }
     }
 
     /// The repository such a run is made against.
@@ -486,13 +514,19 @@ mod tests {
         fs::create_dir(common.join("dupe")).unwrap();
         assert!(main.attached_now());
         assert!(!linked.attached_now());
+        assert_eq!(linked.obstruction(), None);
         // A symbolic link at the linked worktree's own path is not its private repository,
-        // even where it leads to one.
+        // even where it leads to one, and it obstructs that path; so does a file.
         std::os::unix::fs::symlink(common.join("dupe"), linked.private_directory()).unwrap();
         assert!(!linked.attached_now());
+        assert_eq!(linked.obstruction(), Some(linked.private_directory()));
+        fs::remove_file(linked.private_directory()).unwrap();
+        fs::write(linked.private_directory(), b"").unwrap();
+        assert_eq!(linked.obstruction(), Some(linked.private_directory()));
         fs::remove_file(linked.private_directory()).unwrap();
         fs::create_dir(linked.private_directory()).unwrap();
         assert!(linked.attached_now());
+        assert_eq!(linked.obstruction(), None);
         fs::remove_dir(common.join("dupe")).unwrap();
         assert!(!main.attached_now());
         assert!(linked.attached_now());

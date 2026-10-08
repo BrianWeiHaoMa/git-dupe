@@ -2,12 +2,13 @@
 //! the main worktree, whose `.git` entry at the root is the common Git directory, or a
 //! linked worktree that `git worktree add` made, whose Git directory lies directly under
 //! the common Git directory's `worktrees` (E9), a bare repository's included — and not a
-//! submodule checkout or a project that tracks `.gitdupe` publicly. A bare repository's
-//! own directory never gets here: Git's locate run fails there.
+//! submodule checkout, a worktree where something other than a directory stands at its
+//! private repository's path, or a project that tracks `.gitdupe` publicly. A bare
+//! repository's own directory never gets here: Git's locate run fails there.
 
 use std::fs;
 use std::os::unix::fs::MetadataExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::keeper::{self, Failed};
 use crate::runner::locate::Workspace;
@@ -25,6 +26,11 @@ pub enum Refusal {
     /// A linked worktree whose Git directory's parent is not, by device and inode,
     /// `worktrees` in the common Git directory: no worktree `git worktree add` made.
     NotUnderWorktrees,
+    /// Something other than a directory stands at the private Git directory's path by
+    /// `lstat`, this path: Git's `init` and `config` would follow it to whatever it leads
+    /// to, the public repository or another worktree's private one (G5, G28), and git-dupe
+    /// deletes nothing to make room (R8).
+    Obstructed(PathBuf),
     /// The public repository tracks `.gitdupe`.
     TracksGitdupe,
 }
@@ -42,6 +48,9 @@ pub fn refusal(workspace: &Workspace) -> Result<Option<Refusal>, Failed> {
         }
     } else if !own_git_directory(workspace) {
         return Ok(Some(Refusal::NotOwnGitDirectory));
+    }
+    if let Some(private) = workspace.obstruction() {
+        return Ok(Some(Refusal::Obstructed(private)));
     }
     let tracked = keeper::publicly_tracked(workspace, &[keeper::GITDUPE.to_vec()])?;
     if !tracked.is_empty() {

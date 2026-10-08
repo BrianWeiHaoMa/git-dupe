@@ -685,3 +685,128 @@ fn init_and_clone_write_nothing_through_what_stands_at_the_private_path() {
         refused(&run(s, &other_wt, &other, &["dupe", "status"]), &other);
     });
 }
+
+/// Where something other than a directory stands at the private path and the project also
+/// tracks `.gitdupe`, or `clone`'s URL names a public place, that path is what the refusal
+/// names: it is decided before the public lookup of `.gitdupe` and before the URL is
+/// compared (`Holds/G1`, `Holds/G2`, G4), and nothing is written.
+#[test]
+fn the_private_path_is_refused_before_a_tracked_gitdupe_or_a_public_url() {
+    under_each_release(|s| {
+        let main = s.dir().join("main");
+        s.repository(&main);
+        let main_wt = Worktree::read(s, &main);
+        let remote = s.dir().join("private.git");
+        s.bare_repository(&remote);
+        let root = s.dir().join("linked");
+        s.linked_worktree(&main, &root);
+        let wt = Worktree::read(s, &root);
+        symlink(&main_wt.common_directory, wt.private_directory()).unwrap();
+        let refused = |words: &[&OsStr]| {
+            let before = Tree::of(&wt.common_directory);
+            let output = s.git(words).from(&root).run();
+            assert_eq!(output.end, End::Code(128), "{words:?}: {output:?}");
+            assert!(output.stdout.is_empty(), "{words:?}: {output:?}");
+            names(
+                output.only_line("fatal"),
+                wt.private_directory().as_os_str().as_bytes(),
+            );
+            unchanged(&before, &wt.common_directory);
+        };
+        let dupe = OsStr::new("dupe");
+        // The project's own common Git directory, a public place, as the URL.
+        refused(&[
+            dupe,
+            OsStr::new("clone"),
+            main_wt.common_directory.as_os_str(),
+        ]);
+        fs::write(root.join(".gitdupe"), b"notes\n").unwrap();
+        s.git(["add", "-f", "--", ".gitdupe"])
+            .from(&root)
+            .succeeds();
+        refused(&[dupe, OsStr::new("init")]);
+        refused(&[dupe, OsStr::new("clone"), remote.as_os_str()]);
+    });
+}
+
+/// A help request after a word passed through, which Git may read as an option's value,
+/// in a worktree that is not attached because something other than a directory stands at
+/// its private Git directory, runs nothing through it, not even the lookup of an alias
+/// that the repository it leads to defines: from the worktree and from inside its Git
+/// directory, one `fatal:` line names it, exit 128, and the project's Git directory with
+/// every private repository stands as it was (G5, G28, F2, `Holds/G24`).
+#[test]
+fn a_help_request_runs_nothing_through_what_stands_at_the_private_path() {
+    under_each_release(|s| {
+        // An identity, so that a commit or a tag Git made through the link would be written.
+        for (key, value) in [
+            ("user.name", "Scenario"),
+            ("user.email", "s@example.invalid"),
+            ("maintenance.auto", "false"),
+        ] {
+            s.git(["config", "--global", key, value]).succeeds();
+        }
+        let main = s.dir().join("main");
+        s.attached_project(&main);
+        let main_wt = Worktree::read(s, &main);
+        // An alias that the public repository and the main worktree's private one define,
+        // which a lookup made through a link would find.
+        s.git(["config", "alias.probe", "status"])
+            .from(&main)
+            .succeeds();
+        main_wt
+            .private(s)
+            .git(["config", "alias.probe", "status"])
+            .succeeds();
+        let mut cases = Vec::new();
+        for (name, link_to) in [
+            ("to-common", Some(main_wt.common_directory.clone())),
+            ("to-main-private", Some(main_wt.private_directory())),
+            ("a-file", None),
+        ] {
+            let root = s.dir().join(name);
+            s.linked_worktree(&main, &root);
+            let wt = Worktree::read(s, &root);
+            match &link_to {
+                Some(target) => symlink(target, wt.private_directory()).unwrap(),
+                None => fs::write(wt.private_directory(), b"not a repository\n").unwrap(),
+            }
+            cases.push(wt);
+        }
+        // The main worktree of another project, its `.git/dupe` a link to this project's
+        // common Git directory.
+        let other = s.dir().join("other");
+        s.repository(&other);
+        let other_wt = Worktree::read(s, &other);
+        symlink(&main_wt.common_directory, other_wt.private_directory()).unwrap();
+        cases.push(other_wt);
+
+        for wt in &cases {
+            let before = [
+                Tree::of(&main_wt.common_directory),
+                Tree::of(&wt.common_directory),
+            ];
+            for (from, words) in [
+                (
+                    &wt.root,
+                    &["dupe", "commit", "--allow-empty", "-m", "-h"][..],
+                ),
+                (&wt.root, &["dupe", "log", "-h"]),
+                (&wt.root, &["dupe", "log", "--help"]),
+                (&wt.root, &["dupe", "probe", "-h"]),
+                (&wt.git_directory, &["dupe", "tag", "-m", "-h", "leak"]),
+                (&wt.git_directory, &["dupe", "probe", "-h"]),
+            ] {
+                let output = s.git(words).from(from).run();
+                assert_eq!(output.end, End::Code(128), "{words:?}: {output:?}");
+                assert!(output.stdout.is_empty(), "{words:?}: {output:?}");
+                names(
+                    output.only_line("fatal"),
+                    wt.private_directory().as_os_str().as_bytes(),
+                );
+                unchanged(&before[0], &main_wt.common_directory);
+                unchanged(&before[1], &wt.common_directory);
+            }
+        }
+    });
+}

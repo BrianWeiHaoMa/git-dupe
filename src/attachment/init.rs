@@ -4,10 +4,8 @@
 //! canonical form ends the command before anything is written.
 //!
 //! The private repository is made, completed, and configured only where its path is a
-//! directory by `lstat`, or nothing yet: Git's `init` and `config` follow a symbolic link
-//! there, and would write the keys into whatever repository it leads to, the public one
-//! or another worktree's private one (G5, R8, G28). Something else standing there is
-//! named, and nothing is written; git-dupe deletes nothing to make room.
+//! directory by `lstat`, or nothing yet: something else standing there is one of the
+//! refusals (`refusals`), because Git's `init` and `config` would follow it.
 //!
 //! Git's `init` runs only when the private Git directory lacks `HEAD`, `objects`, or
 //! `refs`, the repository Git cannot open, because on a complete repository it rewrites
@@ -18,7 +16,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::ffi::OsStringExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::refusals::{self, Refusal};
 use super::settings::{self, Unresolved};
@@ -39,9 +37,6 @@ pub struct Initialized {
 pub enum NotInitialized {
     /// G4 refuses the workspace; nothing ran that writes.
     Refused(Refusal),
-    /// Something that is not a directory stands at the private Git directory's path;
-    /// nothing ran that writes.
-    Obstructed(PathBuf),
     /// The relative work tree cannot be computed; nothing ran that writes.
     Unresolved(Unresolved),
     /// A Git step failed, and the steps after it did not run.
@@ -56,9 +51,6 @@ impl From<Failed> for NotInitialized {
 
 /// Why the steps `init` and `clone` share did not all run.
 pub(super) enum NotAttached {
-    /// Something that is not a directory stands at the private Git directory's path;
-    /// nothing ran that writes.
-    Obstructed(PathBuf),
     /// The relative work tree cannot be computed; nothing ran that writes.
     Unresolved(Unresolved),
     /// A Git step failed, and the steps after it did not run.
@@ -74,7 +66,6 @@ impl From<Failed> for NotAttached {
 impl From<NotAttached> for NotInitialized {
     fn from(not_attached: NotAttached) -> Self {
         match not_attached {
-            NotAttached::Obstructed(path) => NotInitialized::Obstructed(path),
             NotAttached::Unresolved(unresolved) => NotInitialized::Unresolved(unresolved),
             NotAttached::Failed(failed) => NotInitialized::Failed(failed),
         }
@@ -97,9 +88,6 @@ pub(super) fn attach(
     branch: Option<&OsStr>,
 ) -> Result<Initialized, NotAttached> {
     let private = workspace.private_directory();
-    if fs::symlink_metadata(&private).is_ok_and(|found| !found.is_dir()) {
-        return Err(NotAttached::Obstructed(private));
-    }
     let work_tree = settings::relative_work_tree(workspace).map_err(NotAttached::Unresolved)?;
     let repository = !complete(&private);
     if repository {

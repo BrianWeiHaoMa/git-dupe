@@ -21,6 +21,13 @@ Every change a user of git-dupe would notice, newest first, in the form of
   no worktree's region update is lost, and one killed while it writes the file holds
   up none.
 
+### Fixed
+
+- Where a symbolic link or a file stands at `.git/dupe`, or at a linked worktree's
+  `dupe`, git-dupe no longer runs Git through it: `git dupe init`, `git dupe clone`,
+  and a help request such as `git dupe commit -m -h` are refused naming it, where they
+  could write into whatever repository it led to, the project's own included.
+
 ## [0.1.0] - 2026-10-03
 
 ### Added

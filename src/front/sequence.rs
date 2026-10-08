@@ -133,7 +133,9 @@ fn sequence(words: &[OsString]) -> Outcome {
     // run would be made: it passes through as received, is dispatched as the command its
     // chain reaches, read as step (2) reads that command typed, or is the usage error G19
     // names, held for after step (5). A lookup Git failed ends the command as Git ended it,
-    // settled in an attached workspace (R3).
+    // settled in an attached workspace (R3). Where something other than a directory stands
+    // at the private Git directory, no lookup is made through it: the word passes through
+    // unresolved, and step (5) refuses it.
     let expanded: Vec<OsString>;
     let (command, read) = match read {
         Some(read) => (literal, read),
@@ -143,7 +145,11 @@ fn sequence(words: &[OsString]) -> Outcome {
                 git_directory: &private,
                 root: workspace.root(),
             };
-            match alias::resolve(words, against) {
+            let resolved = match workspace.obstruction() {
+                Some(_) => Ok(Resolved::PassThrough),
+                None => alias::resolve(words, against),
+            };
+            match resolved {
                 Err(ended) => return ended_early(&workspace, ended),
                 Ok(Resolved::PassThrough) => (None, Ok(Read::Passed(Passed::Word(words)))),
                 Ok(Resolved::Dispatch {
@@ -189,9 +195,13 @@ fn sequence(words: &[OsString]) -> Outcome {
     // through, after `stash`, or after a transfer command, which Git answers alone, after
     // the command's guard, against this worktree's private Git directory, which no `init`
     // has made, so that it never selects the public repository nor another worktree's
-    // private one.
+    // private one. Where something other than a directory stands there, Git would follow
+    // it, and the request is refused naming it instead.
     if !workspace.attached() && !attaching {
         if let Some(passed) = help_request(&read) {
+            if let Some(obstruction) = workspace.obstruction() {
+                return outcome::obstructed(&obstruction);
+            }
             return passed.run(against, || Some(workspace.facts()));
         }
         return outcome::refuse_unattached();
@@ -305,35 +315,47 @@ fn read_words(command: Command, words: &[OsString]) -> Words<'_> {
 /// Step (3) where the locate failed: what is answered there without a repository, its
 /// runs and the alias lookups made as `Composition/Runner` says; `None` for every other
 /// command, which ends with Git's message. A lookup Git failed ends the command as Git
-/// ended it.
+/// ended it. Where something other than a directory stands at the private Git directory,
+/// nothing is looked up or run through it, and a help request is refused naming it.
 fn answered_unlocated(
     read: Option<Result<Read, Vec<u8>>>,
     words: &[OsString],
     unlocated: &Unlocated,
 ) -> Option<Outcome> {
     let against = unlocated.against();
+    let obstruction = unlocated.obstruction();
     let expanded: Vec<OsString>;
     let read = match read {
         Some(read) => read,
-        None => match alias::resolve(words, against) {
-            Err(ended) => return Some(ended),
-            Ok(Resolved::PassThrough) => Ok(Read::Passed(Passed::Word(words))),
-            Ok(Resolved::Dispatch {
-                command,
-                words: dispatched,
-                prefix,
-            }) => {
-                runner::carry_prefix(prefix);
-                expanded = dispatched;
-                match read_words(command, &expanded) {
-                    Words::Answered(answered) => return Some(answered),
-                    Words::Read(read) => read,
+        None => {
+            let resolved = match obstruction {
+                Some(_) => Ok(Resolved::PassThrough),
+                None => alias::resolve(words, against),
+            };
+            match resolved {
+                Err(ended) => return Some(ended),
+                Ok(Resolved::PassThrough) => Ok(Read::Passed(Passed::Word(words))),
+                Ok(Resolved::Dispatch {
+                    command,
+                    words: dispatched,
+                    prefix,
+                }) => {
+                    runner::carry_prefix(prefix);
+                    expanded = dispatched;
+                    match read_words(command, &expanded) {
+                        Words::Answered(answered) => return Some(answered),
+                        Words::Read(read) => read,
+                    }
                 }
+                Ok(Resolved::Ambiguous(_)) => return None,
             }
-            Ok(Resolved::Ambiguous(_)) => return None,
-        },
+        }
     };
-    help_request(&read).map(|passed| passed.run(against, || unlocated.facts()))
+    let passed = help_request(&read)?;
+    Some(match obstruction {
+        Some(obstruction) => outcome::obstructed(obstruction),
+        None => passed.run(against, || unlocated.facts()),
+    })
 }
 
 /// How a command ends where the workspace was not located: with Git's message and status,

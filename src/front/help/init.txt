@@ -19,5 +19,5 @@ again it does not reinitialize: it completes whatever an interrupted init
 left undone, changes nothing else, and says so in a hint.
 
 It is refused in a submodule checkout, where a main worktree's .git is not
-a directory, in a linked worktree "git worktree add" did not make, and in a
-project that tracks .gitdupe.
+a directory, in a linked worktree "git worktree add" did not make, in a
+project that tracks .gitdupe, and where a link or a file stands at its dupe.

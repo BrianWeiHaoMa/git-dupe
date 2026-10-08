@@ -24,7 +24,6 @@
 
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::path::PathBuf;
 
 use super::init::{self, NotAttached};
 use super::refusals::{self, Refusal};
@@ -52,9 +51,6 @@ pub enum NotCloned {
     Refused(Refusal),
     /// This word names this public place; nothing ran that writes.
     NamesAPublicPlace(Vec<u8>, Place),
-    /// Something that is not a directory stands at the private Git directory's path;
-    /// nothing ran that writes.
-    Obstructed(PathBuf),
     /// The relative work tree cannot be computed; nothing ran that writes.
     Unresolved(Unresolved),
     /// No `BRANCH` was given, and the remote's `HEAD` names no branch it has; the
@@ -73,7 +69,6 @@ impl From<Failed> for NotCloned {
 impl From<NotAttached> for NotCloned {
     fn from(not_attached: NotAttached) -> Self {
         match not_attached {
-            NotAttached::Obstructed(path) => NotCloned::Obstructed(path),
             NotAttached::Unresolved(unresolved) => NotCloned::Unresolved(unresolved),
             NotAttached::Failed(failed) => NotCloned::Failed(failed),
         }
