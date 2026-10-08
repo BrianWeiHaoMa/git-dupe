@@ -100,7 +100,7 @@ The runner's `rev-parse` is the only discovery. Literal `help`, `-h` alone, an o
 
 ### G5. Writes inside `.git`
 
-Held by construction: the keeper's fresh files and the attachment's repository live in the worktree's private Git directory; the region rename, which carries this worktree's region and leaves out a stale one (G27), and the creation of `.git/info` when it is missing so that the regions have a home (G5), are the only writes to `.git/info`; the public runs are `rev-parse`, `symbolic-ref -q HEAD`, `ls-files`, `check-ignore --no-index`, `config` with `--get`, `--get-regexp`, or `--list`, `worktree list --porcelain -z`, and the `clean` of G16. R2 keeps it so.
+Held by construction: the keeper's fresh files and the attachment's repository live in the worktree's private Git directory; the region rename, which carries this worktree's region and leaves out a stale one (G27), and the creation of `.git/info` when it is missing so that the regions have a home (G5), are the only writes to `.git/info`; the public runs are `rev-parse`, `symbolic-ref -q HEAD`, `ls-files`, `check-ignore --no-index`, `config` with `--get`, `--get-regexp`, or `--list`, `worktree list --porcelain -z`, the `help COMMAND` of G24, which needs no repository, and the `clean` of G16. R2 keeps it so.
 
 ### G6, G8, G9. The region holds the hidden paths; exposure, double tracking, and release are named
 
