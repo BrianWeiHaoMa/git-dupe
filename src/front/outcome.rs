@@ -5,9 +5,10 @@
 
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 
 use super::lines::{self, Level};
-use crate::attachment::Refusal;
+use crate::attachment::{Refusal, Unresolved};
 use crate::keeper::Failed;
 use crate::runner::locate::Workspace;
 use crate::runner::{End, Failure};
@@ -64,39 +65,65 @@ pub fn usage_error(fault: &[u8], usage_line: &[u8]) -> Outcome {
     Outcome::UsageError
 }
 
-/// The refusal in a linked worktree, which has no private repository and is never
-/// attached: it names the main working tree where Git's `worktree list` does, the common
-/// Git directory's parent when that directory is named `.git`.
-pub fn refuse_in_linked_worktree(workspace: &Workspace) -> Outcome {
-    let mut line = b"a linked worktree has no private repository; use 'git dupe init' \
-                     and git-dupe in the main working tree"
-        .to_vec();
-    if let Some(main) = workspace.main_working_tree_of_linked() {
-        line.extend_from_slice(b": ");
-        line.extend_from_slice(main.as_os_str().as_bytes());
-    }
+/// The refusal of a command that requires an attached workspace, in a worktree that is
+/// not attached, whatever the other worktrees hold (G4).
+pub fn refuse_unattached() -> Outcome {
+    refuse(b"no private repository is attached to this worktree; run 'git dupe init' here first")
+}
+
+/// The refusals of G4 where `init` and `clone` do not attach, each with its explanation.
+pub fn refuse_to_attach(workspace: &Workspace, refusal: Refusal) -> Outcome {
+    let line: Vec<u8> = match refusal {
+        Refusal::SubmoduleCheckout => b"this is a submodule checkout; git-dupe attaches a \
+              worktree of a project, never a submodule checkout"
+            .to_vec(),
+        Refusal::NotOwnGitDirectory => b"the .git entry at the root of this working tree \
+              is not the directory that holds its repository; git-dupe attaches only such \
+              a main worktree"
+            .to_vec(),
+        Refusal::NotUnderWorktrees => [
+            &b"the Git directory of this linked worktree, "[..],
+            workspace.git_directory().as_os_str().as_bytes(),
+            b", is not directly in ",
+            workspace
+                .common_directory()
+                .join("worktrees")
+                .as_os_str()
+                .as_bytes(),
+            b", where 'git worktree add' makes one; git-dupe attaches only such a linked \
+              worktree",
+        ]
+        .concat(),
+        Refusal::TracksGitdupe => b"this project tracks .gitdupe, the file that holds \
+              git-dupe's hidden paths; git-dupe cannot be attached to it"
+            .to_vec(),
+    };
     refuse(&line)
 }
 
-/// The refusals of G4 where `init` and `clone` do not attach, each with its explanation;
-/// in a linked worktree, naming the main working tree where Git knows it.
-pub fn refuse_to_attach(workspace: &Workspace, refusal: Refusal) -> Outcome {
-    let line: &[u8] = match refusal {
-        Refusal::LinkedWorktree => return refuse_in_linked_worktree(workspace),
-        Refusal::SubmoduleCheckout => {
-            b"this is a submodule checkout; git-dupe attaches only the main working tree \
-              of an ordinary repository"
-        }
-        Refusal::NotOwnGitDirectory => {
-            b"the .git entry at the root of this working tree is not the directory that \
-              holds its repository; git-dupe attaches only such a working tree"
-        }
-        Refusal::TracksGitdupe => {
-            b"this project tracks .gitdupe, the file that holds git-dupe's hidden paths; \
-              git-dupe cannot be attached to it"
-        }
-    };
-    refuse(line)
+/// Something that is not a directory standing where this worktree's private repository
+/// goes: a refusal naming it, before anything was written through it or in its place.
+pub fn obstructed(path: &Path) -> Outcome {
+    let line = [
+        path.as_os_str().as_bytes(),
+        b" is not a directory, and this worktree's private repository goes there; \
+          git-dupe writes nothing through it: move it away first",
+    ]
+    .concat();
+    refuse(&line)
+}
+
+/// A path the private repository's working tree is recorded from that has no canonical
+/// form: a refusal naming it and the cause, before anything was written.
+pub fn unresolved(unresolved: &Unresolved) -> Outcome {
+    let line = [
+        &b"cannot resolve "[..],
+        unresolved.path.as_os_str().as_bytes(),
+        b" to record the private repository's working tree: ",
+        unresolved.cause.to_string().as_bytes(),
+    ]
+    .concat();
+    refuse(&line)
 }
 
 /// A list of paths that does not fit on one Git command line is a refusal naming how

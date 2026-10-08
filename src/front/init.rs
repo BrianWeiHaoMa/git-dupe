@@ -79,6 +79,8 @@ pub fn run(workspace: &Workspace, branch: Option<&OsStr>) -> Outcome {
             Outcome::Answered
         }
         Err(NotInitialized::Refused(refusal)) => outcome::refuse_to_attach(workspace, refusal),
+        Err(NotInitialized::Obstructed(path)) => outcome::obstructed(&path),
+        Err(NotInitialized::Unresolved(unresolved)) => outcome::unresolved(&unresolved),
         Err(NotInitialized::Failed(failed)) => outcome::failed(failed),
     }
 }

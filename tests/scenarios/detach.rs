@@ -507,11 +507,16 @@ fn misuse_is_checked_after_workspace_refusals_and_never_settles() {
             assert!(unattached.stdout.is_empty(), "{unattached:?}");
             names(unattached.only_line("fatal"), b"git dupe init");
             unchanged(&plain_before, &plain);
+            // The linked worktree of an attached main worktree is not attached itself, and
+            // its refusal names no path of the main worktree's.
             let linked = s.git(&command).from(&t.linked).run();
             assert_eq!(linked.end, End::Code(128), "{linked:?}");
             assert!(linked.stdout.is_empty(), "{linked:?}");
-            names(linked.only_line("fatal"), t.root.as_os_str().as_bytes());
-            names(linked.only_line("fatal"), b"main working tree");
+            names(linked.only_line("fatal"), b"git dupe init");
+            assert!(
+                !holds(linked.only_line("fatal"), t.root.as_os_str().as_bytes()),
+                "{linked:?}"
+            );
             before.unchanged();
             let absent = s.git(&command).run();
             assert_eq!(absent.end, outside.end, "{absent:?}");

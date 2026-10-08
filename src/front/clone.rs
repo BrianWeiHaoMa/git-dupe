@@ -122,6 +122,8 @@ pub fn run(
         ),
         Err(NotCloned::Refused(refusal)) => outcome::refuse_to_attach(workspace, refusal),
         Err(NotCloned::NamesAPublicPlace(word, place)) => places::refuse(&word, &place),
+        Err(NotCloned::Obstructed(path)) => outcome::obstructed(&path),
+        Err(NotCloned::Unresolved(unresolved)) => outcome::unresolved(&unresolved),
         Err(NotCloned::NoDefaultBranch) => outcome::refuse(
             b"the private remote's HEAD names no branch it has, so there is no default \
               branch to check out; run 'git dupe detach', or 'git dupe detach --force' \

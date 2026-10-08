@@ -37,6 +37,25 @@ impl FreshDirectory {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Creates a drop-guarded directory below an explicit base, or returns `None`
+    /// when that base is unavailable or cannot hold a fresh directory.
+    pub fn create_in(base: &Path) -> Option<FreshDirectory> {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let base = fs::canonicalize(base).ok()?;
+        loop {
+            let path = base.join(format!(
+                "git-dupe-checks-base-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => return Some(FreshDirectory { path }),
+                Err(cause) if cause.kind() == ErrorKind::AlreadyExists => continue,
+                Err(_) => return None,
+            }
+        }
+    }
 }
 
 impl Drop for FreshDirectory {

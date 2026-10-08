@@ -1,0 +1,35 @@
+Each worktree of a project is a workspace of its own. A linked worktree, one
+that git worktree add made, of an ordinary repository or of a bare one, has
+its own private repository, dupe in its own Git directory,
+.git/worktrees/<name>/dupe, its own hidden paths and private history, and its
+own region of the one .git/info/exclude, between markers that carry its name.
+It is unattached, whatever the main worktree holds, until git dupe init or
+git dupe clone is run in it, and every other git dupe command there is refused
+naming git dupe init.
+
+Private work moves between worktrees as it moves between machines. In a linked
+worktree, git dupe clone "$(git rev-parse --git-common-dir)/dupe" attaches it
+from the main worktree's private repository: .gitdupe and the private files
+appear, and a file already there is kept, as on a second machine. Commit there,
+and git dupe push origin HEAD:agent puts the branch agent in the main
+worktree's private repository, where git dupe merge agent, run in the main
+worktree, takes it. Attached instead by git dupe clone of the private remote, a
+linked worktree moves its work through that remote with git dupe push and git
+dupe pull.
+
+After git worktree move, git-dupe goes on working in the linked worktree as
+before. Plain Git, given its private repository with --git-dir, finds the
+working tree again once git dupe init is run in the new place, which records
+it there.
+
+The regions of every worktree stand in one .git/info/exclude, which the
+project's Git reads in every worktree: a path one worktree hides is ignored in
+the others too. What another worktree writes at such a path, while it does not
+hide the path itself, is then seen by neither repository there, until git dupe
+add makes it private there too. git-dupe commands in different worktrees may
+run at the same time; each replaces its own region alone.
+
+git worktree remove and git worktree prune delete a linked worktree's Git
+directory and its private repository with it, and the private files on disk do
+not stop them: private work not pushed first is gone. Push it, or run git dupe
+detach, before removing the worktree.

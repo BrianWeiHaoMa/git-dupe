@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, holds, locate_words, names, names_number, refused_stash_untracked,
-    region, region_rules, unchanged, under_each_release, usage_line,
+    End, Output, Scenario, Tree, Worktree, holds, locate_words, names, names_number,
+    refused_stash_untracked, region, region_rules, unchanged, under_each_release, usage_line,
 };
 
 /// An unattached repository and the directory to run from: its root, or `sub` below it.
@@ -489,8 +489,20 @@ fn init_refused_changing_nothing(s: &Scenario, dir: &Path, from: &Path, before: 
     output
 }
 
+/// `git dupe init` from `from` attaches the linked worktree at `linked`: exit 0, and its
+/// private repository stands in its own Git directory.
+fn linked_attached(s: &Scenario, linked: &Path, from: &Path) -> Worktree {
+    let output = s.git(["dupe", "init"]).from(from).run();
+    assert_eq!(output.end, End::Code(0), "{output:?}");
+    assert!(output.lines("fatal").is_empty(), "{output:?}");
+    let own = Worktree::read(s, linked);
+    assert_ne!(own.git_directory, own.common_directory);
+    assert!(own.private_directory().join("HEAD").is_file(), "{output:?}");
+    own
+}
+
 #[test]
-fn linked_worktrees_separate_git_directories_and_symlinks_are_refused() {
+fn main_worktrees_apart_from_their_repository_are_refused_and_linked_worktrees_attach() {
     under_each_release(|s| {
         for below in [false, true] {
             for separate in [false, true] {
@@ -511,30 +523,18 @@ fn linked_worktrees_separate_git_directories_and_symlinks_are_refused() {
                     names(output.only_line("fatal"), b".git");
                     assert_eq!(fs::read(main.join(".git")).unwrap(), entry);
                 }
+                // Its linked worktree is one `git worktree add` made, whose Git directory
+                // lies in the common one's `worktrees`, wherever that is: it attaches.
                 let linked = s.dir().join(format!("linked-{separate}-{below}"));
                 s.linked_worktree(&main, &linked);
-                let git_dir = if separate {
+                let own = linked_attached(s, &linked, &from(&linked, below));
+                let common = if separate {
                     admin.clone()
                 } else {
                     main.join(".git")
                 };
-                let before = Tree::of(&git_dir);
-                let entry = fs::read(linked.join(".git")).unwrap();
-                let output =
-                    init_refused_changing_nothing(s, &git_dir, &from(&linked, below), &before);
-                let line = output.only_line("fatal");
-                if separate {
-                    assert!(!line.contains(&b'/'), "{output:?}");
-                } else {
-                    names(line, main.as_os_str().as_bytes());
-                    assert!(
-                        !line
-                            .windows(main.as_os_str().as_bytes().len() + 1)
-                            .any(|part| part == [main.as_os_str().as_bytes(), b"/"].concat()),
-                        "{output:?}"
-                    );
-                }
-                assert_eq!(fs::read(linked.join(".git")).unwrap(), entry);
+                assert_eq!(own.common_directory, common);
+                assert!(!common.join("dupe").exists());
             }
             // A working tree named apart from its repository: its own `.git` is another
             // repository's directory, or it has none. `core.worktree` `../..` relative
@@ -571,6 +571,62 @@ fn linked_worktrees_separate_git_directories_and_symlinks_are_refused() {
             names(output.only_line("fatal"), b".git");
             assert_eq!(fs::read_link(dir.join(".git")).unwrap(), admin);
         }
+    });
+}
+
+#[test]
+fn a_linked_worktree_git_worktree_add_did_not_make_is_refused_naming_its_git_directory() {
+    under_each_release(|s| {
+        // Its Git directory moved by hand out of `worktrees`, into a directory whose name
+        // is not UTF-8, with the links between it and the working tree rewritten: Git
+        // still reads it as a linked worktree, but no `git worktree add` made it (E9).
+        // Typed and through an alias, `init` and `clone` refuse it before any write,
+        // naming its Git directory byte for byte; a linked worktree beside it attaches.
+        let main = s.dir().join("main");
+        s.repository(&main);
+        let remote = s.dir().join("private.git");
+        s.bare_repository(&remote);
+        s.git(["config", "--global", "alias.attach", "init"])
+            .succeeds();
+        s.git(["config", "--global", "alias.bring", "clone"])
+            .succeeds();
+        let moved = s.dir().join("moved");
+        s.linked_worktree(&main, &moved);
+        let elsewhere = main.join(OsStr::from_bytes(b".git/elsewh\xe9re"));
+        fs::create_dir(&elsewhere).unwrap();
+        let admin = elsewhere.join("moved");
+        fs::rename(main.join(".git/worktrees/moved"), &admin).unwrap();
+        fs::write(
+            moved.join(".git"),
+            [b"gitdir: ", admin.as_os_str().as_bytes(), b"\n"].concat(),
+        )
+        .unwrap();
+        let asked = Worktree::read(s, &moved);
+        assert_eq!(asked.git_directory, admin);
+        assert_eq!(asked.common_directory, main.join(".git"));
+
+        let before = Tree::of(&main.join(".git"));
+        for words in [
+            &[OsStr::new("init")][..],
+            &[OsStr::new("attach")],
+            &[OsStr::new("clone"), remote.as_os_str()],
+            &[OsStr::new("bring"), remote.as_os_str()],
+        ] {
+            let output = s
+                .git([OsStr::new("dupe")].iter().chain(words))
+                .from(&moved)
+                .run();
+            assert_eq!(output.end, End::Code(128), "{words:?}: {output:?}");
+            assert!(output.stdout.is_empty(), "{words:?}: {output:?}");
+            names(output.only_line("fatal"), admin.as_os_str().as_bytes());
+            unchanged(&before, &main.join(".git"));
+            assert!(!admin.join("dupe").exists());
+        }
+
+        let beside = s.dir().join("beside");
+        s.linked_worktree(&main, &beside);
+        linked_attached(s, &beside, &beside);
+        assert!(!admin.join("dupe").exists());
     });
 }
 

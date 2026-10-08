@@ -405,7 +405,7 @@ fn the_page_is_the_same_bytes_for_the_same_texts() {
 /// general text sheds, of the refusals of G17 and G18 above all, stands here.
 #[test]
 fn the_page_explains_what_the_general_text_has_no_room_for() {
-    let explanations: [(&str, &[&str]); 4] = [
+    let explanations: [(&str, &[&str]); 5] = [
         (
             "HIDDEN AND PRIVATE",
             &[
@@ -420,6 +420,20 @@ fn the_page_explains_what_the_general_text_has_no_room_for() {
                 "A path is tracked by one repository or the other.",
                 "git dupe add never stages a file only the project's Git tracks",
                 "git rm --cached README.md, which stages its deletion from the project, a deletion every other clone receives once it is committed and pushed, and then git dupe add README.md, with -f where the project ignores it, which tracks it privately.",
+            ],
+        ),
+        (
+            "WORKTREES",
+            &[
+                "Each worktree of a project is a workspace of its own.",
+                "its own private repository, dupe in its own Git directory, .git/worktrees/<name>/dupe",
+                "It is unattached, whatever the main worktree holds, until git dupe init or git dupe clone is run in it",
+                "git dupe clone \"$(git rev-parse --git-common-dir)/dupe\" attaches it from the main worktree's private repository",
+                "git dupe push origin HEAD:agent puts the branch agent in the main worktree's private repository, where git dupe merge agent, run in the main worktree, takes it",
+                "finds the working tree again once git dupe init is run in the new place",
+                "a path one worktree hides is ignored in the others too",
+                "git worktree remove and git worktree prune delete a linked worktree's Git directory and its private repository with it",
+                "private work not pushed first is gone",
             ],
         ),
         (

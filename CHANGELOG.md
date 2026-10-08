@@ -8,6 +8,16 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Added
+
+- Linked worktrees as workspaces of their own: `git dupe init` and `git dupe clone`
+  attach a worktree that `git worktree add` made, of an ordinary or a bare repository,
+  with its own private repository in its Git directory (`.git/worktrees/<name>/dupe`),
+  its own hidden paths and history, and its own region of `.git/info/exclude`, where
+  `git dupe` in a linked worktree was refused before. Private work moves between
+  worktrees as between machines, and `git dupe init` run after `git worktree move`
+  records the new place for plain Git.
+
 ## [0.1.0] - 2026-10-03
 
 ### Added

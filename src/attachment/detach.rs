@@ -17,8 +17,8 @@
 //! 4. and 5. The keeper's `remove` deletes the region and asks what public Git now sees.
 //! 6. The caller writes the warnings, while the private index still stands, so that a kill
 //!    in the removal cannot leave the privately tracked files named nowhere.
-//! 7. `Leaving::remove` removes `.git/dupe`, the one deletion git-dupe makes of its own
-//!    (R8). A region that could not be deleted keeps it, and so do a question whose list
+//! 7. `Leaving::remove` removes this worktree's private repository, the one deletion
+//!    git-dupe makes of its own (R8). A region that could not be deleted keeps it, and so do a question whose list
 //!    did not fit and a question killed by a signal, which ends the command with 128 plus
 //!    its number: attached, its region deleted, as a kill after step 4 leaves it.
 
@@ -62,7 +62,7 @@ pub struct Leaving {
     private_directory: PathBuf,
 }
 
-/// Why `.git/dupe` still stands after the region was deleted.
+/// Why the private repository still stands after the region was deleted.
 pub enum NotRemoved {
     /// The exposure question's list of this many paths did not fit on one command line:
     /// nothing is removed while what public Git sees is unknown.
@@ -97,7 +97,7 @@ pub fn detach(workspace: &Workspace, force: bool) -> Result<Leaving, NotDetached
 }
 
 impl Leaving {
-    /// Step 7: removes `.git/dupe` recursively, once the warnings are written.
+    /// Step 7: removes the private repository recursively, once the warnings are written.
     pub fn remove(self) -> Result<(), NotRemoved> {
         if let Some(count) = self.removed.refused {
             return Err(NotRemoved::TooLong(count));

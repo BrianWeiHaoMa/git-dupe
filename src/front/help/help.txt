@@ -15,7 +15,7 @@ beyond the git-dupe executable for the texts it prints itself.
 
 The manual page of git-dupe, where it is installed, holds these texts and
 more: a quick start, examples of daily use, and what one screen has no room
-for, such as hidden and private paths, a file the project ignores, what plain
-git does to private files, and the refused commands in full. "man git-dupe"
-shows it, and so does "git dupe --help" while Git's help format is man, its
-default.
+for, such as hidden and private paths, worktrees, a file the project
+ignores, what plain git does to private files, and the refused commands in
+full. "man git-dupe" shows it, and so does "git dupe --help" while Git's help
+format is man, its default.

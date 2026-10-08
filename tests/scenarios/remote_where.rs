@@ -129,17 +129,21 @@ fn linked_git_directory_refuses_the_main_working_tree() {
     });
 }
 
-/// Without a help request, the linked worktree requires attaching the main working tree.
+/// Without a help request, a linked worktree requires its own `init`, whatever the main
+/// worktree holds, and its refusal names no path of the main worktree's.
 #[test]
-fn linked_worktree_requires_init_in_the_main_working_tree() {
+fn an_unattached_linked_worktree_requires_its_own_init() {
     under_each_release(|s| {
         let transfer = s.transfer_workspace("workspace");
         let before = transfer.everything();
         let output = s.git(["dupe", "remote", "-v"]).from(&transfer.linked).run();
-        refused(
-            &output,
-            b"git dupe init",
-            transfer.root.as_os_str().as_bytes(),
+        assert_eq!(output.end, End::Code(128), "{output:?}");
+        assert!(output.stdout.is_empty(), "{output:?}");
+        let line = output.only_line("fatal");
+        names(line, b"git dupe init");
+        assert!(
+            !holds(line, transfer.root.as_os_str().as_bytes()),
+            "{output:?}"
         );
         before.unchanged();
     });
@@ -173,23 +177,34 @@ fn linked_worktree_refuses_public_destination_before_init() {
     });
 }
 
-/// Linked worktree help keeps Git's answer against its never-created private directory.
+/// A linked worktree's help is Git's answer against its own private directory: one not
+/// yet created while it is unattached, its own private repository once it is attached,
+/// never the main worktree's.
 #[test]
-fn linked_worktree_help_runs_against_its_own_missing_private_repository() {
+fn linked_worktree_help_runs_against_its_own_private_repository() {
     under_each_release(|s| {
         let transfer = s.transfer_workspace("workspace");
         let directory = git_directory(s, &transfer.linked);
+        let help = || {
+            let expected = s
+                .git(["-c", "help.autocorrect=0", "remote", "-h"])
+                .variable("GIT_DIR", directory.join("dupe"))
+                .variable("GIT_WORK_TREE", &transfer.linked)
+                .from(&transfer.linked)
+                .run();
+            let output = s.git(["dupe", "remote", "-h"]).from(&transfer.linked).run();
+            assert_eq!(output, expected);
+        };
         let before = transfer.everything();
-        let expected = s
-            .git(["-c", "help.autocorrect=0", "remote", "-h"])
-            .variable("GIT_DIR", directory.join("dupe"))
-            .variable("GIT_WORK_TREE", &transfer.linked)
-            .from(&transfer.linked)
-            .run();
-        let output = s.git(["dupe", "remote", "-h"]).from(&transfer.linked).run();
-        assert_eq!(output, expected);
+        help();
         assert!(!directory.join("dupe").exists());
         before.unchanged();
+
+        s.init(&transfer.linked);
+        let main_private = Tree::of(&transfer.root.join(".git/dupe"));
+        help();
+        assert!(directory.join("dupe/HEAD").is_file());
+        unchanged(&main_private, &transfer.root.join(".git/dupe"));
     });
 }
 

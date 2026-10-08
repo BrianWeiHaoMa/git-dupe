@@ -1,5 +1,13 @@
 //! `init` after its words: the refusals, then the repository, then the settings, each
-//! step done only where it is missing (G1, `State` "`init`").
+//! step done only where it is missing (G1, `State` "`init`"). The relative work tree the
+//! settings compare and write is computed first, so that a root or Git directory with no
+//! canonical form ends the command before anything is written.
+//!
+//! The private repository is made, completed, and configured only where its path is a
+//! directory by `lstat`, or nothing yet: Git's `init` and `config` follow a symbolic link
+//! there, and would write the keys into whatever repository it leads to, the public one
+//! or another worktree's private one (G5, R8, G28). Something else standing there is
+//! named, and nothing is written; git-dupe deletes nothing to make room.
 //!
 //! Git's `init` runs only when the private Git directory lacks `HEAD`, `objects`, or
 //! `refs`, the repository Git cannot open, because on a complete repository it rewrites
@@ -10,10 +18,11 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::ffi::OsStringExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::refusals::{self, Refusal};
-use super::{settings, step};
+use super::settings::{self, Unresolved};
+use super::step;
 use crate::keeper::Failed;
 use crate::runner::Run;
 use crate::runner::locate::Workspace;
@@ -30,6 +39,11 @@ pub struct Initialized {
 pub enum NotInitialized {
     /// G4 refuses the workspace; nothing ran that writes.
     Refused(Refusal),
+    /// Something that is not a directory stands at the private Git directory's path;
+    /// nothing ran that writes.
+    Obstructed(PathBuf),
+    /// The relative work tree cannot be computed; nothing ran that writes.
+    Unresolved(Unresolved),
     /// A Git step failed, and the steps after it did not run.
     Failed(Failed),
 }
@@ -37,6 +51,33 @@ pub enum NotInitialized {
 impl From<Failed> for NotInitialized {
     fn from(failed: Failed) -> Self {
         NotInitialized::Failed(failed)
+    }
+}
+
+/// Why the steps `init` and `clone` share did not all run.
+pub(super) enum NotAttached {
+    /// Something that is not a directory stands at the private Git directory's path;
+    /// nothing ran that writes.
+    Obstructed(PathBuf),
+    /// The relative work tree cannot be computed; nothing ran that writes.
+    Unresolved(Unresolved),
+    /// A Git step failed, and the steps after it did not run.
+    Failed(Failed),
+}
+
+impl From<Failed> for NotAttached {
+    fn from(failed: Failed) -> Self {
+        NotAttached::Failed(failed)
+    }
+}
+
+impl From<NotAttached> for NotInitialized {
+    fn from(not_attached: NotAttached) -> Self {
+        match not_attached {
+            NotAttached::Obstructed(path) => NotInitialized::Obstructed(path),
+            NotAttached::Unresolved(unresolved) => NotInitialized::Unresolved(unresolved),
+            NotAttached::Failed(failed) => NotInitialized::Failed(failed),
+        }
     }
 }
 
@@ -51,15 +92,22 @@ pub fn init(workspace: &Workspace, branch: Option<&OsStr>) -> Result<Initialized
 
 /// What `init` does once nothing refuses, and the first step of `clone`: the repository,
 /// then the settings, each where it is missing.
-pub(super) fn attach(workspace: &Workspace, branch: Option<&OsStr>) -> Result<Initialized, Failed> {
+pub(super) fn attach(
+    workspace: &Workspace,
+    branch: Option<&OsStr>,
+) -> Result<Initialized, NotAttached> {
     let private = workspace.private_directory();
+    if fs::symlink_metadata(&private).is_ok_and(|found| !found.is_dir()) {
+        return Err(NotAttached::Obstructed(private));
+    }
+    let work_tree = settings::relative_work_tree(workspace).map_err(NotAttached::Unresolved)?;
     let repository = !complete(&private);
     if repository {
         make(workspace, &private, branch)?;
     }
-    let settings = settings::unfinished(workspace, &private)?;
+    let settings = settings::unfinished(workspace, &private, &work_tree)?;
     if settings {
-        settings::set(workspace, &private)?;
+        settings::set(workspace, &private, &work_tree)?;
     }
     Ok(Initialized {
         repository,

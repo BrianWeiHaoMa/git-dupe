@@ -1,9 +1,9 @@
 usage: git dupe [-h | --version] <command> [<args>]
-git-dupe versions private files in .git/dupe: every Git command runs on it as
+git-dupe versions private files: every Git command runs on their repository as
 "git dupe <command>". The project's Git ignores a hidden path: .gitdupe, a path
 it lists ("git dupe hide" or by hand), or a file "git dupe add <path>" tracks.
 
-  git dupe init [-b BRANCH]  attach a private repository to this clone
+  git dupe init [-b BRANCH]  attach a private repository to this worktree
   git dupe clone URL         attach one from URL, overwriting no file
   git dupe detach [--force]  remove it, leaving every file on disk
   git dupe hide PATH...      hide each PATH, listing it in .gitdupe
@@ -13,11 +13,11 @@ it lists ("git dupe hide" or by hand), or a file "git dupe add <path>" tracks.
   git dupe clean [ARGS]      cleans the project, sparing the hidden paths
   git dupe git WORDS         Git with WORDS as typed, guarded by nothing
   git dupe help [COMMAND]    this text, or the help of COMMAND
-
 Refused: stash -u and -a ("git dupe add" first, then "git dupe stash"); push,
 pull, fetch, remote, or clone naming the project's repository or a remote of it
 ("git dupe git" if meant, "git dupe remote remove" for a private remote). Plain
 git is not guarded: git clean -x deletes private files, git stash -a stashes
 them, git add -f makes them public, a pull or checkout may overwrite them;
-commit first: "git dupe restore ." brings back what was staged. Git's messages
-are unchanged: read "git" as "git dupe". Needs Git 2.43.0 or newer, below 3.0.0.
+commit first: "git dupe restore ." brings back what was staged. Each worktree
+is attached on its own, and git worktree remove takes its private repository
+with it. Needs Git 2.43.0 or newer, below 3.0.0.

@@ -10,8 +10,8 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, locate_words, names, region, region_rules, run_traced, unchanged,
-    under_each_release, usage_line,
+    End, Output, Scenario, Tree, Worktree, locate_words, names, region, region_rules, run_traced,
+    unchanged, under_each_release, usage_line,
 };
 
 /// `git dupe clone <words>` from `dir`.
@@ -178,13 +178,34 @@ fn where_init_is_refused_clone_is_refused_alike_and_creates_nothing() {
             dir
         };
 
-        // A linked worktree, naming the main working tree.
+        // A linked worktree whose Git directory was moved by hand out of `worktrees`, so
+        // that no `git worktree add` made it, naming that directory; a linked worktree
+        // `git worktree add` made beside it attaches from the same URL.
         let main = repository("main");
+        let moved = s.dir().join("moved");
+        s.linked_worktree(&main, &moved);
+        let admin = main.join(".git/elsewhere/moved");
+        fs::create_dir(main.join(".git/elsewhere")).unwrap();
+        fs::rename(main.join(".git/worktrees/moved"), &admin).unwrap();
+        fs::write(
+            moved.join(".git"),
+            [b"gitdir: ", admin.as_os_str().as_bytes(), b"\n"].concat(),
+        )
+        .unwrap();
+        let refused = as_init_ends(s, &moved, &main.join(".git"), url);
+        assert_eq!(refused.end, End::Code(128), "{refused:?}");
+        names(refused.only_line("fatal"), admin.as_os_str().as_bytes());
         let linked = s.dir().join("linked");
         s.linked_worktree(&main, &linked);
-        let refused = as_init_ends(s, &linked, &main.join(".git"), url);
-        assert_eq!(refused.end, End::Code(128), "{refused:?}");
-        names(refused.only_line("fatal"), main.as_os_str().as_bytes());
+        let attached = clone(s, &linked, &[url]);
+        assert_eq!(attached.end, End::Code(0), "{attached:?}");
+        assert!(
+            Worktree::read(s, &linked)
+                .private_directory()
+                .join("HEAD")
+                .is_file()
+        );
+        assert!(!main.join(".git/dupe").exists());
 
         // A submodule checkout.
         let public = repository("public");

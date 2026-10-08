@@ -8,12 +8,12 @@ ignores, run from the root:
     $ git dupe add -f .env.local
     $ git dupe commit -m "Private files"
 
-git dupe init attaches an empty private repository, .git/dupe, on the branch
-the project is on. git dupe add notes/ hides the directory notes from the
-project's Git and stages the files in it. Like git add, git dupe add adds a
-file the project ignores only with -f. The commit is private: git status
-lists none of these files, git log shows no private commit, and the project's
-repository never holds them.
+git dupe init attaches an empty private repository, .git/dupe in this main
+worktree, on the branch the project is on. git dupe add notes/ hides the
+directory notes from the project's Git and stages the files in it. Like git
+add, git dupe add adds a file the project ignores only with -f. The commit is
+private: git status lists none of these files, git log shows no private
+commit, and the project's repository never holds them.
 
 Then make an empty repository of your own for the private history, on a host
 or a disk you trust, with the project's branch as its default branch:

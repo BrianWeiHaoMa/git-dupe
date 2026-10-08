@@ -1,9 +1,12 @@
 usage: git dupe init [-b BRANCH | --initial-branch=BRANCH]
 
-Attaches a private repository to this clone: an empty Git repository at
-.git/dupe, inside the project's own .git directory, whose working tree is
-the project's. Git prints its own line for it. The working tree is recorded
-relative to .git/dupe, so the clone stays attached when it is moved.
+Attaches a private repository to this worktree, each worktree on its own: an
+empty Git repository named dupe in the worktree's own Git directory, at
+.git/dupe in the main worktree and at .git/worktrees/<name>/dupe in a linked
+one, whose working tree is the worktree's. Git prints its own line for it.
+The working tree is recorded relative to the private repository: the main
+worktree stays attached when the project is moved, and after "git worktree
+move" init run in the linked worktree records its new place for plain Git.
 
 The initial branch is BRANCH, else the branch the project's HEAD names,
 else Git's own default. user.name and user.email are copied from the
@@ -15,5 +18,6 @@ Unlike "git init", it takes no directory and no other option, and run
 again it does not reinitialize: it completes whatever an interrupted init
 left undone, changes nothing else, and says so in a hint.
 
-It is refused in a linked worktree, in a submodule checkout, where the
-clone's .git is not a directory, and in a project that tracks .gitdupe.
+It is refused in a submodule checkout, where a main worktree's .git is not
+a directory, in a linked worktree "git worktree add" did not make, and in a
+project that tracks .gitdupe.

@@ -1,19 +1,17 @@
 //! Where a command that needs a workspace stands: outside any repository it ends as Git
-//! does, and in a repository git-dupe is not attached to it is refused naming
-//! `git dupe init`. Nothing here is attached by git-dupe: `.git/dupe` is a fixture.
+//! does, and in a worktree git-dupe is not attached to it is refused naming
+//! `git dupe init`, whatever the other worktrees of the project hold. Nothing here is
+//! attached by git-dupe, `.git/dupe` being a fixture, but the linked worktrees whose own
+//! `init` shows that each worktree is attached on its own.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use crate::harness::{End, Scenario, Tree, holds, locate_words, names, under_each_release};
-
-/// Whether `line` names the main working tree itself, and no path below it.
-fn names_the_main_working_tree(line: &[u8], main: &Path) -> bool {
-    let main = main.as_os_str().as_bytes();
-    holds(line, main) && !holds(line, &[main, b"/"].concat())
-}
+use crate::harness::{
+    End, Scenario, Tree, Worktree, holds, locate_words, names, under_each_release,
+};
 
 /// `git dupe <words>` from `directory` must be the refusal of an unattached repository:
 /// nothing on standard output, one `fatal:` line naming `git dupe init`, exit 128.
@@ -160,13 +158,15 @@ fn a_file_at_the_private_repositorys_path_attaches_nothing() {
 }
 
 #[test]
-fn a_linked_worktree_is_never_attached_and_its_refusal_names_the_main_working_tree() {
+fn a_linked_worktree_is_unattached_until_its_own_init_whatever_the_main_worktree_holds() {
     under_each_release(|s| {
-        // The main working tree unattached, and one that a directory at `.git/dupe`
-        // makes attached: its linked worktree is unattached all the same.
+        // The main worktree unattached, and one that a directory at `.git/dupe` makes
+        // attached: its linked worktrees are unattached all the same, and the refusal
+        // names no path of the main worktree's, one that is not UTF-8 included.
         for (name, attached) in [("plain", false), ("attached", true)] {
-            let main = s.dir().join(name);
-            // Named so that the main working tree's path is no part of the linked one's.
+            let main = s.dir().join(OsStr::from_bytes(
+                [name.as_bytes(), b"-caf\xe9"].concat().as_slice(),
+            ));
             let linked = s.dir().join(format!("linked-of-{name}"));
             s.repository(&main);
             if attached {
@@ -178,21 +178,34 @@ fn a_linked_worktree_is_never_attached_and_its_refusal_names_the_main_working_tr
             for directory in [&linked, &linked.join("sub"), &linked.join("new\nline\n")] {
                 let line = refused_as_unattached(s, directory, &[OsStr::new("status")]);
                 assert!(
-                    names_the_main_working_tree(&line, &main),
+                    !holds(&line, main.as_os_str().as_bytes()),
                     "{name}: {}",
                     line.escape_ascii()
                 );
             }
         }
+
+        // A linked worktree attached by its own `init` while the main worktree is not:
+        // each is attached or not on its own (G4).
+        let main = s.dir().join("main");
+        let linked = s.dir().join("linked");
+        s.repository(&main);
+        s.linked_worktree(&main, &linked);
+        s.init(&linked);
+        let own = Worktree::read(s, &linked);
+        assert!(own.private_directory().join("HEAD").is_file());
+        assert!(!main.join(".git/dupe").exists());
+        s.git(["dupe", "status"]).from(&linked).succeeds();
+        refused_as_unattached(s, &main, &[OsStr::new("status")]);
     });
 }
 
 #[test]
-fn a_linked_worktree_whose_main_git_directory_lies_elsewhere_is_refused_naming_no_path() {
+fn a_linked_worktree_of_a_repository_whose_git_directory_lies_elsewhere_is_a_worktree() {
     under_each_release(|s| {
-        // The main working tree's `.git` entry is a file naming `admin`: the common Git
-        // directory's parent is no working tree, and Git's own `worktree list` names
-        // `admin` itself. Where Git does not know the main working tree, none is named.
+        // The main working tree's `.git` entry is a file naming `admin`: the main worktree
+        // is not one git-dupe attaches (G4), but its linked worktree is a worktree like
+        // any other, refused naming `git dupe init` and no path until its own `init`.
         let main = s.dir().join("main");
         let linked = s.dir().join("linked");
         let mut separate = OsString::from("--separate-git-dir=");
@@ -211,23 +224,13 @@ fn a_linked_worktree_whose_main_git_directory_lies_elsewhere_is_refused_naming_n
             let line = refused_as_unattached(s, directory, &[OsStr::new("status")]);
             assert!(!line.contains(&b'/'), "{}", line.escape_ascii());
         }
-    });
-}
-
-#[test]
-fn a_path_that_is_not_utf8_is_named_byte_for_byte() {
-    under_each_release(|s| {
-        let main = s.dir().join(OsStr::from_bytes(b"caf\xe9/main"));
-        let linked = s.dir().join(OsStr::from_bytes(b"caf\xe9/linked"));
-        s.repository(&main);
-        s.linked_worktree(&main, &linked);
-
+        s.init(&linked);
+        let own = Worktree::read(s, &linked);
+        assert_eq!(own.common_directory, s.dir().join("admin"));
+        assert!(own.private_directory().join("HEAD").is_file());
+        s.git(["dupe", "status"])
+            .from(&linked.join("sub"))
+            .succeeds();
         refused_as_unattached(s, &main, &[OsStr::new("status")]);
-        let line = refused_as_unattached(s, &linked, &[OsStr::new("status")]);
-        assert!(
-            names_the_main_working_tree(&line, &main),
-            "{}",
-            line.escape_ascii()
-        );
     });
 }

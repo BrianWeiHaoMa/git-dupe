@@ -37,33 +37,44 @@ impl Scenario {
         assert_eq!(init.end, End::Code(0), "git dupe init: {init:?}");
     }
 
-    /// Git against the private repository of the workspace at `directory`, run from
-    /// there: for building fixtures (`add -f`, `commit`) and reading the private index in
-    /// assertions. git-dupe itself is reached only as `git dupe …`.
+    /// Git against the private repository of the main worktree at `directory`,
+    /// `.git/dupe`, run from there: for building fixtures (`add -f`, `commit`) and
+    /// reading the private index in assertions. git-dupe itself is reached only as
+    /// `git dupe …`. A linked worktree's is reached through `private_at`.
     pub fn private(&self, directory: &Path) -> Private<'_> {
+        self.private_at(directory, &directory.join(".git/dupe"))
+    }
+
+    /// Git against the private repository whose Git directory is `private_directory`
+    /// itself, with the working tree `root`, run from `root`: the repository of any
+    /// worktree, a linked one's `<Git directory>/dupe` as `Worktree::private_directory`
+    /// names it.
+    pub fn private_at(&self, root: &Path, private_directory: &Path) -> Private<'_> {
         Private {
             scenario: self,
-            directory: directory.to_path_buf(),
+            root: root.to_path_buf(),
+            git_directory: private_directory.to_path_buf(),
         }
     }
 }
 
 pub struct Private<'s> {
     scenario: &'s Scenario,
-    directory: PathBuf,
+    root: PathBuf,
+    git_directory: PathBuf,
 }
 
 impl<'s> Private<'s> {
-    /// `git --git-dir=<directory>/.git/dupe --work-tree=<directory> <words>`.
+    /// `git --git-dir=<private Git directory> --work-tree=<root> <words>`, from the root.
     pub fn git<W: AsRef<OsStr>>(&self, words: impl IntoIterator<Item = W>) -> Git<'s> {
         let mut git_dir = OsString::from("--git-dir=");
-        git_dir.push(self.directory.join(".git/dupe"));
+        git_dir.push(&self.git_directory);
         let mut work_tree = OsString::from("--work-tree=");
-        work_tree.push(&self.directory);
+        work_tree.push(&self.root);
         let words = words.into_iter().map(|word| word.as_ref().to_owned());
         self.scenario
             .git([git_dir, work_tree].into_iter().chain(words))
-            .from(&self.directory)
+            .from(&self.root)
     }
 }
 

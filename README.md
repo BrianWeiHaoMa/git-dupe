@@ -53,9 +53,11 @@ a host or a disk you trust, with the project's branch as its default branch, whi
 repository, or of any of its remotes, is refused. From then on, `git dupe pull` and
 `git dupe push` move private work between machines.
 
-Everything private lives in `.git/dupe`. Delete the clone, and unpushed private history
-goes with it, so push first. `git dupe detach` is the way out: it leaves every file on
-disk, and refuses, without `--force`, while private work is uncommitted or on no remote.
+Everything private lives in `.git/dupe`, or, in a linked worktree, in that worktree's own
+Git directory under `.git/worktrees/`. Delete the clone, or remove the worktree, and
+unpushed private history goes with it, so push first. `git dupe detach` is the way out:
+it leaves every file on disk, and refuses, without `--force`, while private work is
+uncommitted or on no remote.
 
 ## Install
 
@@ -113,9 +115,10 @@ files, or `cargo uninstall git-dupe` after an install from source.
 
 ## How it works
 
-- The **private repository** is an ordinary Git repository at `.git/dupe`, inside the
-  project's own `.git`, whose working tree is the project's. Plain Git can read it, and
-  clone, fetch, or push from it. It has its own object store, which the project's Git
+- The **private repository** is an ordinary Git repository inside the project's own
+  `.git`, one per worktree: `.git/dupe` in the main worktree, and
+  `.git/worktrees/<name>/dupe` in a linked one, whose working tree is that worktree's.
+  Plain Git can read it, and clone, fetch, or push from it. It has its own object store, which the project's Git
   never opens, so the project's `git gc` and `git prune` leave it alone; and every Git
   process git-dupe runs has the object-directory variables cleared, so a hook or alias
   of the project cannot redirect private objects into the project's store. Being inside
@@ -133,8 +136,9 @@ files, or `cargo uninstall git-dupe` after an install from source.
   `fetch`, `remote`, or `clone` naming the project's repository or any of its remotes.
   Every other Git command, `commit`, `diff`, `log`, `restore`, `switch`, `merge`, runs
   against the private repository unchanged.
-- **What it writes.** Of its own accord, git-dupe writes `.git/dupe`, a marked region of
-  `.git/info/exclude` (and `.git/info` when it is missing), and `.gitdupe`;
+- **What it writes.** Of its own accord, git-dupe writes the worktree's private
+  repository, its own marked region of `.git/info/exclude` (and `.git/info` when it is
+  missing), and `.gitdupe`;
   `git dupe clone` also writes the private files it checks out, and `git dupe clean`
   deletes what your `git clean` would, hidden paths excepted. Beyond that, a Git command
   writes where your words tell Git to. No hook, no daemon, no edit to `.gitignore` or to
@@ -161,15 +165,16 @@ files, or `cargo uninstall git-dupe` after an install from source.
   file as last staged, and `git dupe clean` cleans the project while sparing them. Public
   `git stash -u`, `git add -A`, and `git add .` leave them alone, as they leave any
   ignored file.
-- **One command at a time.** git-dupe commands must not overlap each other or a public
-  Git command that writes to the working tree, and one person or agent works in a clone
-  at a time; nothing is promised when they do.
-- **The main working tree only.** `git dupe` in a linked worktree is refused and names
-  the main one. The exclude rules apply in every worktree, since `.git/info/exclude` is
-  shared, but private versioning exists in the main one only. Whether linked worktrees
-  should share one private repository or each get their own is undecided; if you need
-  them, say how you would want them to behave in
-  [issue #2](https://github.com/BrianWeiHaoMa/git-dupe/issues/2).
+- **One command at a time in a worktree.** git-dupe commands in one worktree must not
+  overlap each other or a public Git command that writes to that worktree, and one
+  person or agent works in a worktree at a time; nothing is promised when they do.
+  Commands in different worktrees may run at the same time.
+- **Each worktree on its own.** A linked worktree is attached by its own `git dupe init`
+  or `git dupe clone`, and has its own private repository, hidden paths, and history.
+  Its exclude rules apply in every worktree, since `.git/info/exclude` is shared: a path
+  one worktree hides is ignored by the project's Git in the others too.
+  `git worktree remove` and `git worktree prune` delete a linked worktree's private
+  repository with it, whatever private files stand on disk, so push first.
 - **Up to 1,000 hidden paths, a few thousand private files.** That is the envelope the
   suite covers. The hidden paths not below another one are passed to Git on one command
   line; a list that does not fit is refused, naming the count, never truncated. Files
@@ -206,6 +211,13 @@ files, or `cargo uninstall git-dupe` after an install from source.
 - **Two people on the same project?** Each clone has its own `.git/dupe`, its own
   `.gitdupe`, and its own private remote, one person per clone. Nothing shows in the
   project for anyone else.
+- **Agents working several branches at once, in linked worktrees?** Each worktree is a
+  workspace of its own. In one that `git worktree add` made, run
+  `git dupe clone "$(git rev-parse --git-common-dir)/dupe"` to attach it from the main
+  worktree's private repository, or `git dupe clone <private-url>`; private work then
+  moves between worktrees as between machines, `git dupe push origin HEAD:agent` there
+  and `git dupe merge agent` in the main worktree. After `git worktree move`, run
+  `git dupe init` in the new place so that plain Git finds it again.
 - **My agent runs `git add -A` all day.** Anything that finds files through the ignore
   rules, `add -A`, `add .`, `commit -a`, `status`, never picks up a hidden path. What
   writes the index from an explicit tree or patch can: `add -f`, or a merge, rebase, or
@@ -219,8 +231,8 @@ files, or `cargo uninstall git-dupe` after an install from source.
 - **What if the project later adds a file at my path?** A public pull or checkout
   overwrites yours. Commit private work first; `git dupe restore` brings it back; then
   one repository has to give the path up.
-- **How do I get out?** `git dupe detach` removes `.git/dupe` and its own region of
-  `.git/info/exclude`, leaving the rest of that file, leaves every file on disk,
+- **How do I get out?** `git dupe detach` removes the worktree's private repository and
+  its own region of `.git/info/exclude`, leaving the rest of that file, leaves every file on disk,
   `.gitdupe` included, and warns which paths the project can now see. Without `--force`
   it refuses while anything is uncommitted or on no remote; history removed by
   `detach --force` is gone, since git-dupe keeps no copy. Then delete

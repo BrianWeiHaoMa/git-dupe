@@ -19,13 +19,15 @@
 //! which is outside the root or at the root itself, where reading a destination from it
 //! is reading it from the root again. Where the locate failed after naming a Git
 //! directory, there is no root: the common Git directory's parent stands for it, which
-//! is the root wherever a workspace is attached (`Holds/G1`), and the user's directory,
-//! inside a Git directory, is always read too. The facts also hold the value of `HOME`
+//! is the main worktree's root wherever that worktree's `.git` is the common Git
+//! directory (`Holds/G1`), and the user's directory, inside a Git directory, is always
+//! read too. The facts also hold the value of `HOME`
 //! git-dupe received, which every run passes through and from which Git reads a local
 //! destination's leading `~` (S13).
 
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
@@ -147,11 +149,11 @@ impl Workspace {
     }
 
     /// Whether the workspace is attached as things stand now, asked again after a
-    /// handler that can attach it: the private Git directory is a directory while the
-    /// Git directory is the common one. Its existence alone would make a linked worktree
-    /// of an attached workspace attached.
+    /// handler that can attach it: this worktree's private Git directory is a directory
+    /// by `lstat`, whatever the other worktrees hold (G4). A symbolic link there is not
+    /// one, wherever it leads.
     pub fn attached_now(&self) -> bool {
-        !self.linked() && self.private_directory().is_dir()
+        fs::symlink_metadata(self.private_directory()).is_ok_and(|found| found.is_dir())
     }
 
     /// The root: the working tree's top directory, absolute.
@@ -165,24 +167,19 @@ impl Workspace {
         &self.prefix
     }
 
-    /// The common Git directory, absolute: the public repository's `.git`, which holds
-    /// `info/exclude` and the private repository.
+    /// The common Git directory, absolute: the public repository's `.git`, or a bare
+    /// repository's own directory, which holds `info/exclude` for every worktree.
     pub fn common_directory(&self) -> &Path {
         &self.common_directory
     }
 
-    /// Where the private repository lives: `dupe` in the common Git directory.
+    /// Where this worktree's private repository lives: `dupe` in its Git directory,
+    /// `.git/dupe` in the main worktree and `.git/worktrees/<name>/dupe` in a linked one
+    /// (F2). Every private run and every write of the private repository's is made here,
+    /// and where it is no directory the worktree is unattached, so that a run made there
+    /// before an `init` names a path nothing has created yet (`Holds/G24`).
     pub fn private_directory(&self) -> PathBuf {
-        private_directory(&self.common_directory)
-    }
-
-    /// Where a help request is run where no workspace is attached: `dupe` in the Git
-    /// directory. Outside a linked worktree that is the private repository's path; in
-    /// one it is a path nothing creates, so that private history is reached from the
-    /// main working tree only and a word Git reads as a value fails as outside a
-    /// repository (`Holds/G24`).
-    pub fn help_directory(&self) -> PathBuf {
-        private_directory(self.git_directory())
+        private_directory(&self.git_directory)
     }
 
     /// The Git directory, absolute, as the locate run printed it: the common Git
@@ -229,17 +226,6 @@ impl Workspace {
     pub fn linked(&self) -> bool {
         self.git_directory != self.common_directory
     }
-
-    /// In a linked worktree, the main working tree where Git's `worktree list` names it:
-    /// the common Git directory's parent, when that directory is named `.git`. Elsewhere,
-    /// as for a Git directory made with `--separate-git-dir` or a submodule's, that parent
-    /// is no working tree, and Git itself does not know the main one.
-    pub fn main_working_tree_of_linked(&self) -> Option<&Path> {
-        if !self.linked() || self.common_directory.file_name() != Some(OsStr::new(".git")) {
-            return None;
-        }
-        self.common_directory.parent()
-    }
 }
 
 #[cfg(test)]
@@ -272,8 +258,9 @@ impl Workspace {
     }
 }
 
-fn private_directory(common_directory: &Path) -> PathBuf {
-    common_directory.join("dupe")
+/// `dupe` in a Git directory: the private repository of the worktree it belongs to.
+fn private_directory(git_directory: &Path) -> PathBuf {
+    git_directory.join("dupe")
 }
 
 /// Where a destination is compared from (`Holds/G18`), all absolute: the root a relative
@@ -316,9 +303,9 @@ pub enum Unlocated {
     /// The locate printed the Git directory and the common Git directory: a bare
     /// repository, or a directory inside a Git directory. Such a run is private, its Git
     /// directory `dupe` in that Git directory, with no working tree, so that it never
-    /// selects the repository found there, whose own aliases could write (G5). Where the
-    /// two differ, inside a linked worktree's Git directory, that path never exists, so
-    /// that the main working tree's private history is not reached from there either
+    /// selects the repository found there, whose own aliases could write (G5). Inside a
+    /// linked worktree's Git directory that is the linked worktree's own private
+    /// repository, or a path nothing has created, and never the main worktree's
     /// (`Holds/G24`). The common Git directory is kept as printed, for the facts.
     InGitDirectory {
         git_directory: PathBuf,
@@ -399,8 +386,6 @@ mod tests {
             Path::new("/w/repo/.git/dupe")
         );
         assert_eq!(workspace.prefix(), b"");
-        assert_eq!(workspace.main_working_tree_of_linked(), None);
-        assert_eq!(workspace.help_directory(), workspace.private_directory());
         assert!(!workspace.linked());
         assert!(!workspace.attached());
     }
@@ -411,41 +396,31 @@ mod tests {
         assert_eq!(workspace.git_directory, Path::new("/w/repo/.git"));
         assert_eq!(workspace.root(), Path::new("/w/repo"));
         assert_eq!(workspace.prefix(), b"sub/dir/");
-        assert_eq!(workspace.main_working_tree_of_linked(), None);
     }
 
     #[test]
-    fn in_a_linked_worktree_the_main_working_tree_is_the_common_directorys_parent() {
-        let workspace = read(b"/w/repo/.git/worktrees/linked\n/w/repo/.git\n/w/linked\nsub/\n");
-        assert_eq!(
-            workspace.git_directory,
-            Path::new("/w/repo/.git/worktrees/linked")
-        );
-        assert_eq!(workspace.common_directory, Path::new("/w/repo/.git"));
-        assert!(workspace.linked());
-        assert_eq!(
-            workspace.main_working_tree_of_linked(),
-            Some(Path::new("/w/repo"))
-        );
-        // A help request there never reaches the main working tree's private repository.
-        assert_eq!(
-            workspace.help_directory(),
-            Path::new("/w/repo/.git/worktrees/linked/dupe")
-        );
-    }
-
-    #[test]
-    fn where_the_common_directory_is_not_named_dot_git_no_main_working_tree_is_known() {
-        // A repository made with `--separate-git-dir`, and a submodule's.
-        for answer in [
-            &b"/w/s/admin/worktrees/linked\n/w/s/admin\n/w/s/linked\n\n"[..],
-            b"/w/super/.git/modules/sub/worktrees/l\n/w/super/.git/modules/sub\n/w/l\n\n",
+    fn a_linked_worktrees_private_repository_is_in_its_own_git_directory() {
+        // An ordinary repository's, a bare one's, and one made with `--separate-git-dir`:
+        // never the main worktree's, whatever the common Git directory is called.
+        for (answer, private) in [
+            (
+                &b"/w/repo/.git/worktrees/linked\n/w/repo/.git\n/w/linked\nsub/\n"[..],
+                "/w/repo/.git/worktrees/linked/dupe",
+            ),
+            (
+                b"/w/bare.git/worktrees/one\n/w/bare.git\n/w/one\n\n",
+                "/w/bare.git/worktrees/one/dupe",
+            ),
+            (
+                b"/w/s/admin/worktrees/linked\n/w/s/admin\n/w/s/linked\n\n",
+                "/w/s/admin/worktrees/linked/dupe",
+            ),
         ] {
             let workspace = read(answer);
             assert!(workspace.linked(), "{}", answer.escape_ascii());
             assert_eq!(
-                workspace.main_working_tree_of_linked(),
-                None,
+                workspace.private_directory(),
+                Path::new(private),
                 "{}",
                 answer.escape_ascii()
             );
@@ -491,20 +466,41 @@ mod tests {
                 "{}",
                 answer.escape_ascii()
             );
-            // Nothing else moves with the name: the private repository is still the
-            // common Git directory's, and a linked worktree is still not attached.
+            // The private repository is the Git directory's, which is named the same.
             assert_eq!(
                 workspace.private_directory(),
-                private_directory(workspace.common_directory())
+                Path::new(OsStr::from_bytes(git_directory)).join("dupe")
             );
             assert!(workspace.linked());
-            assert!(!workspace.attached());
-            assert!(!workspace.attached_now());
         }
     }
 
     #[test]
-    fn the_private_directory_is_dupe_in_the_common_directory() {
+    fn attached_is_this_worktrees_private_directory_being_a_directory_by_lstat() {
+        let scratch = env::temp_dir().join(format!("git-dupe-locate-{}", std::process::id()));
+        let common = scratch.join("repo/.git");
+        let linked = Workspace::linked_at(&common, b"one", &scratch.join("one"));
+        let main = Workspace::at_root(&scratch.join("repo"));
+        fs::create_dir_all(common.join("worktrees/one")).unwrap();
+        // The main worktree attached leaves the linked one unattached.
+        fs::create_dir(common.join("dupe")).unwrap();
+        assert!(main.attached_now());
+        assert!(!linked.attached_now());
+        // A symbolic link at the linked worktree's own path is not its private repository,
+        // even where it leads to one.
+        std::os::unix::fs::symlink(common.join("dupe"), linked.private_directory()).unwrap();
+        assert!(!linked.attached_now());
+        fs::remove_file(linked.private_directory()).unwrap();
+        fs::create_dir(linked.private_directory()).unwrap();
+        assert!(linked.attached_now());
+        fs::remove_dir(common.join("dupe")).unwrap();
+        assert!(!main.attached_now());
+        assert!(linked.attached_now());
+        fs::remove_dir_all(&scratch).unwrap();
+    }
+
+    #[test]
+    fn the_private_directory_is_dupe_in_the_git_directory() {
         assert_eq!(
             private_directory(Path::new("/w/repo/.git")),
             Path::new("/w/repo/.git/dupe")
@@ -515,8 +511,8 @@ mod tests {
     fn paths_are_bytes() {
         let workspace = read(b"/w/caf\xe9/.git/worktrees/x\n/w/caf\xe9/.git\n/w/x\xff\n\n");
         assert_eq!(
-            workspace.main_working_tree_of_linked(),
-            Some(Path::new(OsStr::from_bytes(b"/w/caf\xe9")))
+            workspace.private_directory(),
+            Path::new(OsStr::from_bytes(b"/w/caf\xe9/.git/worktrees/x/dupe"))
         );
         assert_eq!(workspace.root(), Path::new(OsStr::from_bytes(b"/w/x\xff")));
     }
@@ -528,10 +524,8 @@ mod tests {
         assert_eq!(workspace.git_directory, Path::new("/w/repo/.git"));
         assert_eq!(workspace.common_directory, Path::new("/w/repo/.git"));
         let workspace = read(b"/w/repo/.git/worktrees/l\n/w/repo/.git\n/w/l\nnew\nline\n/\n");
-        assert_eq!(
-            workspace.main_working_tree_of_linked(),
-            Some(Path::new("/w/repo"))
-        );
+        assert_eq!(workspace.prefix(), b"new\nline\n/");
+        assert_eq!(workspace.root(), Path::new("/w/l"));
     }
 
     #[test]
@@ -566,7 +560,7 @@ mod tests {
         assert!(Unlocated::Outside.facts().is_none());
         // Inside a workspace's `.git` the two answers are the same directory; in a linked
         // worktree's Git directory the common one is the main repository's, whose private
-        // repository is never the one used there.
+        // repository is never the one used there: the linked worktree's own is.
         for (printed, private) in [
             (
                 &b"/w/repo/.git\n/w/repo/.git\n"[..],

@@ -1,9 +1,10 @@
 usage: git dupe clone URL [-b BRANCH]
 
-Attaches a private repository to this clone of the project from an existing
-one at URL, as on a second machine: it makes .git/dupe as "git dupe init"
-does, adds URL as the remote origin, fetches it, and checks out BRANCH, else
-the remote's default branch, as a local branch tracking origin.
+Attaches a private repository to this worktree from an existing one at URL,
+as on a second machine: it makes the worktree's own as "git dupe init" does,
+adds URL as the remote origin, fetches it, and checks out BRANCH, else the
+remote's default branch, as a local branch tracking origin. In a linked
+worktree, URL may be "$(git rev-parse --git-common-dir)/dupe", the main one's.
 
 It writes every private file missing from the working tree, .gitdupe among
 them, so that the hidden paths are hidden here too. A file or directory

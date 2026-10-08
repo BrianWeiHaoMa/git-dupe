@@ -24,6 +24,7 @@ mod stash;
 mod sweep;
 mod trace;
 mod tree;
+mod worktrees;
 
 pub use attached::{
     Region, daily_edited, daily_state, gitdupe_written_and_staged, private_add, private_commit,
@@ -59,3 +60,4 @@ pub use stash::{refused_stash_untracked, stash_refusal_first, stash_untracked_li
 pub use sweep::{GITDUPE, Killed, Sweep, Version, copied, files, lived_in, outside};
 pub use trace::{Runs, run_traced};
 pub use tree::{Tree, changed_since, unchanged};
+pub use worktrees::Worktree;

@@ -274,7 +274,7 @@ fn general_help_names_hidden_paths_stash_alternatives_and_recovery() {
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
         for phrase in [
             // Every Git command, as git-dupe runs it.
-            r#"every Git command runs on it as "git dupe <command>"."#,
+            r#"every Git command runs on their repository as "git dupe <command>"."#,
             // What a hidden path is, and the three ways to make one.
             r#"The project's Git ignores a hidden path: .gitdupe, a path it lists ("git dupe hide" or by hand), or a file "git dupe add <path>" tracks."#,
             // The refused forms of stash, and what to run instead.
@@ -286,8 +286,8 @@ fn general_help_names_hidden_paths_stash_alternatives_and_recovery() {
             "git add -f makes them public,",
             "a pull or checkout may overwrite them; commit first:",
             r#""git dupe restore ." brings back what was staged."#,
-            // What Git's own messages are under git-dupe.
-            r#"Git's messages are unchanged: read "git" as "git dupe"."#,
+            // Each worktree on its own, and what removing a linked one takes with it.
+            "Each worktree is attached on its own, and git worktree remove takes its private repository with it.",
             // The unguarded route.
             "git dupe git WORDS Git with WORDS as typed, guarded by nothing",
         ] {
@@ -315,15 +315,17 @@ fn general_help_names_every_command_and_the_transfer_refusals() {
                 String::from_utf8_lossy(&general)
             );
         }
-        // The command list holds a row for each of the ten commands and stands apart, an
-        // empty line before it and after it.
+        // The command list holds a row for each of the ten commands, one after another, an
+        // empty line before it; the paragraph after it begins at its own margin, the empty
+        // line there having given way to what the screen must state.
         let lines: Vec<&[u8]> = general.split(|byte| *byte == b'\n').collect();
         let rows: Vec<usize> = (0..lines.len())
             .filter(|&at| lines[at].starts_with(b"  git dupe "))
             .collect();
         let (first, last) = (rows[0], rows[rows.len() - 1]);
         assert_eq!(rows, (first..=last).collect::<Vec<_>>());
-        assert!(lines[first - 1].is_empty() && lines[last + 1].is_empty());
+        assert!(lines[first - 1].is_empty());
+        assert!(lines[last + 1].starts_with(b"Refused: "));
         for word in [
             "init", "clone", "detach", "hide", "unhide", "status", "add", "clean", "git", "help",
         ] {
@@ -366,7 +368,8 @@ fn each_commands_text_says_what_it_does_and_how_it_differs_from_git() {
         (
             "init",
             &[
-                "an empty Git repository at .git/dupe",
+                "an empty Git repository named dupe in the worktree's own Git directory, at .git/dupe in the main worktree and at .git/worktrees/<name>/dupe in a linked one",
+                r#"after "git worktree move" init run in the linked worktree records its new place for plain Git"#,
                 r#"Unlike "git init", it takes no directory and no other option, and run again it does not reinitialize"#,
             ],
         ),
@@ -380,7 +383,8 @@ fn each_commands_text_says_what_it_does_and_how_it_differs_from_git() {
         (
             "detach",
             &[
-                "Removes the private repository, .git/dupe, and the managed region",
+                "Removes this worktree's private repository, and its region of .git/info/exclude",
+                "the other worktrees' regions included, stays as it is",
                 "Every file stays on disk",
                 "There is no Git command of this name.",
             ],
@@ -411,7 +415,7 @@ fn each_commands_text_says_what_it_does_and_how_it_differs_from_git() {
             "help",
             &[
                 r#"with any other COMMAND, it runs "git help COMMAND""#,
-                "The manual page of git-dupe, where it is installed, holds these texts and more: a quick start, examples of daily use, and what one screen has no room for, such as hidden and private paths, a file the project ignores, what plain git does to private files, and the refused commands in full.",
+                "The manual page of git-dupe, where it is installed, holds these texts and more: a quick start, examples of daily use, and what one screen has no room for, such as hidden and private paths, worktrees, a file the project ignores, what plain git does to private files, and the refused commands in full.",
                 r#""man git-dupe" shows it, and so does "git dupe --help" while Git's help format is man, its default."#,
             ],
         ),

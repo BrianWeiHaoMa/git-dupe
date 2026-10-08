@@ -133,6 +133,20 @@ fn linked_worktree_help_runs_where_no_repository_exists() {
             unchanged(&before, &private);
             assert!(!git_directory.join("dupe").exists());
         }
+
+        // Attached on its own, the linked worktree's help runs against its own private
+        // repository, and settles it; the main worktree's history is never reached.
+        s.init(&linked);
+        let linked_private = s.private_at(&linked, &git_directory.join("dupe"));
+        let gits = linked_private
+            .git(["-c", "help.autocorrect=0", "log", "-h"])
+            .run();
+        let ours = s.git(["dupe", "log", "-h"]).from(&linked).run();
+        assert_eq!(ours.end, gits.end, "{ours:?}, Git: {gits:?}");
+        assert_eq!(ours.stdout, gits.stdout);
+        assert_eq!(ours.stderr, gits.stderr);
+        unchanged(&before, &private);
+        assert!(git_directory.join("dupe/HEAD").is_file());
     });
 }
 

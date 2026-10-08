@@ -184,27 +184,17 @@ fn sequence(words: &[OsString]) -> Outcome {
         root: workspace.root(),
     };
 
-    // (5) Every command but the ones that attach requires an attached workspace, but for a
-    // help request after a word passed through, after `stash`, or after a transfer
-    // command, which Git answers alone, after the command's guard, against a Git directory
-    // that does not exist and that nothing creates, so that it never selects the public
-    // repository nor, from a linked worktree, the private one. A linked worktree's refusal
-    // names the main working tree only where Git knows it.
+    // (5) Every command but the ones that attach requires this worktree to be attached,
+    // whatever the other worktrees hold, but for a help request after a word passed
+    // through, after `stash`, or after a transfer command, which Git answers alone, after
+    // the command's guard, against this worktree's private Git directory, which no `init`
+    // has made, so that it never selects the public repository nor another worktree's
+    // private one.
     if !workspace.attached() && !attaching {
         if let Some(passed) = help_request(&read) {
-            let nowhere = workspace.help_directory();
-            let against = Against::Private {
-                git_directory: &nowhere,
-                root: workspace.root(),
-            };
             return passed.run(against, || Some(workspace.facts()));
         }
-        if !workspace.linked() {
-            return outcome::refuse(
-                b"no private repository is attached to this project; run 'git dupe init' first",
-            );
-        }
-        return outcome::refuse_in_linked_worktree(&workspace);
+        return outcome::refuse_unattached();
     }
 
     // A misuse held from (2) or (4), then an operand that names the root or a path outside
