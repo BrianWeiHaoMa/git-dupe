@@ -18,10 +18,18 @@
 //! `.git/info` through which no such region is read. An exclude file that cannot be read
 //! holds no region for `start`; the deletion refuses it instead, because `detach` succeeds
 //! only once no region stands.
+//!
+//! All of `update` happens under the lock every worktree's command shares (`Holds/G28`):
+//! an exclusive `flock` on a descriptor of the common Git directory, opened read-only,
+//! taken before anything is looked at, waited for while another command holds it, and let
+//! go when `update` returns, whichever way it returns, so that no Git run, settle's
+//! exposure question or `detach`'s removal of the private repository, starts while it is
+//! held (R10). A lock that cannot be taken is no wait: nothing is looked at, and the
+//! caller says why.
 
 mod sections;
 
-use std::fs;
+use std::fs::{self, File};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
@@ -75,11 +83,26 @@ fn exclude_file(workspace: &Workspace) -> PathBuf {
 }
 
 /// Replaces the region with one rule per path, in the order given, and returns the
-/// warnings: that the region cannot be maintained where a symbolic link stands, that a
-/// write failed and why, or that a link at the exclude file became a regular file.
+/// warnings: that the region cannot be maintained where a symbolic link stands, that the
+/// lock could not be taken or a write failed and why, or that a link at the exclude file
+/// became a regular file.
 pub fn replace(workspace: &Workspace, paths: &[Vec<u8>]) -> Vec<Vec<u8>> {
-    match update(workspace, Change::Set(paths), |info| fs::create_dir(info)) {
+    let updated = update(
+        workspace,
+        Change::Set(paths),
+        |info| fs::create_dir(info),
+        &FILE_LOCK,
+    );
+    replaced(workspace, updated)
+}
+
+/// The warnings of a replacement that `update` did or did not make.
+fn replaced(workspace: &Workspace, updated: Result<Updated, NotUpdated>) -> Vec<Vec<u8>> {
+    match updated {
         Ok(updated) => updated.warning.into_iter().collect(),
+        Err(NotUpdated::NotLocked(cause)) => {
+            vec![not_locked(workspace.common_directory(), &cause.to_string())]
+        }
         Err(NotUpdated::InfoLink) => {
             vec![unmaintainable(
                 &info_directory(workspace),
@@ -111,14 +134,38 @@ pub enum NotDeleted {
     /// The exclude file could not be looked at or read, or the fresh file could not be
     /// written or renamed over it.
     Failed { file: PathBuf, cause: io::Error },
+    /// The lock on the common Git directory, at this path, could not be taken: nothing
+    /// was looked at.
+    NotLocked {
+        directory: PathBuf,
+        cause: io::Error,
+    },
 }
 
 /// Deletes the region with its markers, every other byte kept as it stands, by the same
 /// update as `replace`. Where the region does not stand, nothing is written, created, or
 /// warned about.
 pub fn delete(workspace: &Workspace) -> Result<Deleted, NotDeleted> {
-    match update(workspace, Change::Remove, |info| fs::create_dir(info)) {
+    let updated = update(
+        workspace,
+        Change::Remove,
+        |info| fs::create_dir(info),
+        &FILE_LOCK,
+    );
+    deleted(workspace, updated)
+}
+
+/// What a deletion that `update` did or did not make did.
+fn deleted(
+    workspace: &Workspace,
+    updated: Result<Updated, NotUpdated>,
+) -> Result<Deleted, NotDeleted> {
+    match updated {
         Ok(Updated { paths, warning }) => Ok(Deleted { paths, warning }),
+        Err(NotUpdated::NotLocked(cause)) => Err(NotDeleted::NotLocked {
+            directory: workspace.common_directory().to_path_buf(),
+            cause,
+        }),
         Err(NotUpdated::InfoLink) => Err(NotDeleted::BeyondALink(info_directory(workspace))),
         // Nothing is read through a link to nothing: no region stands there.
         Err(NotUpdated::DanglingLink) => Ok(Deleted::default()),
@@ -148,6 +195,8 @@ struct Updated {
 
 /// Why `update` left the file as it stands.
 enum NotUpdated {
+    /// The common Git directory could not be opened, or its lock taken.
+    NotLocked(io::Error),
     /// `.git/info` is a symbolic link by `lstat`: for the deletion, one through which the
     /// file holds the region.
     InfoLink,
@@ -161,14 +210,58 @@ enum NotUpdated {
 /// make it first.
 type MakeInfo = fn(&Path) -> io::Result<()>;
 
-/// The one site that reads `.git/info/exclude` to write it: looks, reads, composes the
-/// change, and writes a fresh file renamed over it, or writes nothing where the change
-/// leaves the file as it is.
+/// How `update` takes the lock on the common Git directory and lets it go: `FILE_LOCK`,
+/// except in a unit check that makes taking it fail or looks on while it is held.
+struct Locking<'l> {
+    take: &'l dyn Fn(&File) -> io::Result<()>,
+    release: &'l dyn Fn(&File) -> io::Result<()>,
+}
+
+/// `flock(LOCK_EX)`, which waits while another descriptor holds the lock, and
+/// `flock(LOCK_UN)` (S16).
+const FILE_LOCK: Locking<'static> = Locking {
+    take: &File::lock,
+    release: &File::unlock,
+};
+
+/// The lock on the common Git directory, held while this lives: taken on the one
+/// descriptor `take` opens, read-only, and let go when it is dropped.
+struct Held<'l> {
+    directory: File,
+    release: &'l dyn Fn(&File) -> io::Result<()>,
+}
+
+impl<'l> Held<'l> {
+    fn take(common_directory: &Path, locking: &Locking<'l>) -> io::Result<Held<'l>> {
+        let directory = File::open(common_directory)?;
+        (locking.take)(&directory)?;
+        Ok(Held {
+            directory,
+            release: locking.release,
+        })
+    }
+}
+
+impl Drop for Held<'_> {
+    /// A release that fails is not reported: the descriptor is closed right after, the
+    /// only one of its open file description, since it is never duplicated and no child
+    /// inherits it, and closing it lets the lock go all the same (S16). Whatever the
+    /// update wrote stands.
+    fn drop(&mut self) {
+        let _ = (self.release)(&self.directory);
+    }
+}
+
+/// The one site that reads `.git/info/exclude` to write it: takes the lock, looks, reads,
+/// composes the change, and writes a fresh file renamed over it, or writes nothing where
+/// the change leaves the file as it is, and lets the lock go on every return.
 fn update(
     workspace: &Workspace,
     change: Change,
     make_info: MakeInfo,
+    locking: &Locking,
 ) -> Result<Updated, NotUpdated> {
+    let _held = Held::take(workspace.common_directory(), locking).map_err(NotUpdated::NotLocked)?;
     let info = info_directory(workspace);
     let exclude = exclude_file(workspace);
     let own = own(workspace);
@@ -323,6 +416,17 @@ fn unmaintainable(path: &Path, what: &[u8]) -> Vec<u8> {
         path.as_os_str().as_bytes(),
         b" ",
         what,
+        b"; private files may be visible to public Git",
+    ]
+    .concat()
+}
+
+fn not_locked(directory: &Path, cause: &str) -> Vec<u8> {
+    [
+        b"cannot take the lock on ",
+        directory.as_os_str().as_bytes(),
+        b" to replace the managed region: ",
+        cause.as_bytes(),
         b"; private files may be visible to public Git",
     ]
     .concat()

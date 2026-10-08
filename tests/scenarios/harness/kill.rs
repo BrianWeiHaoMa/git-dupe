@@ -19,14 +19,19 @@
 //! Git reports a dashed command killed by a signal with the status a shell gives it, 128
 //! plus the signal's number; that status and the script's record of whom it killed tell a
 //! delivered kill from a run that ended by itself.
+//!
+//! A run is started, and waited for later, through one control directory at a time: its
+//! records are that run's. The same limit with `SIGXFSZ` ignored makes git-dupe's own
+//! writes fail, not kill it, while Git's runs write as ever.
 
-use std::ffi::OsString;
+use std::cell::Cell;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use super::output::{End, Output};
+use super::running::Running;
 use super::scenario::Scenario;
 
 const SIGKILL: i32 = 9;
@@ -82,6 +87,8 @@ pub struct Killing<'s> {
     scenario: &'s Scenario,
     words: Vec<OsString>,
     control: PathBuf,
+    /// Whether a run started through the control directory has not been waited for.
+    started: Cell<bool>,
 }
 
 impl Scenario {
@@ -90,9 +97,20 @@ impl Scenario {
     pub fn killing(&self, name: &str, words: &[&str]) -> Killing<'_> {
         let control = self.dir().join(name);
         fs::create_dir(&control).unwrap_or_else(|cause| panic!("{}: {cause}", control.display()));
+        // Written by a process of its own: a descriptor of this process open to write it
+        // could be inherited by a child another scenario's thread is starting, and running
+        // the script while that child holds it fails with ETXTBSY.
         let script = control.join("git");
-        fs::write(&script, SCRIPT).unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        self.program(
+            "/bin/sh",
+            [
+                OsStr::new("-c"),
+                OsStr::new(r#"cat > "$0" && chmod 755 "$0""#),
+                script.as_os_str(),
+            ],
+        )
+        .input(SCRIPT.as_bytes())
+        .succeeds();
         fs::write(
             control.join("release"),
             [self.release_git().as_os_str().as_encoded_bytes(), b"\n"].concat(),
@@ -102,6 +120,7 @@ impl Scenario {
             scenario: self,
             words: ["dupe"].iter().chain(words).map(OsString::from).collect(),
             control,
+            started: Cell::new(false),
         }
     }
 }
@@ -131,6 +150,12 @@ impl Killing<'_> {
     /// printed. Fails unless git-dupe itself was killed there, and returns only once no
     /// process of the run is left.
     pub fn killed(&self, dir: &Path, point: Point) -> Output {
+        self.start_killed(dir, point).wait()
+    }
+
+    /// Starts the command in the workspace `dir`, to be killed at `point`, and returns at
+    /// once; `KilledRun::wait` checks the kill as `killed` does.
+    pub fn start_killed(&self, dir: &Path, point: Point) -> KilledRun<'_> {
         let expected = match point {
             Point::BeforeRun(n) => Some(format!("before {n}")),
             Point::AfterRun(n) => Some(format!("after {n}")),
@@ -141,26 +166,43 @@ impl Killing<'_> {
             Point::InsideWrite { blocks } => self.git(dir).file_size_limit(blocks),
             _ => self.git(dir),
         };
-        let output = git.run();
-        let killed = match fs::read_to_string(self.control.join("killed")) {
-            Ok(killed) => Some(killed),
-            Err(cause) if cause.kind() == ErrorKind::NotFound => None,
-            Err(cause) => panic!("{}: {cause}", self.control.display()),
-        };
-        let (signal, record) = match expected {
-            Some(expected) => (SIGKILL, Some(format!("{expected} git-dupe\n"))),
-            None => (SIGXFSZ, None),
-        };
+        let started = Started::through(self);
+        KilledRun {
+            killing: self,
+            point,
+            expected,
+            running: git.start(),
+            started,
+        }
+    }
+
+    /// Runs the command uninterrupted in the workspace `dir`, through the script, with
+    /// every write of git-dupe's own failing: under a file size limit of no block with
+    /// `SIGXFSZ` ignored, so that its first write of a byte fails with `EFBIG` and it goes
+    /// on. Fails if the script killed anything or git-dupe died of the limit.
+    pub fn writes_failing(&self, dir: &Path) -> Output {
+        self.prepare(None);
+        let output = self
+            .git(dir)
+            .file_size_limit(0)
+            .file_size_signal_ignored()
+            .run();
         assert!(
-            output.end == End::Code(128 + signal) && killed == record,
-            "git {:?} was not killed at {point:?}: the script killed {killed:?}; {output:?}",
+            self.record().is_none() && output.end != End::Code(128 + SIGXFSZ),
+            "git {:?} did not go on past its failed writes: {output:?}",
             self.words
         );
         output
     }
 
-    /// Clears the record of the last run and sets the point to kill at.
+    /// Clears the record of the last run and sets the point to kill at. Fails while a run
+    /// started through the control directory has not been waited for.
     fn prepare(&self, point: Option<&str>) {
+        assert!(
+            !self.started.get(),
+            "git {:?} is started again before its last run was waited for",
+            self.words
+        );
         for record in ["count", "parents", "killed", "kill"] {
             match fs::remove_file(self.control.join(record)) {
                 Ok(()) => {}
@@ -173,11 +215,73 @@ impl Killing<'_> {
         }
     }
 
+    /// The script's record of the point at which it killed and whom, if it killed.
+    fn record(&self) -> Option<String> {
+        match fs::read_to_string(self.control.join("killed")) {
+            Ok(killed) => Some(killed),
+            Err(cause) if cause.kind() == ErrorKind::NotFound => None,
+            Err(cause) => panic!("{}: {cause}", self.control.display()),
+        }
+    }
+
     fn git(&self, dir: &Path) -> super::scenario::Git<'_> {
         self.scenario
             .git(&self.words)
             .from(dir)
             .variable("GIT_EXEC_PATH", &self.control)
             .leaving_no_process()
+    }
+}
+
+/// A run to be killed, started and not yet waited for.
+pub struct KilledRun<'k> {
+    killing: &'k Killing<'k>,
+    point: Point,
+    expected: Option<String>,
+    running: Running,
+    started: Started<'k>,
+}
+
+impl KilledRun<'_> {
+    /// Waits for the run: fails unless git-dupe itself was killed at its point, and
+    /// returns what it printed once no process of the run is left.
+    pub fn wait(self) -> Output {
+        let KilledRun {
+            killing,
+            point,
+            expected,
+            running,
+            started,
+        } = self;
+        let output = running.wait();
+        let killed = killing.record();
+        let (signal, record) = match expected {
+            Some(expected) => (SIGKILL, Some(format!("{expected} git-dupe\n"))),
+            None => (SIGXFSZ, None),
+        };
+        assert!(
+            output.end == End::Code(128 + signal) && killed == record,
+            "git {:?} was not killed at {point:?}: the script killed {killed:?}; {output:?}",
+            killing.words
+        );
+        drop(started);
+        output
+    }
+}
+
+/// That a run started through a control directory has not been waited for, while this
+/// lives.
+struct Started<'k>(&'k Cell<bool>);
+
+impl<'k> Started<'k> {
+    fn through(killing: &'k Killing) -> Started<'k> {
+        killing.started.set(true);
+        Started(&killing.started)
+    }
+}
+
+impl Drop for Started<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
     }
 }

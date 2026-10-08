@@ -4,12 +4,14 @@
 //! What the listing below cannot show:
 //!
 //! - Only `settle` and `remove` write the region, through `region`'s one `update`, the one
-//!   site that reads `.git/info/exclude` to write it (R10), always whole through
-//!   `replace`, its rules always in `rule`'s form, its bounds always `region`'s one
-//!   reading of them: one write, one rule form, one reading back (G6, F3). `remove` only
-//!   deletes it, for `detach`, which never settles (R3). Every other worktree's region and
-//!   the user's text are copied through it as they stand. Only `edit` writes `.gitdupe`, always whole through `replace`, and only
-//!   after its caller has decided the refusals over a listing it took (F5, G11).
+//!   site that reads `.git/info/exclude` to write it and the one that takes the lock every
+//!   worktree's command shares, held there across no Git run (R10, `Holds/G28`), always
+//!   whole through `replace`, its rules always in `rule`'s form, its bounds always
+//!   `region`'s one reading of them: one write, one rule form, one reading back (G6,
+//!   F3). `remove` only deletes it, for `detach`, which never settles (R3). Every other
+//!   worktree's region and the user's text are copied through it as they stand. Only
+//!   `edit` writes `.gitdupe`, always whole through `replace`, and only after its caller
+//!   has decided the refusals over a listing it took (F5, G11).
 //! - Every path crossing the keeper's boundary is bytes relative to the root, without a
 //!   leading or trailing slash.
 //! - Every Git run is one `ls-files`, `diff --cached`, `cat-file`, `check-ignore`, or

@@ -5,18 +5,16 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
-use std::thread;
-use std::time::{Duration, Instant};
 
 use super::fresh::FreshDirectory;
 use super::output::{End, Output};
 use super::provision::Store;
 use super::releases::{NARROWING_VARIABLE, selection};
+use super::running::Running;
 
 /// A release this run exercises, built and present.
 struct Release {
@@ -185,8 +183,17 @@ impl Scenario {
             stdout_to: None,
             input: None,
             file_size_limit: None,
+            file_size_signal_ignored: false,
             leaving_no_process: false,
         }
+    }
+}
+
+#[cfg(test)]
+impl Scenario {
+    /// A scenario under the first release of this run: for a check of the harness itself.
+    pub(super) fn of_the_first_release() -> Scenario {
+        Scenario::begin(&selected()[0])
     }
 }
 
@@ -200,6 +207,7 @@ pub struct Git<'s> {
     stdout_to: Option<PathBuf>,
     input: Option<Vec<u8>>,
     file_size_limit: Option<u32>,
+    file_size_signal_ignored: bool,
     leaving_no_process: bool,
 }
 
@@ -239,6 +247,13 @@ impl Git<'_> {
         self
     }
 
+    /// Under `file_size_limit`, ignores `SIGXFSZ` for the run, so that a write past the
+    /// limit fails with `EFBIG` and the writer goes on, where it would have been killed.
+    pub(super) fn file_size_signal_ignored(mut self) -> Self {
+        self.file_size_signal_ignored = true;
+        self
+    }
+
     /// Starts it in a process group of its own and, once it has ended, waits until no
     /// process of that group is left running: for a run in which a process is killed, so
     /// that nothing it started is still at work when the scenario takes its next step.
@@ -247,32 +262,46 @@ impl Git<'_> {
         self
     }
 
+    /// Starts it and returns at once, in a process group of its own, which is waited for
+    /// as `leaving_no_process` says: for a scenario that acts while the run goes on, and
+    /// then waits for it as `run` does (`Running`).
+    pub fn start(mut self) -> Running {
+        self.leaving_no_process = true;
+        self.begin()
+    }
+
     /// Runs it to its end with the supplied standard input, or none. No variable of the
     /// caller's reaches it but the `PATH` behind the release and the built git-dupe.
     pub fn run(self) -> Output {
+        self.begin().wait()
+    }
+
+    fn begin(self) -> Running {
         let named = self.named();
         let mut command = match self.file_size_limit {
             None => Command::new(&self.program),
             Some(blocks) => {
                 let mut shell = Command::new("/bin/sh");
+                let ignoring = if self.file_size_signal_ignored {
+                    "trap '' XFSZ && "
+                } else {
+                    ""
+                };
                 shell.args([
                     "-c",
-                    r#"ulimit -S -c 0 && ulimit -S -f "$0" && exec "$@""#,
+                    &format!(r#"{ignoring}ulimit -S -c 0 && ulimit -S -f "$0" && exec "$@""#),
                     &blocks.to_string(),
                 ]);
                 shell.arg(&self.program);
                 shell
             }
         };
-        if self.leaving_no_process {
-            command.process_group(0);
-        }
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         if let Some(file) = &self.stdout_to {
             let opened = fs::OpenOptions::new().write(true).open(file);
             command.stdout(opened.unwrap_or_else(|cause| panic!("{}: {cause}", file.display())));
         }
-        let mut child = command
+        command
             .args(&self.words)
             .current_dir(&self.from)
             .env_clear()
@@ -287,33 +316,8 @@ impl Git<'_> {
                 Stdio::piped()
             } else {
                 Stdio::null()
-            })
-            .spawn()
-            .unwrap_or_else(|cause| panic!("cannot run {named}: {cause}"));
-        let group = child.id();
-        if let Some(bytes) = self.input {
-            child
-                .stdin
-                .take()
-                .expect("piped standard input")
-                .write_all(&bytes)
-                .unwrap_or_else(|cause| panic!("cannot feed {named}: {cause}"));
-        }
-        let output = child
-            .wait_with_output()
-            .unwrap_or_else(|cause| panic!("cannot wait for {named}: {cause}"));
-        if self.leaving_no_process {
-            no_process_left(group, &named);
-        }
-        let end = match output.status.signal() {
-            Some(signal) => End::Signal(signal),
-            None => End::Code(output.status.code().expect("an exit code where no signal")),
-        };
-        Output {
-            stdout: output.stdout,
-            stderr: output.stderr,
-            end,
-        }
+            });
+        Running::start(command, self.input, named, self.leaving_no_process)
     }
 
     /// Runs it as `run` does; it must exit 0.
@@ -328,48 +332,6 @@ impl Git<'_> {
     fn named(&self) -> String {
         format!("{} {:?}", self.program.to_string_lossy(), self.words)
     }
-}
-
-/// Waits, ten seconds at most, until no process of the process group `group` is running.
-/// A zombie has ended and is not counted: who reaps an orphan is the machine's.
-fn no_process_left(group: u32, named: &str) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let running = running_in(group);
-        if running.is_empty() {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "{named} left processes running: {running:?}"
-        );
-        thread::sleep(Duration::from_millis(5));
-    }
-}
-
-/// The processes of the group `group` that have not ended, each as its `/proc` status
-/// line, read from `/proc/<pid>/stat`: the name in parentheses, then the state, the
-/// parent, and the process group.
-fn running_in(group: u32) -> Vec<String> {
-    let mut running = Vec::new();
-    for entry in fs::read_dir("/proc").expect("/proc") {
-        let Ok(entry) = entry else { continue };
-        if !entry.file_name().as_bytes().iter().all(u8::is_ascii_digit) {
-            continue;
-        }
-        // A process that ends meanwhile leaves nothing to read.
-        let Ok(stat) = fs::read_to_string(entry.path().join("stat")) else {
-            continue;
-        };
-        let Some((_, after_name)) = stat.rsplit_once(") ") else {
-            continue;
-        };
-        let fields: Vec<&str> = after_name.split(' ').collect();
-        if fields.get(2) == Some(&group.to_string().as_str()) && fields[0] != "Z" {
-            running.push(stat.trim_end().to_owned());
-        }
-    }
-    running
 }
 
 #[cfg(test)]

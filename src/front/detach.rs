@@ -147,8 +147,16 @@ fn refuse(not_detached: NotDetached) -> Outcome {
         ]
         .concat(),
         NotDetached::Killed(failed) => return outcome::failed(failed),
-        NotDetached::NotDeleted(NotDeleted::BeyondALink(link)) => beyond_a_link(&link),
-        NotDetached::NotDeleted(NotDeleted::Failed { file, cause }) => [
+        NotDetached::NotDeleted(not_deleted) => region_stands(not_deleted),
+    };
+    outcome::refuse(&line)
+}
+
+/// The refusal while the region could not be deleted, and stands as it was.
+fn region_stands(not_deleted: NotDeleted) -> Vec<u8> {
+    match not_deleted {
+        NotDeleted::BeyondALink(link) => beyond_a_link(&link),
+        NotDeleted::Failed { file, cause } => [
             b"cannot delete the managed region of ",
             file.as_os_str().as_bytes(),
             b": ",
@@ -156,8 +164,15 @@ fn refuse(not_detached: NotDetached) -> Outcome {
             b"; nothing is detached",
         ]
         .concat(),
-    };
-    outcome::refuse(&line)
+        NotDeleted::NotLocked { directory, cause } => [
+            b"cannot take the lock on ",
+            directory.as_os_str().as_bytes(),
+            b" to delete the managed region: ",
+            cause.to_string().as_bytes(),
+            b"; nothing is detached",
+        ]
+        .concat(),
+    }
 }
 
 /// The refusal while the region stands beyond a link at `.git/info` (G3).
@@ -206,6 +221,30 @@ mod tests {
         ] {
             assert_eq!(read(&words(misuse)), Asked::Misused(fault), "{misuse:?}");
         }
+    }
+
+    #[test]
+    fn a_region_whose_lock_cannot_be_taken_stands_and_names_the_lock() {
+        // No common Git directory to lock: the keeper's deletion stops before anything
+        // else, and the refusal names the lock and its cause, not the exclude file.
+        let root = std::env::temp_dir().join(format!("git-dupe-unlocked-{}", std::process::id()));
+        let workspace = Workspace::at_root(&root);
+        let Err(not_deleted) = crate::keeper::remove(&workspace, None) else {
+            panic!("the region was deleted without its lock");
+        };
+        let line = region_stands(not_deleted);
+        let expected = [
+            b"cannot take the lock on ",
+            root.join(".git").as_os_str().as_bytes(),
+            b" to delete the managed region: ",
+        ]
+        .concat();
+        assert!(
+            line.starts_with(&expected) && line.ends_with(b"; nothing is detached"),
+            "{}",
+            line.escape_ascii()
+        );
+        assert!(!root.exists());
     }
 
     #[test]

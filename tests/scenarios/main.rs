@@ -78,6 +78,7 @@ mod public_to_private;
 mod publicly_tracked_is_visible;
 mod readme;
 mod region;
+mod region_lock;
 mod release_archive;
 mod released;
 mod remote;

@@ -1,7 +1,10 @@
 //! The one site on disk: what it writes, what it leaves, and where it writes nothing.
 
 use super::*;
+use std::fs::TryLockError;
 use std::os::unix::fs::{MetadataExt, symlink};
+
+mod lock;
 
 fn paths(paths: &[&[u8]]) -> Vec<Vec<u8>> {
     paths.iter().map(|path| path.to_vec()).collect()
@@ -31,6 +34,20 @@ impl Scratch {
 
     fn exclude(&self) -> PathBuf {
         self.0.join(".git/info/exclude")
+    }
+
+    /// Whether another descriptor of the common Git directory can take its lock now: none
+    /// is held, by an update that returned or by anyone else.
+    fn lock_is_free(&self) -> bool {
+        lock_is_free(&self.0.join(".git"))
+    }
+}
+
+fn lock_is_free(common_directory: &Path) -> bool {
+    match File::open(common_directory).unwrap().try_lock() {
+        Ok(()) => true,
+        Err(TryLockError::WouldBlock) => false,
+        Err(TryLockError::Error(cause)) => panic!("{}: {cause}", common_directory.display()),
     }
 }
 
@@ -73,6 +90,7 @@ fn a_deletion_that_cannot_write_leaves_the_region_and_one_that_finds_none_writes
         _ => panic!("the deletion wrote without a fresh file"),
     }
     assert_eq!(fs::read(&exclude).unwrap(), file);
+    assert!(scratch.lock_is_free());
 
     fs::create_dir(scratch.0.join(".git/dupe")).unwrap();
     let Ok(found) = delete(&workspace) else {
@@ -88,14 +106,17 @@ fn a_deletion_that_cannot_write_leaves_the_region_and_one_that_finds_none_writes
     };
     assert!(none.paths.is_empty());
     assert_eq!(fs::read(&exclude).unwrap(), b"mine\nafter\n");
+    assert!(scratch.lock_is_free());
     // A file that cannot be read may hold a region: the deletion refuses it.
     fs::remove_file(&exclude).unwrap();
     fs::create_dir(&exclude).unwrap();
     assert!(matches!(delete(&workspace), Err(NotDeleted::Failed { .. })));
     assert!(exclude.is_dir());
+    assert!(scratch.lock_is_free());
     fs::remove_dir_all(scratch.info()).unwrap();
     assert!(delete(&workspace).is_ok());
     assert!(!scratch.info().exists());
+    assert!(scratch.lock_is_free());
     assert_eq!(
         fs::read_dir(scratch.0.join(".git/dupe")).unwrap().count(),
         0
@@ -121,6 +142,7 @@ fn a_replacement_that_cannot_write_leaves_the_file_as_it_was() {
     assert_eq!(fs::read(scratch.exclude()).unwrap(), FOREIGN);
     assert_eq!(identity(&scratch.exclude()), before);
     assert_eq!(mode(&scratch.exclude()), 0o640);
+    assert!(scratch.lock_is_free());
 }
 
 #[test]
@@ -143,6 +165,7 @@ fn a_region_is_appended_after_the_others_and_an_equal_composition_writes_nothing
     // The same region again: the file is the one already there, not a copy of it.
     let written = identity(&scratch.exclude());
     assert!(replace(&workspace, &region).is_empty());
+    assert!(scratch.lock_is_free());
     assert_eq!(identity(&scratch.exclude()), written);
     assert_eq!(fs::read(scratch.exclude()).unwrap(), composed);
     assert_eq!(
@@ -162,6 +185,7 @@ fn a_deletion_where_this_worktrees_region_does_not_stand_writes_nothing() {
     };
     assert!(deleted.paths.is_empty());
     assert_eq!(deleted.warning, None);
+    assert!(scratch.lock_is_free());
     assert_eq!(identity(&scratch.exclude()), before);
     assert_eq!(fs::read(scratch.exclude()).unwrap(), FOREIGN);
 
@@ -184,10 +208,20 @@ fn a_deletion_where_this_worktrees_region_does_not_stand_writes_nothing() {
           bottom"
     );
 
-    // A link to nothing at the file is left as it is.
+    // A link to nothing at the file is left as it is, by the deletion and the replacement.
     fs::remove_file(scratch.exclude()).unwrap();
     symlink(scratch.0.join("nowhere"), scratch.exclude()).unwrap();
     assert!(delete(&workspace).is_ok_and(|deleted| deleted.paths.is_empty()));
+    assert!(scratch.lock_is_free());
+    let warnings = replace(&workspace, &paths(&[b".gitdupe"]));
+    assert!(
+        warnings.len() == 1
+            && warnings[0].ends_with(
+                b" is a symbolic link to nothing; private files may be visible to public Git"
+            ),
+        "{warnings:?}"
+    );
+    assert!(scratch.lock_is_free());
     assert!(
         fs::symlink_metadata(scratch.exclude())
             .unwrap()
@@ -210,6 +244,7 @@ fn a_link_at_the_file_becomes_a_regular_file_even_when_its_target_holds_the_comp
     symlink(&target, scratch.exclude()).unwrap();
 
     let warnings = replace(&workspace, &region);
+    assert!(scratch.lock_is_free());
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert!(warnings[0].ends_with(b", and its target is untouched"));
     assert!(fs::symlink_metadata(scratch.exclude()).unwrap().is_file());
@@ -260,6 +295,7 @@ fn info_made_by_another_command_first_is_looked_at_again_and_read() {
         &scratch.workspace(),
         Change::Set(&region),
         another_made_info_with_a_file,
+        &FILE_LOCK,
     );
     assert!(made.is_ok());
     assert_eq!(
@@ -274,8 +310,10 @@ fn info_made_by_another_command_first_is_looked_at_again_and_read() {
         &scratch.workspace(),
         Change::Set(&region),
         another_left_a_file_at_info,
+        &FILE_LOCK,
     );
     assert!(matches!(made, Err(NotUpdated::Failed(_))));
+    assert!(scratch.lock_is_free());
     assert_eq!(fs::read(scratch.info()).unwrap(), b"not a directory\n");
 
     // A symbolic link: it is not followed, and its target is untouched.
@@ -285,8 +323,10 @@ fn info_made_by_another_command_first_is_looked_at_again_and_read() {
         &scratch.workspace(),
         Change::Set(&region),
         another_left_a_link_at_info,
+        &FILE_LOCK,
     );
     assert!(matches!(made, Err(NotUpdated::InfoLink)));
+    assert!(scratch.lock_is_free());
     assert!(
         fs::symlink_metadata(scratch.info())
             .unwrap()
@@ -301,11 +341,17 @@ fn info_made_by_another_command_first_is_looked_at_again_and_read() {
     // Any other failure to make it is the cause, and nothing is written.
     let scratch = Scratch::new("race-refused");
     fs::remove_dir(scratch.info()).unwrap();
-    let made = update(&scratch.workspace(), Change::Set(&region), refused);
+    let made = update(
+        &scratch.workspace(),
+        Change::Set(&region),
+        refused,
+        &FILE_LOCK,
+    );
     assert!(
         matches!(made, Err(NotUpdated::Failed(cause)) if cause.kind() == io::ErrorKind::PermissionDenied)
     );
     assert!(!scratch.info().exists());
+    assert!(scratch.lock_is_free());
 
     // Made here, it holds the region alone.
     let scratch = Scratch::new("race-none");
@@ -336,6 +382,9 @@ fn only_this_worktrees_region_is_read_and_refused_beyond_a_link() {
     assert_eq!(beyond_a_link(&linked), Some(scratch.info()));
     assert_eq!(start(&linked).paths, paths(&[b"agent"]));
     assert!(matches!(delete(&linked), Err(NotDeleted::BeyondALink(_))));
+    assert!(scratch.lock_is_free());
+    assert!(!replace(&main, &paths(&[b".gitdupe"])).is_empty());
+    assert!(scratch.lock_is_free());
 
     // The main worktree's region there is the main worktree's alone.
     fs::write(

@@ -17,6 +17,7 @@ mod release_archive;
 mod releases;
 mod remotes;
 mod repository;
+mod running;
 mod scenario;
 mod sha256;
 mod stash;
