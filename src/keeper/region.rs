@@ -13,11 +13,24 @@
 //! where nothing stands. The replacement creates `.git/info` when it is missing — one
 //! that another command made first counting as made, and looked at again — makes no write
 //! when the composition equals a regular file as read, and replaces a link at the file by
-//! a regular file. The deletion writes and creates nothing where this worktree's region
-//! does not stand: no `.git/info`, no file, a dangling link at it, or a link at
-//! `.git/info` through which no such region is read. An exclude file that cannot be read
-//! holds no region for `start`; the deletion refuses it instead, because `detach` succeeds
-//! only once no region stands.
+//! a regular file. The deletion creates nothing, and where this worktree's region does
+//! not stand writes only a stale region's removal: nothing where there is no
+//! `.git/info`, no file, a dangling link at it, or a link at `.git/info` through which no
+//! such region is read. An exclude file that cannot be read holds no region for `start`;
+//! the deletion refuses it instead, because `detach` succeeds only once no region stands.
+//!
+//! The same read gives every other worktree's region, by `sections`' one reading of the
+//! bounds. One whose worktree holds no private repository — its private Git directory,
+//! `<common Git directory>/dupe` for the main worktree's markers and
+//! `<common Git directory>/worktrees/<name>/dupe` for `worktree <name>`, not a directory
+//! by `lstat` at the composition — is stale and left out of what is written (G27); every
+//! other one is copied through byte for byte and handed back, its rules read back into
+//! paths, as the observation the caller's warnings start from (`foreign`). That
+//! observation is owned memory, used after the lock is let go: nothing reads the file a
+//! second time. A replacement hands it back only where it maintained the region, written
+//! or found equal and so kept; one that left the region as it is hands back nothing for
+//! G27 to name. The deletion hands it back wherever it could read the file, its own
+//! region absent included, and leaves out a stale region there too.
 //!
 //! All of `update` happens under the lock every worktree's command shares (`Holds/G28`):
 //! an exclusive `flock` on a descriptor of the common Git directory, opened read-only,
@@ -29,15 +42,17 @@
 
 mod sections;
 
+use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use super::foreign::{self, Owner};
 use super::replace;
 use crate::runner::locate::Workspace;
-use sections::Worktree;
+use sections::{Sections, Worktree};
 
 /// This worktree's markers: the main worktree's, or the linked worktree's of its name.
 fn own(workspace: &Workspace) -> Worktree<'_> {
@@ -82,11 +97,21 @@ fn exclude_file(workspace: &Workspace) -> PathBuf {
     info_directory(workspace).join("exclude")
 }
 
-/// Replaces the region with one rule per path, in the order given, and returns the
-/// warnings: that the region cannot be maintained where a symbolic link stands, that the
-/// lock could not be taken or a write failed and why, or that a link at the exclude file
-/// became a regular file.
-pub fn replace(workspace: &Workspace, paths: &[Vec<u8>]) -> Vec<Vec<u8>> {
+/// What a replacement did: its warnings, and, where it maintained the region, the other
+/// worktrees' regions it copied through.
+pub struct Replaced {
+    /// That the region cannot be maintained where a symbolic link stands, that the lock
+    /// could not be taken or a write failed and why, or that a link at the exclude file
+    /// became a regular file.
+    pub warnings: Vec<Vec<u8>>,
+    /// The other regions as the file was read to be written, the stale ones left out;
+    /// `None` where the region is left as it is (G6, G27).
+    pub others: Option<Vec<foreign::Region>>,
+}
+
+/// Replaces the region with one rule per path, in the order given, leaving out every
+/// stale region, and returns what it did.
+pub fn replace(workspace: &Workspace, paths: &[Vec<u8>]) -> Replaced {
     let updated = update(
         workspace,
         Change::Set(paths),
@@ -96,10 +121,15 @@ pub fn replace(workspace: &Workspace, paths: &[Vec<u8>]) -> Vec<Vec<u8>> {
     replaced(workspace, updated)
 }
 
-/// The warnings of a replacement that `update` did or did not make.
-fn replaced(workspace: &Workspace, updated: Result<Updated, NotUpdated>) -> Vec<Vec<u8>> {
-    match updated {
-        Ok(updated) => updated.warning.into_iter().collect(),
+/// What a replacement that `update` did or did not make did.
+fn replaced(workspace: &Workspace, updated: Result<Updated, NotUpdated>) -> Replaced {
+    let warnings = match updated {
+        Ok(updated) => {
+            return Replaced {
+                warnings: updated.warning.into_iter().collect(),
+                others: Some(updated.others),
+            };
+        }
         Err(NotUpdated::NotLocked(cause)) => {
             vec![not_locked(workspace.common_directory(), &cause.to_string())]
         }
@@ -116,15 +146,21 @@ fn replaced(workspace: &Workspace, updated: Result<Updated, NotUpdated>) -> Vec<
         Err(NotUpdated::Failed(cause)) => {
             vec![not_written(&exclude_file(workspace), &cause.to_string())]
         }
+    };
+    Replaced {
+        warnings,
+        others: None,
     }
 }
 
-/// What the deletion of the region did: the paths its rules were written for, and the
-/// warning that a link at the exclude file became a regular file.
+/// What the deletion of the region did: the paths its rules were written for, the
+/// warning that a link at the exclude file became a regular file, and the other
+/// worktrees' regions as the file was read, the stale ones left out.
 #[derive(Default)]
 pub struct Deleted {
     pub paths: Vec<Vec<u8>>,
     pub warning: Option<Vec<u8>>,
+    pub others: Vec<foreign::Region>,
 }
 
 /// Why a region may stand after its deletion was asked for: nothing was written.
@@ -142,9 +178,9 @@ pub enum NotDeleted {
     },
 }
 
-/// Deletes the region with its markers, every other byte kept as it stands, by the same
-/// update as `replace`. Where the region does not stand, nothing is written, created, or
-/// warned about.
+/// Deletes the region with its markers, every other byte kept as it stands but a stale
+/// region's, by the same update as `replace`. Where the region does not stand, nothing is
+/// created or warned about, and only a stale region's removal is written.
 pub fn delete(workspace: &Workspace) -> Result<Deleted, NotDeleted> {
     let updated = update(
         workspace,
@@ -161,7 +197,15 @@ fn deleted(
     updated: Result<Updated, NotUpdated>,
 ) -> Result<Deleted, NotDeleted> {
     match updated {
-        Ok(Updated { paths, warning }) => Ok(Deleted { paths, warning }),
+        Ok(Updated {
+            paths,
+            warning,
+            others,
+        }) => Ok(Deleted {
+            paths,
+            warning,
+            others,
+        }),
         Err(NotUpdated::NotLocked(cause)) => Err(NotDeleted::NotLocked {
             directory: workspace.common_directory().to_path_buf(),
             cause,
@@ -185,12 +229,13 @@ enum Change<'p> {
 }
 
 /// What `update` read and wrote: the paths the region's rules were written for as the file
-/// was read, none where it held no region, and the warning that a link at the exclude file
-/// is now a regular file.
+/// was read, none where it held no region, the warning that a link at the exclude file
+/// is now a regular file, and the other regions it did not find stale.
 #[derive(Default)]
 struct Updated {
     paths: Vec<Vec<u8>>,
     warning: Option<Vec<u8>>,
+    others: Vec<foreign::Region>,
 }
 
 /// Why `update` left the file as it stands.
@@ -274,10 +319,17 @@ fn update(
                 // The link and what it leads to stay as they are; the deletion only asks
                 // whether the region stands beyond it, as `start` would read it.
                 Change::Remove => match fs::read(&exclude) {
-                    Ok(bytes) if sections::split(&bytes, own).rules.is_some() => {
-                        Err(NotUpdated::InfoLink)
+                    Ok(bytes) => {
+                        let found = sections::split(&bytes, own);
+                        if found.rules.is_some() {
+                            return Err(NotUpdated::InfoLink);
+                        }
+                        let (_, others) = standing(workspace.common_directory(), &found);
+                        Ok(Updated {
+                            others,
+                            ..Updated::default()
+                        })
                     }
-                    Ok(_) => Ok(Updated::default()),
                     Err(cause) if cause.kind() == io::ErrorKind::NotFound => Ok(Updated::default()),
                     Err(cause) => Err(NotUpdated::Failed(cause)),
                 },
@@ -290,13 +342,15 @@ fn update(
 
     let found = sections::split(&bytes, own);
     let paths = found.paths();
+    let (kept, others) = standing(workspace.common_directory(), &found);
     let (composed, holding) = match change {
         Change::Set(set) => {
-            let composed = found.set(own, set);
+            let composed = found.set(own, set, &kept);
             if mode.is_some() && !link && composed == bytes {
                 return Ok(Updated {
                     paths,
                     warning: None,
+                    others,
                 });
             }
             (
@@ -305,11 +359,16 @@ fn update(
             )
         }
         Change::Remove => {
-            if found.rules.is_none() {
-                return Ok(Updated::default());
+            let composed = found.removed(&kept);
+            // Without the region, only a stale region's removal is written.
+            if found.rules.is_none() && composed == bytes {
+                return Ok(Updated {
+                    others,
+                    ..Updated::default()
+                });
             }
             (
-                found.removed(),
+                composed,
                 &b"what its target held without the managed region"[..],
             )
         }
@@ -319,7 +378,55 @@ fn update(
     Ok(Updated {
         paths,
         warning: link.then(|| link_replaced(&exclude, holding)),
+        others,
     })
+}
+
+/// Whether each other region of `found` is kept, in its order, and those kept, as owned
+/// paths with their worktree: one `lstat` per other region, of its worktree's private
+/// Git directory (`Holds/G27`).
+fn standing(common_directory: &Path, found: &Sections) -> (Vec<bool>, Vec<foreign::Region>) {
+    let kept: Vec<bool> = found
+        .others
+        .iter()
+        .map(|other| repository_stands(common_directory, other.worktree))
+        .collect();
+    let others = found
+        .others
+        .iter()
+        .zip(&kept)
+        .filter(|(_, kept)| **kept)
+        .map(|(other, _)| foreign::Region {
+            owner: match other.worktree {
+                Worktree::Main => Owner::Main,
+                Worktree::Linked(name) => Owner::Linked(name.to_vec()),
+            },
+            paths: other.paths(),
+        })
+        .collect();
+    (kept, others)
+}
+
+/// Whether the private Git directory of the worktree whose markers open a region is a
+/// directory by `lstat`: `<common Git directory>/dupe` for the main worktree's markers,
+/// `<common Git directory>/worktrees/<name>/dupe` for `worktree <name>`, whatever the
+/// worktree list or the region's rules say (G27). Nothing there, or something other than
+/// a directory — a file, or a symbolic link wherever it leads — is a repository gone; an
+/// `lstat` that fails for another cause proves nothing gone, and the region is kept.
+fn repository_stands(common_directory: &Path, worktree: Worktree) -> bool {
+    let git_directory = match worktree {
+        Worktree::Main => common_directory.to_path_buf(),
+        Worktree::Linked(name) => common_directory
+            .join("worktrees")
+            .join(OsStr::from_bytes(name)),
+    };
+    match fs::symlink_metadata(git_directory.join("dupe")) {
+        Ok(found) => found.is_dir(),
+        Err(cause) => !matches!(
+            cause.kind(),
+            io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+        ),
+    }
 }
 
 /// The exclude file as `update` finds it.

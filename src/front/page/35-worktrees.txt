@@ -4,8 +4,9 @@ its own private repository, dupe in its own Git directory,
 .git/worktrees/<name>/dupe, its own hidden paths and private history, and its
 own region of the one .git/info/exclude, between markers that carry its name.
 It is unattached, whatever the main worktree holds, until git dupe init or
-git dupe clone is run in it, and every other git dupe command there is refused
-naming git dupe init.
+git dupe clone is run in it, and every other git dupe command there, but help,
+a request for help, --version, and a usage error, is refused naming git dupe
+init.
 
 Private work moves between worktrees as it moves between machines. In a linked
 worktree, git dupe clone "$(git rev-parse --git-common-dir)/dupe" attaches it
@@ -26,10 +27,21 @@ The regions of every worktree stand in one .git/info/exclude, which the
 project's Git reads in every worktree: a path one worktree hides is ignored in
 the others too. What another worktree writes at such a path, while it does not
 hide the path itself, is then seen by neither repository there, until git dupe
-add makes it private there too. git-dupe commands in different worktrees may
-run at the same time; each replaces its own region alone.
+add makes it private there too. Each git dupe command there that keeps its
+region up to date, every command but help, -h, --version, a usage error, and
+detach, names such a path in a warning, with the worktree that hides it, while
+something stands at it that the project's Git ignores and does not track,
+until it is hidden there too, the other worktree stops hiding it, or it is
+removed; git-dupe does nothing further with it. Where the region cannot be
+maintained, a symbolic link standing at .git/info for instance, no such path
+is named. git dupe detach likewise names each formerly hidden path that
+another worktree still hides. git-dupe commands in different worktrees may run
+at the same time; each replaces its own region alone.
 
 git worktree remove and git worktree prune delete a linked worktree's Git
 directory and its private repository with it, and the private files on disk do
 not stop them: private work not pushed first is gone. Push it, or run git dupe
-detach, before removing the worktree.
+detach, before removing the worktree. Its region stays in .git/info/exclude,
+and its paths stay ignored in the other worktrees, until the next git dupe
+command in any of them that keeps its region up to date, or detaches it, which
+leaves out the region of every worktree whose private repository is gone.

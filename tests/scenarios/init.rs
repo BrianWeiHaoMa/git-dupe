@@ -340,7 +340,7 @@ fn repeated_init_preserves_edits_and_restores_unfinished_or_deleted_config() {
 }
 
 #[test]
-fn settle_over_arg_max_replaces_success_after_the_hint_without_writing_exclude() {
+fn settle_over_arg_max_replaces_success_after_the_hint_and_replaces_the_region() {
     under_each_release(|s| {
         let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
         assert!(limit.status.success());
@@ -358,7 +358,11 @@ fn settle_over_arg_max_replaces_success_after_the_hint_without_writing_exclude()
             let (dir, from) = unattached_workspace(s, "arg-max", below);
             s.init(&dir);
             fs::write(dir.join(".gitdupe"), &listed).unwrap();
-            let exclude = fs::read(dir.join(".git/info/exclude")).unwrap();
+            let before = region(&dir).unwrap();
+            let index = s
+                .private(&dir)
+                .git(["ls-files", "--stage", "-z"])
+                .succeeds();
             let output = s.git(["dupe", "init"]).from(&from).run();
             assert_eq!(output.end, End::Code(128), "{output:?}");
             assert!(output.stdout.is_empty(), "{output:?}");
@@ -378,7 +382,30 @@ fn settle_over_arg_max_replaces_success_after_the_hint_without_writing_exclude()
                 ]
                 .concat()
             );
-            assert_eq!(fs::read(dir.join(".git/info/exclude")).unwrap(), exclude);
+            // Composition/Keeper: the public listing is refused after replacement.
+            let mut expected = before.before;
+            expected.extend_from_slice(b"# BEGIN git-dupe\n/.gitdupe\n");
+            for path in listed
+                .split(|&byte| byte == b'\n')
+                .filter(|p| !p.is_empty())
+            {
+                expected.extend_from_slice(b"/");
+                expected.extend_from_slice(path);
+                expected.push(b'\n');
+            }
+            expected.extend_from_slice(b"# END git-dupe\n");
+            expected.extend_from_slice(&before.after);
+            assert!(
+                fs::read(dir.join(".git/info/exclude")).unwrap() == expected,
+                "region differs"
+            );
+            assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), listed);
+            assert_eq!(
+                s.private(&dir)
+                    .git(["ls-files", "--stage", "-z"])
+                    .succeeds(),
+                index
+            );
         }
     });
 }

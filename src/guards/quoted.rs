@@ -3,6 +3,9 @@
 //! byte written as Git's C-style escape. Git's lines name such a path the same way.
 //! git-dupe's lines use it for a name holding a newline, which E4 keeps out of the
 //! workspace's paths but not out of a word the user types or a file Git reads rules from.
+//!
+//! A path a line offers as an operand of a command to run is written by `shell_word`,
+//! so that the command, typed as the line shows it, gives that path as one word (G25).
 
 /// `name` between double quotes, escaped as Git escapes a path it quotes.
 pub fn quoted(name: &[u8]) -> Vec<u8> {
@@ -33,9 +36,44 @@ pub fn quoted(name: &[u8]) -> Vec<u8> {
     quoted
 }
 
+/// `word` as a POSIX shell reads it back as one word: as it stands when it holds only
+/// bytes no shell treats specially, else between double quotes, with `\`, `"`, `$`,
+/// and `` ` `` escaped. A byte above ASCII is no shell's concern, and a leading `-` is
+/// the command's, which writes `--` before the word.
+pub fn shell_word(word: &[u8]) -> Vec<u8> {
+    let plain = |byte: &u8| {
+        byte.is_ascii_alphanumeric() || b"._/@%+=:,-".contains(byte) || !byte.is_ascii()
+    };
+    if !word.is_empty() && word.iter().all(plain) {
+        return word.to_vec();
+    }
+    let mut quoted = vec![b'"'];
+    for &byte in word {
+        if matches!(byte, b'\\' | b'"' | b'$' | b'`') {
+            quoted.push(b'\\');
+        }
+        quoted.push(byte);
+    }
+    quoted.push(b'"');
+    quoted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_word_is_quoted_only_where_a_shell_would_read_it_otherwise() {
+        for plain in [&b"notes"[..], b"-x", b"a/b.c", b"caf\xe9", b"a=b,c:d@e%f+g"] {
+            assert_eq!(shell_word(plain), plain);
+        }
+        assert_eq!(shell_word(b"two words"), b"\"two words\"");
+        assert_eq!(shell_word(b"it's"), b"\"it's\"");
+        assert_eq!(shell_word(b"a\"b\\c$d`e"), b"\"a\\\"b\\\\c\\$d\\`e\"");
+        assert_eq!(shell_word(b"~home"), b"\"~home\"");
+        assert_eq!(shell_word(b"#x;y&z|w"), b"\"#x;y&z|w\"");
+        assert_eq!(shell_word(b"!bang"), b"\"!bang\"");
+    }
 
     #[test]
     fn every_control_byte_is_escaped_and_every_other_byte_kept() {

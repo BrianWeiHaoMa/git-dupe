@@ -19,7 +19,12 @@ Every change a user of git-dupe would notice, newest first, in the form of
   records the new place for plain Git. Commands in different worktrees may run at the
   same time: each waits for another's write of `.git/info/exclude` to finish, so that
   no worktree's region update is lost, and one killed while it writes the file holds
-  up none.
+  up none. Every command that keeps its region up to date warns about a path that
+  another worktree hides, while it stands in this one, is not hidden here, and the
+  project's Git ignores it, naming that worktree, and `git dupe detach` names each
+  formerly hidden path another worktree still hides. The region of a worktree whose
+  private repository is gone, after `git worktree remove` or `prune`, is dropped by
+  the next such command, or `detach`, in any worktree.
 
 ### Fixed
 

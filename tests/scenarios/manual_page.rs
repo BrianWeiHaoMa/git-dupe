@@ -432,8 +432,13 @@ fn the_page_explains_what_the_general_text_has_no_room_for() {
                 "git dupe push origin HEAD:agent puts the branch agent in the main worktree's private repository, where git dupe merge agent, run in the main worktree, takes it",
                 "finds the working tree again once git dupe init is run in the new place",
                 "a path one worktree hides is ignored in the others too",
+                "Each git dupe command there that keeps its region up to date, every command but help, -h, --version, a usage error, and detach, names such a path in a warning, with the worktree that hides it",
+                "Where the region cannot be maintained, a symbolic link standing at .git/info for instance, no such path is named.",
+                "git-dupe does nothing further with it",
+                "git dupe detach likewise names each formerly hidden path that another worktree still hides",
                 "git worktree remove and git worktree prune delete a linked worktree's Git directory and its private repository with it",
                 "private work not pushed first is gone",
+                "until the next git dupe command in any of them that keeps its region up to date, or detaches it, which leaves out the region of every worktree whose private repository is gone",
             ],
         ),
         (

@@ -159,13 +159,21 @@ fn linked_clone_keeps_differing_files_and_a_file_obstructing_private_notes() {
         let main_region = main.region_bytes();
         let output = clone(s, &wt, &wt.common_directory.join("dupe"), None);
         assert_eq!(output.end, End::Code(0), "{output:?}");
+        // G27: main hides notes, while the kept .gitdupe lists only scratch
+        // and the private index hides notes/a.md, not its obstructing parent.
+        let foreign_warning = &b"notes stands here and is hidden by the main worktree alone: public Git ignores it here, and this worktree does not hide it; run from the root, 'git dupe hide -- notes' hides it here too"[..];
         warnings_in_any_order(
             &output,
             &[
                 &[b".env.local was kept", b"differs"],
                 &[b".gitdupe was kept", b"differs"],
                 &[b"notes was kept", b"file"],
+                &[foreign_warning],
             ],
+        );
+        assert!(
+            output.lines("warning").contains(&foreign_warning),
+            "{output:?}"
         );
         assert!(working.changed_in(&Tree::working(&wt.root)).is_empty());
         assert!(wt.root.join("notes").is_file());

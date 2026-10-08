@@ -23,13 +23,18 @@
 //! A run is started, and waited for later, through one control directory at a time: its
 //! records are that run's. The same limit with `SIGXFSZ` ignored makes git-dupe's own
 //! writes fail, not kill it, while Git's runs write as ever.
+//!
+//! The same forwarder can select a run by its argument prefix and public/private
+//! environment, to fail it, truncate its real answer, observe bytes before it starts,
+//! or pause it. A pause has a bounded wait and its process group is cleaned up even
+//! when the scenario fails; no product hook or second forwarding script is needed.
 
 use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::output::{End, Output};
 use super::running::Running;
@@ -67,6 +72,55 @@ case $point in
     exit 0
     ;;
 esac
+if [ -f "$control/selection" ]; then
+    read -r scope < "$control/scope"
+    read -r selected < "$control/selection"
+    actual=public
+    case ${GIT_DIR-} in */dupe) actual=private ;; esac
+    if [ "$scope" = "$actual" ]; then
+        case "$*" in "$selected"|"$selected "*)
+            candidate=1
+            if [ -f "$control/candidates" ]; then
+                read -r candidate < "$control/candidates"
+                candidate=$((candidate + 1))
+            fi
+            printf '%s\n' "$candidate" > "$control/candidates"
+            wanted=1
+            if [ -f "$control/occurrence" ]; then read -r wanted < "$control/occurrence"; fi
+            if [ "$candidate" -ne "$wanted" ]; then exec "$release" "$@"; fi
+            if [ -f "$control/observed-file" ]; then
+                read -r observed < "$control/observed-file"
+                if cmp -s "$observed" "$control/expected"; then
+                    printf 'equal\n' > "$control/observed"
+                else
+                    printf 'different\n' > "$control/observed"
+                fi
+            fi
+            printf 'selected\n' >> "$control/matched"
+            read -r effect < "$control/effect"
+            case $effect in
+            exit*) exit "${effect#exit }" ;;
+            truncate)
+                "$release" "$@" > "$control/answer"
+                status=$?
+                count=$(wc -c < "$control/answer")
+                [ "$count" -gt 0 ] || exit 125
+                head -c "$((count - 1))" "$control/answer"
+                exit "$status"
+                ;;
+            pause)
+                n=0
+                while [ ! -f "$control/released" ]; do
+                    [ "$n" -lt 3000 ] || exit 125
+                    sleep 0.01
+                    n=$((n + 1))
+                done
+                ;;
+            esac
+            ;;
+        esac
+    fi
+fi
 exec "$release" "$@"
 "#;
 
@@ -204,7 +258,17 @@ impl Killing<'_> {
             "git {:?} is started again before its last run was waited for",
             self.words
         );
-        for record in ["count", "parents", "killed", "kill"] {
+        for record in [
+            "count",
+            "parents",
+            "killed",
+            "kill",
+            "matched",
+            "candidates",
+            "observed",
+            "released",
+            "answer",
+        ] {
             match fs::remove_file(self.control.join(record)) {
                 Ok(()) => {}
                 Err(cause) if cause.kind() == ErrorKind::NotFound => {}
@@ -295,5 +359,130 @@ impl<'k> Started<'k> {
 impl Drop for Started<'_> {
     fn drop(&mut self) {
         self.0.set(false);
+    }
+}
+
+/// One selected Git run's effect, while every other run forwards unchanged.
+pub enum ForwardEffect {
+    Exit(i32),
+    Truncate,
+    Pause,
+}
+
+/// A command using the kill harness's one forwarder, selected by arguments and scope.
+pub struct Forwarded<'s> {
+    killing: Killing<'s>,
+}
+
+impl Scenario {
+    /// Selects an argument prefix in either the private (`GIT_DIR` ending in `/dupe`)
+    /// or public environment. The prefix ends at a word boundary.
+    pub fn forwarded(
+        &self,
+        name: &str,
+        words: &[&str],
+        private: bool,
+        prefix: &[&str],
+        effect: ForwardEffect,
+    ) -> Forwarded<'_> {
+        let killing = self.killing(name, words);
+        assert!(!prefix.is_empty());
+        fs::write(killing.control.join("selection"), prefix.join(" ")).unwrap();
+        fs::write(
+            killing.control.join("scope"),
+            if private { "private" } else { "public" },
+        )
+        .unwrap();
+        let effect = match effect {
+            ForwardEffect::Exit(code) => {
+                assert!(code > 0 && code < 256);
+                format!("exit {code}")
+            }
+            ForwardEffect::Truncate => "truncate".into(),
+            ForwardEffect::Pause => "pause".into(),
+        };
+        fs::write(killing.control.join("effect"), effect).unwrap();
+        Forwarded { killing }
+    }
+}
+
+impl Forwarded<'_> {
+    /// Selects the nth matching run, when a handler and settle use the same arguments.
+    /// This counts matching arguments and scope, never unrelated runs.
+    pub fn on_match(self, occurrence: usize) -> Self {
+        assert!(occurrence > 0);
+        fs::write(
+            self.killing.control.join("occurrence"),
+            occurrence.to_string(),
+        )
+        .unwrap();
+        self
+    }
+
+    /// Records whether `file` holds exactly `bytes` when the selected run starts.
+    pub fn observe(&self, file: &Path, bytes: &[u8]) {
+        fs::write(
+            self.killing.control.join("observed-file"),
+            file.as_os_str().as_encoded_bytes(),
+        )
+        .unwrap();
+        fs::write(self.killing.control.join("expected"), bytes).unwrap();
+    }
+
+    pub fn observed_equal(&self) {
+        assert_eq!(
+            fs::read(self.killing.control.join("observed")).unwrap(),
+            b"equal\n"
+        );
+    }
+
+    pub fn run(&self, dir: &Path) -> Output {
+        self.start(dir).wait()
+    }
+
+    /// Starts in a process group: dropping the handle cleans up a failed pause too.
+    pub fn start(&self, dir: &Path) -> ForwardedRun<'_> {
+        self.killing.prepare(None);
+        ForwardedRun {
+            forwarded: self,
+            running: self.killing.git(dir).start(),
+            _started: Started::through(&self.killing),
+        }
+    }
+}
+
+pub struct ForwardedRun<'f> {
+    forwarded: &'f Forwarded<'f>,
+    running: Running,
+    _started: Started<'f>,
+}
+
+impl ForwardedRun<'_> {
+    /// Waits until the selected run has started, with no sleep standing in for the seam.
+    pub fn selected(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !self.forwarded.killing.control.join("matched").exists() {
+            assert!(
+                !self.running.finished(),
+                "command ended before its selected run"
+            );
+            assert!(Instant::now() < deadline, "selected Git run did not start");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    pub fn release(self) -> Output {
+        fs::write(self.forwarded.killing.control.join("released"), b"").unwrap();
+        self.wait()
+    }
+
+    pub fn wait(self) -> Output {
+        let output = self.running.wait_within(Duration::from_secs(35));
+        assert_eq!(
+            fs::read(self.forwarded.killing.control.join("matched")).unwrap(),
+            b"selected\n",
+            "selected run must occur exactly once: {output:?}"
+        );
+        output
     }
 }

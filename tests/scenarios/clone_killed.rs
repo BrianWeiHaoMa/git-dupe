@@ -106,13 +106,14 @@ impl Run<'_> {
         match point {
             Point::BeforeRun(at) => at > n,
             Point::AfterRun(at) => at >= n,
-            // Settle writes the region between its last two runs.
-            Point::InsideWrite { .. } => n < self.commands.len(),
+            // Composition/Keeper: replacement follows the private listing, before
+            // the public listing and check-ignore, the final two runs.
+            Point::InsideWrite { .. } => n < self.commands.len() - 1,
         }
     }
 
-    /// Whether settle had renamed the region into place: it does so after its public
-    /// listing and before it asks `check-ignore`, the last run of all.
+    /// Composition/Keeper: settle renames after its private listing and before
+    /// its public listing and `check-ignore`, the final two runs.
     fn renamed(&self, point: Point) -> bool {
         let last = self.commands.len();
         assert_eq!(
@@ -121,7 +122,9 @@ impl Run<'_> {
             "{:?}",
             self.commands
         );
-        matches!(point, Point::BeforeRun(n) | Point::AfterRun(n) if n == last)
+        assert_eq!(self.commands[last - 2], "ls-files", "{:?}", self.commands);
+        assert_eq!(self.commands[last - 3], "ls-files", "{:?}", self.commands);
+        matches!(point, Point::BeforeRun(n) | Point::AfterRun(n) if n >= last - 1)
     }
 }
 

@@ -1,23 +1,34 @@
 //! Settle: what every command G6 covers ends with (R3).
 //!
-//! In this order: the hidden paths, from `.gitdupe` and one private listing; one public
-//! listing under the region paths and the released paths; the region replaced with one
-//! rule per region path; one exposure question about every hidden path and every released
+//! In this order: the hidden paths, from `.gitdupe` and one private listing; the region
+//! replaced with one rule per region path, a stale region left out, which hands back the
+//! other worktrees' regions as the file was read to be written where it maintained the
+//! region (`region`, `foreign`); the foreign paths, from those regions alone; one public
+//! listing under the region paths, the released paths, and the foreign paths; one
+//! exposure question about every hidden path, every released path, and every foreign
 //! path, a path the listing names being one public Git does not ignore. Each finding is
-//! one warning. A released path's warning names `git dupe hide` when `hide` would take
-//! it, which the guards decide over the same two listings, `.gitdupe` being a region path
-//! always, and only while `.gitdupe` can be read as a file, which `hide` rewrites: no
-//! further Git run asks (G9, G11, G22, G25). A listing settle needs and cannot take
-//! leaves the region as it is, because without it the hidden paths are not known and a
-//! rule would be dropped; the command keeps its status all the same, except that a list
-//! that does not fit on one command line is refused naming its count (G23).
+//! one warning. A foreign path is named only where public Git ignores it and the listing
+//! does not name it, and never where the region is left as it is (G27). A released or
+//! foreign path's warning names `git dupe hide` when `hide` would take it, which the
+//! guards decide over the same two listings, `.gitdupe` being a region path always, and
+//! only while `.gitdupe` can be read as a file, which `hide` rewrites: no further Git run
+//! asks (G9, G11, G22, G25, G27).
+//!
+//! The private listing that settle cannot take leaves the region as it is, because
+//! without it the hidden paths are not known and a rule would be dropped. The public
+//! listing comes after the replacement, because its query holds the foreign paths of the
+//! file as replaced; one that cannot be taken is one warning that exposure was not
+//! checked, the region as replaced (`Composition/Keeper`). The command keeps its status
+//! either way, except that a list that does not fit on one command line is refused naming
+//! its count (G23).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 
 use super::exposure::{self, Asked};
+use super::foreign::Foreign;
 use super::gitdupe::{self, SetAside, Source};
 use super::hidden::HiddenPaths;
 use super::region::{self, StartingRegion};
@@ -60,6 +71,7 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
         Err(failed) => return stopped(warnings, failed, Listing::Private),
     };
     let hidden = HiddenPaths::of(listed.paths, privately_tracked);
+    let root = workspace.root();
     // Released: in the starting region, neither hidden now nor below a hidden path, and
     // present by `lstat` (G9).
     let released: Vec<&[u8]> = starting
@@ -67,21 +79,42 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
         .iter()
         .map(Vec::as_slice)
         .filter(|path| !hidden.hides(path))
-        .filter(|path| fs::symlink_metadata(workspace.root().join(OsStr::from_bytes(path))).is_ok())
+        .filter(|path| fs::symlink_metadata(root.join(OsStr::from_bytes(path))).is_ok())
         .collect();
+
+    let replaced = region::replace(workspace, &hidden.region);
+    warnings.extend(replaced.warnings);
+    // A region left as it is names no foreign path (G27).
+    let others = replaced.others.unwrap_or_default();
+    let foreign = Foreign::of(&others);
+    // The ancestors looked at for a link, for the foreign paths and then for the hidden
+    // and released paths of the question, each once.
+    let mut known = HashMap::new();
+    let released_set: BTreeSet<&[u8]> = released.iter().copied().collect();
+    let standing = foreign.standing(root, &hidden, &released_set, |path| {
+        exposure::beyond_a_link(root, path, &mut known)
+    });
+
     let query: Vec<Vec<u8>> = hidden
         .region
         .iter()
         .cloned()
         .chain(released.iter().map(|path| path.to_vec()))
+        .chain(standing.iter().map(|path| path.to_vec()))
         .collect();
     let publicly_tracked = match listing::public(workspace, &query) {
         Ok(tracked) => tracked,
         Err(failed) => return stopped(warnings, failed, Listing::Public),
     };
 
-    warnings.extend(region::replace(workspace, &hidden.region));
-
+    let hideable = |path: &[u8]| {
+        hideable(
+            path,
+            &listed.source,
+            &hidden.privately_tracked,
+            &publicly_tracked,
+        )
+    };
     let asked: Vec<(&[u8], Asked)> = hidden
         .hidden
         .iter()
@@ -95,18 +128,23 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
             (path.as_slice(), kind)
         })
         .chain(released.iter().map(|path| {
-            let hideable = hideable(
-                path,
-                &listed.source,
-                &hidden.privately_tracked,
-                &publicly_tracked,
-            );
-            (*path, Asked::Released { hideable })
+            let released = Asked::Released {
+                hideable: hideable(path),
+                owners: foreign.holding(path),
+            };
+            (*path, released)
+        }))
+        .chain(standing.iter().map(|path| {
+            let foreign = Asked::Foreign {
+                hideable: hideable(path),
+                owners: foreign.holding(path),
+            };
+            (*path, foreign)
         }))
         .collect();
     // A question that failed, a signal included, is its warning alone: the command keeps
     // its status (`Composition/Keeper`).
-    let answered = exposure::warnings(workspace, &asked, &publicly_tracked);
+    let answered = exposure::warnings(workspace, &asked, &publicly_tracked, &mut known);
     warnings.extend(answered.warnings);
     let refused = answered.refused;
 
@@ -144,7 +182,8 @@ fn hideable(
         .is_none()
 }
 
-/// Settle stopped at a listing: the region is left as it is.
+/// Settle stopped at a listing: the private one before the replacement, the region left
+/// as it is, or the public one after it, the region as replaced.
 fn stopped(mut warnings: Vec<Vec<u8>>, failed: Failed, listing: Listing) -> Settled {
     if let Failed::TooLong(count) = failed {
         return Settled {
@@ -163,7 +202,7 @@ fn stopped(mut warnings: Vec<Vec<u8>>, failed: Failed, listing: Listing) -> Sett
         Listing::Public => [
             b"cannot list what public Git tracks under the hidden paths (",
             &failed.cause()[..],
-            b"); the managed region is left as it is and exposure was not checked",
+            b"); the managed region is replaced, but exposure was not checked",
         ]
         .concat(),
     };

@@ -5,13 +5,16 @@ use std::fs::TryLockError;
 use std::os::unix::fs::{MetadataExt, symlink};
 
 mod lock;
+mod stale;
 
 fn paths(paths: &[&[u8]]) -> Vec<Vec<u8>> {
     paths.iter().map(|path| path.to_vec()).collect()
 }
 
 /// A directory of the test's own below the system's temporary one, removed after, with
-/// `.git/info` and the private Git directory `.git/dupe` made inside it.
+/// `.git/info` and the private Git directory `.git/dupe` made inside it, and the private
+/// Git directories of the linked worktrees `agent` and `other`, whose regions the checks
+/// write, so that their regions stand for repositories that are there (G27).
 struct Scratch(PathBuf);
 
 impl Scratch {
@@ -21,6 +24,9 @@ impl Scratch {
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(path.join(".git/info")).unwrap();
         fs::create_dir(path.join(".git/dupe")).unwrap();
+        for name in ["agent", "other"] {
+            fs::create_dir_all(path.join(".git/worktrees").join(name).join("dupe")).unwrap();
+        }
         Scratch(path)
     }
 
@@ -132,7 +138,7 @@ fn a_replacement_that_cannot_write_leaves_the_file_as_it_was() {
     fs::set_permissions(scratch.exclude(), fs::Permissions::from_mode(0o640)).unwrap();
     let before = identity(&scratch.exclude());
 
-    let warnings = replace(&workspace, &paths(&[b".gitdupe"]));
+    let warnings = replace(&workspace, &paths(&[b".gitdupe"])).warnings;
     assert_eq!(warnings.len(), 1);
     assert!(
         warnings[0].starts_with(b"cannot replace the managed region of "),
@@ -153,7 +159,7 @@ fn a_region_is_appended_after_the_others_and_an_equal_composition_writes_nothing
     fs::set_permissions(scratch.exclude(), fs::Permissions::from_mode(0o640)).unwrap();
     let region = paths(&[b".gitdupe", b"notes"]);
 
-    assert!(replace(&workspace, &region).is_empty());
+    assert!(replace(&workspace, &region).warnings.is_empty());
     let composed = [
         FOREIGN,
         b"\n# BEGIN git-dupe\n/.gitdupe\n/notes\n# END git-dupe\n",
@@ -164,7 +170,7 @@ fn a_region_is_appended_after_the_others_and_an_equal_composition_writes_nothing
 
     // The same region again: the file is the one already there, not a copy of it.
     let written = identity(&scratch.exclude());
-    assert!(replace(&workspace, &region).is_empty());
+    assert!(replace(&workspace, &region).warnings.is_empty());
     assert!(scratch.lock_is_free());
     assert_eq!(identity(&scratch.exclude()), written);
     assert_eq!(fs::read(scratch.exclude()).unwrap(), composed);
@@ -213,7 +219,7 @@ fn a_deletion_where_this_worktrees_region_does_not_stand_writes_nothing() {
     symlink(scratch.0.join("nowhere"), scratch.exclude()).unwrap();
     assert!(delete(&workspace).is_ok_and(|deleted| deleted.paths.is_empty()));
     assert!(scratch.lock_is_free());
-    let warnings = replace(&workspace, &paths(&[b".gitdupe"]));
+    let warnings = replace(&workspace, &paths(&[b".gitdupe"])).warnings;
     assert!(
         warnings.len() == 1
             && warnings[0].ends_with(
@@ -243,7 +249,7 @@ fn a_link_at_the_file_becomes_a_regular_file_even_when_its_target_holds_the_comp
     let target_before = identity(&target);
     symlink(&target, scratch.exclude()).unwrap();
 
-    let warnings = replace(&workspace, &region);
+    let warnings = replace(&workspace, &region).warnings;
     assert!(scratch.lock_is_free());
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert!(warnings[0].ends_with(b", and its target is untouched"));
@@ -356,7 +362,7 @@ fn info_made_by_another_command_first_is_looked_at_again_and_read() {
     // Made here, it holds the region alone.
     let scratch = Scratch::new("race-none");
     fs::remove_dir(scratch.info()).unwrap();
-    assert!(replace(&scratch.workspace(), &region).is_empty());
+    assert!(replace(&scratch.workspace(), &region).warnings.is_empty());
     assert_eq!(fs::read(scratch.exclude()).unwrap(), &appended[1..]);
 }
 
@@ -383,7 +389,7 @@ fn only_this_worktrees_region_is_read_and_refused_beyond_a_link() {
     assert_eq!(start(&linked).paths, paths(&[b"agent"]));
     assert!(matches!(delete(&linked), Err(NotDeleted::BeyondALink(_))));
     assert!(scratch.lock_is_free());
-    assert!(!replace(&main, &paths(&[b".gitdupe"])).is_empty());
+    assert!(!replace(&main, &paths(&[b".gitdupe"])).warnings.is_empty());
     assert!(scratch.lock_is_free());
 
     // The main worktree's region there is the main worktree's alone.

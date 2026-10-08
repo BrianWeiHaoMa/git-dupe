@@ -26,7 +26,8 @@
 //!   configuration the caller took, the URLs of its remotes and the default remote.
 //! - A name a line must give that may hold a newline, a word the user typed or a file Git
 //!   reads rules from, is written by `quoted`, as Git quotes a path, so that the front's
-//!   lines and the keeper's warnings stay one line each (F8).
+//!   lines and the keeper's warnings stay one line each (F8); a path a warning offers to a
+//!   command it names, by `shell_word`, so that the command as shown takes it whole.
 
 pub mod add;
 pub mod clean;

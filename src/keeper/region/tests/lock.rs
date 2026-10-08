@@ -41,7 +41,19 @@ fn the_lock_is_held_from_before_the_file_is_read_until_after_the_rename() {
         |info| fs::create_dir(info),
         &locking,
     );
-    assert!(updated.is_ok_and(|updated| updated.warning.is_none()));
+    let updated = updated.ok().expect("the update failed");
+    assert!(updated.warning.is_none());
+    // The region another command wrote just before the lock was taken is among those the
+    // update read and hands back: the file as read under the lock, not before it.
+    let others: Vec<(Owner, Vec<Vec<u8>>)> = updated
+        .others
+        .into_iter()
+        .map(|other| (other.owner, other.paths))
+        .collect();
+    assert_eq!(
+        others,
+        [(Owner::Linked(b"agent".to_vec()), paths(&[b"agent"]))]
+    );
     let composed = b"mine\n\
         # BEGIN git-dupe worktree agent\n/agent\n# END git-dupe worktree agent\nlast\n\
         # BEGIN git-dupe\n/.gitdupe\n# END git-dupe\n";
@@ -79,10 +91,13 @@ fn a_lock_that_cannot_be_taken_is_no_wait_and_nothing_follows_it() {
 
     // The replacement: one warning naming the directory, the cause, and what it may
     // expose, and the file as it was.
-    let warnings = replaced(
+    let replaced = replaced(
         &workspace,
         update(&workspace, Change::Set(&region), refused, &failing),
     );
+    // Nothing maintained: no other region is handed back for G27 to name.
+    assert!(replaced.others.is_none());
+    let warnings = replaced.warnings;
     assert_eq!(
         warnings,
         vec![
@@ -129,7 +144,7 @@ fn a_lock_that_cannot_be_taken_is_no_wait_and_nothing_follows_it() {
     // Where the common Git directory cannot be opened, the product's own replacement and
     // deletion say so, and make nothing.
     let gone = Workspace::at_root(&scratch.0.join("gone"));
-    let warnings = replace(&gone, &region);
+    let warnings = replace(&gone, &region).warnings;
     assert!(
         warnings.len() == 1 && warnings[0].starts_with(b"cannot take the lock on "),
         "{warnings:?}"

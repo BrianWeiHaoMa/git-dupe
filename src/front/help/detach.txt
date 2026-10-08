@@ -2,10 +2,10 @@ usage: git dupe detach [--force]
 
 Removes this worktree's private repository, and its region of
 .git/info/exclude, whose rules kept the project's Git ignoring its hidden
-paths; the rest of .git/info/exclude, the other worktrees' regions included,
-stays as it is. Every file stays on disk, .gitdupe included, and a warning
-names each formerly hidden path that the project's Git can now see; a last
-hint counts them.
+paths; the other worktrees' regions stay, but for one whose private
+repository is gone. Every file stays on disk, .gitdupe included. A warning
+names each formerly hidden path the project's Git can now see, which a last
+hint counts, and each that another worktree still hides, naming it.
 
 Without --force it refuses, changing nothing, while the private repository
 has a change not committed (to a file it tracks, or a staged addition or

@@ -384,7 +384,11 @@ fn each_commands_text_says_what_it_does_and_how_it_differs_from_git() {
             "detach",
             &[
                 "Removes this worktree's private repository, and its region of .git/info/exclude",
-                "the other worktrees' regions included, stays as it is",
+                // G27: a region whose private repository is gone is dropped by any
+                // worktree's command, detach's included; G3 names what another worktree
+                // still hides.
+                "the other worktrees' regions stay, but for one whose private repository is gone",
+                "and each that another worktree still hides, naming it",
                 "Every file stays on disk",
                 "There is no Git command of this name.",
             ],

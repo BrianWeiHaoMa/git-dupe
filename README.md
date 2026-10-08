@@ -138,7 +138,8 @@ files, or `cargo uninstall git-dupe` after an install from source.
   against the private repository unchanged.
 - **What it writes.** Of its own accord, git-dupe writes the worktree's private
   repository, its own marked region of `.git/info/exclude` (and `.git/info` when it is
-  missing), and `.gitdupe`;
+  missing, and the removal of a region whose worktree's private repository is gone),
+  and `.gitdupe`;
   `git dupe clone` also writes the private files it checks out, and `git dupe clean`
   deletes what your `git clean` would, hidden paths excepted. Beyond that, a Git command
   writes where your words tell Git to. No hook, no daemon, no edit to `.gitignore` or to
@@ -232,8 +233,10 @@ files, or `cargo uninstall git-dupe` after an install from source.
   overwrites yours. Commit private work first; `git dupe restore` brings it back; then
   one repository has to give the path up.
 - **How do I get out?** `git dupe detach` removes the worktree's private repository and
-  its own region of `.git/info/exclude`, leaving the rest of that file, leaves every file on disk,
-  `.gitdupe` included, and warns which paths the project can now see. Without `--force`
+  its own region of `.git/info/exclude`, leaving the rest of that file but the region of
+  a worktree whose private repository is gone, leaves every file on disk, `.gitdupe`
+  included, and warns which paths the project can now see and which another worktree
+  still hides. Without `--force`
   it refuses while anything is uncommitted or on no remote; history removed by
   `detach --force` is gone, since git-dupe keeps no copy. Then delete
   `~/.local/bin/git-dupe` and `~/.local/share/man/man1/git-dupe.1`, or

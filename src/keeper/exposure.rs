@@ -2,6 +2,8 @@
 //! removal ask about, from one public `git check-ignore --no-index -v -n -z --stdin` from
 //! the root, and the warnings of its answer, which `warnings` alone words; and the same
 //! question about the ancestors of the paths `clean` spares under `-X` (`Holds/G16`).
+//! Settle also asks it about the foreign paths, and both settle and `detach` about paths
+//! another worktree's region hides (`foreign`, G3, G27).
 //!
 //! The question and its records are written and read by `runner::records`, which says
 //! whether a record reports its path ignored; what a path that is not ignored means is
@@ -9,11 +11,13 @@
 //! question answers, because Git applies no ignore rule to a path its index tracks (G7,
 //! `Holds/G6, G8, G9`): `--no-index` reads the rules as if nothing were tracked. Exit 1
 //! means no path matched, which is an answer; any other failure answers nothing, and a
-//! partial output is never read as an answer. A failure is one warning; a run killed by
-//! a signal is also handed back, because `detach` ends with it (`Composition/Front`,
-//! "Lines"), while settle keeps the command's status (`Composition/Keeper`). A path
-//! with a symbolic link among its ancestors makes Git fail the whole run, so it is
-//! never fed: it is named as lying beyond one instead.
+//! partial output is never read as an answer: a path is named as still hidden by another
+//! worktree only on an answer that says public Git ignores it, never on a question that
+//! failed. A failure is one warning; a run killed by a signal is also handed back,
+//! because `detach` ends with it (`Composition/Front`, "Lines"), while settle keeps the
+//! command's status (`Composition/Keeper`). A path with a symbolic link among its
+//! ancestors makes Git fail the whole run, so it is never fed: it is named as lying
+//! beyond one instead.
 
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsStr;
@@ -22,8 +26,9 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use super::Failed;
+use super::foreign::{self, Owner};
 use crate::guards::operand;
-use crate::guards::quoted::quoted;
+use crate::guards::quoted::{quoted, shell_word};
 use crate::runner::locate::Workspace;
 use crate::runner::{End, Failure, Run, records};
 
@@ -35,19 +40,38 @@ pub struct Exposed {
 }
 
 /// What a path asked about is to the command asking, which decides what its warning says
-/// when public Git does not ignore it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Asked {
+/// when public Git does not ignore it, and, for a path no longer hidden here, the other
+/// worktrees whose regions hide it, which its warning names when public Git ignores it
+/// and does not track it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Asked<'o> {
     /// A hidden path, which the region ignores unless a rule re-includes it (G6).
     Hidden,
     /// A path the region hid when the command began that is no longer hidden (G9), and
     /// whether `git dupe hide` would hide it again, which its warning then names (G25).
-    Released { hideable: bool },
+    Released {
+        hideable: bool,
+        owners: Vec<&'o Owner>,
+    },
     /// A hidden path whose region `detach` deleted (G3).
-    Left,
+    Left { owners: Vec<&'o Owner> },
     /// A hidden path both indexes track: public Git does not ignore it, and settle's own
     /// warning of G8 is the one that names it.
     TrackedByBoth,
+    /// A foreign path: named only while public Git ignores it and does not track it, and
+    /// never as one it can see, because it is not hidden here (G27).
+    Foreign {
+        hideable: bool,
+        owners: Vec<&'o Owner>,
+    },
+}
+
+/// What the question said of one path.
+enum Answer<'e> {
+    Ignored,
+    Exposed(&'e Exposed),
+    /// The question failed, and said nothing of it.
+    Unanswered,
 }
 
 /// Why public Git does not ignore a path.
@@ -74,19 +98,22 @@ pub struct Answered {
 /// Asks public Git about each path in `paths` but those beyond a symbolic link, and
 /// returns, in order, one warning per path beyond a link, the one warning that the
 /// question failed, unless its list did not fit, then one per path public Git does not
-/// ignore, worded by what the path is to the asker; how many of those name a path as now
-/// visible; and the run where a signal killed the question. `tracked`, the paths the asker's public listing named, are not ignored
-/// whatever the question answers, and are named so even when it failed.
+/// ignore, worded by what the path is to the asker, or that it ignores, does not track,
+/// and another worktree's region hides; how many of those name a path as now visible; and
+/// the run where a signal killed the question. `tracked`, the paths the asker's public
+/// listing named, are not ignored whatever the question answers, and are named so even
+/// when it failed. `known` holds the asker's answers for ancestors already looked at.
 pub fn warnings(
     workspace: &Workspace,
     paths: &[(&[u8], Asked)],
     tracked: &BTreeSet<Vec<u8>>,
+    known: &mut HashMap<Vec<u8>, bool>,
 ) -> Answered {
     let mut warnings = Vec::new();
-    let mut known = HashMap::new();
     let mut asked = Vec::new();
-    for &(path, kind) in paths {
-        if beyond_a_link(workspace.root(), path, &mut known) {
+    for (path, kind) in paths {
+        let path = *path;
+        if beyond_a_link(workspace.root(), path, known) {
             warnings.push(
                 [
                     path,
@@ -102,38 +129,46 @@ pub fn warnings(
     let question: Vec<&[u8]> = asked.iter().map(|(path, _)| *path).collect();
     let mut refused = None;
     let mut killed = None;
-    let answers = ask(workspace, &question).unwrap_or_else(|failed| {
-        match failed {
-            Failed::TooLong(count) => refused = Some(count),
-            failed => {
-                warnings.push(
-                    [
-                        b"cannot ask public Git whether it ignores the hidden paths (",
-                        &failed.cause()[..],
-                        b"); exposure was not checked",
-                    ]
-                    .concat(),
-                );
-                if let Failed::Exited(End::Signal(_)) = failed {
-                    killed = Some(failed);
-                }
+    let answers = ask(workspace, &question).map_err(|failed| match failed {
+        Failed::TooLong(count) => refused = Some(count),
+        failed => {
+            warnings.push(
+                [
+                    b"cannot ask public Git whether it ignores the hidden paths (",
+                    &failed.cause()[..],
+                    b"); exposure was not checked",
+                ]
+                .concat(),
+            );
+            if let Failed::Exited(End::Signal(_)) = failed {
+                killed = Some(failed);
             }
         }
-        // Unanswered: what the listing says alone stands.
-        question.iter().map(|_| None).collect()
     });
     let mut visible = 0;
-    for ((path, kind), answer) in asked.iter().zip(&answers) {
+    for (at, (path, kind)) in asked.iter().enumerate() {
+        // Unanswered: what the listing says alone stands.
+        let answer = match &answers {
+            Ok(answers) => match &answers[at] {
+                None => Answer::Ignored,
+                Some(exposed) => Answer::Exposed(exposed),
+            },
+            Err(()) => Answer::Unanswered,
+        };
         let seen = if tracked.contains(*path) {
             Some(Seen::Tracked)
+        } else if let Answer::Exposed(exposed) = answer {
+            Some(Seen::Exposed(exposed))
         } else {
-            answer.as_ref().map(Seen::Exposed)
+            None
         };
-        if let Some(line) = seen.and_then(|seen| exposed_line(path, &seen, *kind)) {
-            if matches!(kind, Asked::Left | Asked::Released { .. }) {
+        if let Some(line) = seen.and_then(|seen| exposed_line(path, &seen, kind)) {
+            if matches!(kind, Asked::Left { .. } | Asked::Released { .. }) {
                 visible += 1;
             }
             warnings.push(line);
+        } else if matches!(answer, Answer::Ignored) && !tracked.contains(*path) {
+            warnings.extend(still_hidden_line(path, kind));
         }
     }
     Answered {
@@ -144,23 +179,36 @@ pub fn warnings(
     }
 }
 
-fn exposed_line(path: &[u8], seen: &Seen, kind: Asked) -> Option<Vec<u8>> {
-    let line = match kind {
-        Asked::TrackedByBoth => return None,
-        Asked::Released { hideable: false } => {
-            [path, b" is no longer hidden and is visible to public Git"].concat()
+/// The warning for a path public Git ignores and does not track, where another
+/// worktree's region hides it and this worktree no longer does or never did.
+fn still_hidden_line(path: &[u8], kind: &Asked) -> Option<Vec<u8>> {
+    let (owners, hideable) = match kind {
+        Asked::Released { hideable, owners } | Asked::Foreign { hideable, owners } => {
+            (owners, *hideable)
         }
+        Asked::Left { owners } => (owners, false),
+        Asked::Hidden | Asked::TrackedByBoth => return None,
+    };
+    (!owners.is_empty()).then(|| foreign::still_hidden(path, owners, hideable))
+}
+
+fn exposed_line(path: &[u8], seen: &Seen, kind: &Asked) -> Option<Vec<u8>> {
+    let line = match kind {
+        Asked::TrackedByBoth | Asked::Foreign { .. } => return None,
+        Asked::Released {
+            hideable: false, ..
+        } => [path, b" is no longer hidden and is visible to public Git"].concat(),
         // The path is root-relative, and so is the command, as `hide`'s own hint says of
         // `unhide`; `--` keeps a path beginning with `-` a path.
-        Asked::Released { hideable: true } => [
+        Asked::Released { hideable: true, .. } => [
             path,
             b" is no longer hidden and is visible to public Git; run from the root, \
               'git dupe hide -- ",
-            path,
+            &shell_word(path),
             b"' hides it again",
         ]
         .concat(),
-        Asked::Left => [path, b" was hidden and is now visible to public Git"].concat(),
+        Asked::Left { .. } => [path, b" was hidden and is now visible to public Git"].concat(),
         Asked::Hidden => match seen {
             Seen::Tracked => [
                 path,
@@ -291,7 +339,13 @@ mod tests {
     #[test]
     fn a_released_path_names_hide_only_where_hide_would_take_it() {
         let seen = Seen::Exposed(&Exposed { rule: None });
-        let line = |hideable| exposed_line(b"-x", &seen, Asked::Released { hideable });
+        let line = |hideable| {
+            let released = Asked::Released {
+                hideable,
+                owners: Vec::new(),
+            };
+            exposed_line(b"-x", &seen, &released)
+        };
         assert_eq!(
             line(false).unwrap(),
             b"-x is no longer hidden and is visible to public Git"

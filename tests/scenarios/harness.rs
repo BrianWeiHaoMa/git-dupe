@@ -41,7 +41,7 @@ pub use exclude_lock::{commands_wait_for_the_lock, hold_the_lock, lock_is_free};
 pub use files::{copy, write};
 pub use fresh::FreshDirectory;
 pub use front::{general_text, usage_line};
-pub use kill::Point;
+pub use kill::{ForwardEffect, Point};
 pub use man::{
     TERMINAL, asking_for_the_page, command_lines, every_text_shown,
     holds_a_line_of_the_general_text, lines_of, manpage, page_texts_present, shown_by_man,

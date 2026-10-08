@@ -58,6 +58,10 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
     under_each_release(|s| {
         let root = s.dir().join("project");
         s.attached_repository(&root);
+        // G27: only live regions are copied; these foreign private directories stand.
+        for name in [OsStr::new("agent"), OsStr::from_bytes(b"caf\xe9")] {
+            fs::create_dir_all(root.join(".git/worktrees").join(name).join("dupe")).unwrap();
+        }
         let exclude = root.join(".git/info/exclude");
         fs::write(&exclude, around(&main_region(&[b"/.gitdupe"]))).unwrap();
         fs::set_permissions(&exclude, fs::Permissions::from_mode(0o640)).unwrap();

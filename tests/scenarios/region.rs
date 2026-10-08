@@ -332,7 +332,7 @@ fn every_literal_rule_ignores_its_path_and_leaves_its_sibling_visible() {
 }
 
 #[test]
-fn an_argument_list_over_arg_max_is_refused_with_its_count_before_any_write() {
+fn an_argument_list_over_arg_max_is_refused_with_its_count_after_replacing_the_region() {
     under_each_release(|s| {
         let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
         assert!(limit.status.success());
@@ -352,6 +352,10 @@ fn an_argument_list_over_arg_max_is_refused_with_its_count_before_any_write() {
             fs::write(dir.join(".gitdupe"), &listed).unwrap();
             let exclude = dir.join(".git/info/exclude");
             let before = fs::read(&exclude).unwrap();
+            let index = s
+                .private(&dir)
+                .git(["ls-files", "--stage", "-z"])
+                .succeeds();
             let output = s.git(["dupe", "stash", "-u"]).from(&from).run();
             assert_eq!(output.end, End::Code(128), "{output:?}");
             assert!(output.stdout.is_empty(), "{output:?}");
@@ -366,8 +370,26 @@ fn an_argument_list_over_arg_max_is_refused_with_its_count_before_any_write() {
             );
             names_number(fatal[1], count + 1);
             assert!(output.lines("warning").is_empty(), "{output:?}");
-            assert_eq!(fs::read(&exclude).unwrap(), before);
-            assert!(region(&dir).is_none());
+            // Composition/Keeper: the public listing is refused after replacement.
+            let mut expected = before;
+            expected.extend_from_slice(b"# BEGIN git-dupe\n/.gitdupe\n");
+            for path in listed
+                .split(|&byte| byte == b'\n')
+                .filter(|p| !p.is_empty())
+            {
+                expected.extend_from_slice(b"/");
+                expected.extend_from_slice(path);
+                expected.push(b'\n');
+            }
+            expected.extend_from_slice(b"# END git-dupe\n");
+            assert!(fs::read(&exclude).unwrap() == expected, "region differs");
+            assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), listed);
+            assert_eq!(
+                s.private(&dir)
+                    .git(["ls-files", "--stage", "-z"])
+                    .succeeds(),
+                index
+            );
         }
     });
 }
