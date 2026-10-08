@@ -1,13 +1,12 @@
 //! The private status run: option words, confinement, and the boundaries before it.
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::harness::{
     End, Output, Runs, Scenario, holds, names, names_number, private_add, private_commit,
-    region_rules, run_traced, under_each_release, write,
+    region_rules, run_traced, under_each_release, write, write_executable,
 };
 
 const SCOPE: [&str; 4] = [
@@ -281,12 +280,11 @@ fn caller_literal_pathspec_settings_and_public_hooks_keep_the_private_status() {
         }
         let captured = s.dir().join("hook-status");
         let hook = dir.join(".git/hooks/pre-commit");
-        fs::write(
+        write_executable(
+            s,
             &hook,
             b"#!/bin/sh\ngit dupe status --porcelain > \"$STATUS_OUTPUT\"\n",
-        )
-        .unwrap();
-        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         write(&dir, "README.md", b"public change\n");
         s.git(["add", "README.md"]).from(&dir).succeeds();
         let output = s

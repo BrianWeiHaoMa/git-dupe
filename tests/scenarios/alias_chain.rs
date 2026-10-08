@@ -2,15 +2,14 @@
 //! that carry it, and every chain git-dupe passes through for Git to run or report.
 
 use std::ffi::OsStr;
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, Output, Scenario, Tree, daily_state, names, private_add, private_commit, region_rules,
-    run_traced, unchanged, under_each_release, warnings_in_any_order, write,
+    run_traced, unchanged, under_each_release, warnings_in_any_order, write, write_executable,
 };
 
 fn fixture(s: &Scenario, name: &str) -> PathBuf {
@@ -283,8 +282,11 @@ fn shell_aliases_run_as_private_git_runs_them() {
 fn an_alias_exec_path_does_not_preempt_the_next_alias() {
     under_each_release(|s| {
         let programs = s.dir().join("programs");
-        write(&programs, "git-zed", b"#!/bin/sh\nprintf ran > marker\n");
-        fs::set_permissions(programs.join("git-zed"), fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(
+            s,
+            &programs.join("git-zed"),
+            b"#!/bin/sh\nprintf ran > marker\n",
+        );
         for global in [true, false] {
             let dir = fixture(s, if global { "global" } else { "private" });
             alias(

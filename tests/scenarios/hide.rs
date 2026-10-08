@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::harness::{
     End, Output, Tree, gitdupe_written_and_staged, holds, lines_in_order, names, names_number,
     names_the_route_to_private, private_add, region_rules, unchanged, under_each_release,
-    usage_line,
+    usage_line, write_executable,
 };
 
 /// The hints, in order, each naming its path and `git dupe unhide`.
@@ -416,8 +416,7 @@ fn public_hooks_and_repository_variables_stage_only_in_the_private_index() {
         s.project(&dir);
         s.init(&dir);
         let hook = dir.join(".git/hooks/pre-commit");
-        fs::write(&hook, b"#!/bin/sh\ngit dupe hide x\n").unwrap();
-        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(s, &hook, b"#!/bin/sh\ngit dupe hide x\n");
         fs::write(dir.join("README.md"), b"commit me\n").unwrap();
         s.git(["add", "README.md"]).from(&dir).succeeds();
         let output = s

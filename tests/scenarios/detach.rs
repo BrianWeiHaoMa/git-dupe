@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::harness::{
     End, Output, Scenario, Transfer, Tree, changed_since, daily_warnings, detached, holds,
     locate_words, names, now_visible, private_add, private_commit, region, region_rules,
-    run_traced, unchanged, under_each_release, warnings, write,
+    run_traced, unchanged, under_each_release, warnings, write, write_executable,
 };
 
 const USER_BEFORE: &[u8] = b"# developer before\r\n*.o\n# caf\xe9\n";
@@ -352,17 +352,15 @@ fn killing_check_ignore(s: &Scenario) -> PathBuf {
         [release.as_os_str().as_bytes(), b"\n"].concat(),
     )
     .unwrap();
-    let script = control.join("git");
-    fs::write(
-        &script,
-        "#!/bin/sh\n\
+    write_executable(
+        s,
+        &control.join("git"),
+        b"#!/bin/sh\n\
          unset GIT_EXEC_PATH\n\
          for word; do\n    [ \"$word\" = check-ignore ] && kill -TERM $$\ndone\n\
          read -r release < \"${0%/*}/release\"\n\
          exec \"$release\" \"$@\"\n",
-    )
-    .unwrap();
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     control
 }
 

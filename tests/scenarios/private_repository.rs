@@ -5,11 +5,10 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, daily_edited, daily_state, holds, under_each_release, write,
+    End, Output, Scenario, daily_edited, daily_state, holds, under_each_release, write_executable,
 };
 
 /// Plain Git, given the private Git directory and nothing else.
@@ -129,8 +128,7 @@ fn its_own_status_and_template_list_no_project_file_unless_asked_and_no_public_h
         // A public hook that refuses every commit refuses the project's, and is not run
         // for a private one.
         let hook = dir.join(".git/hooks/pre-commit");
-        write(&dir, ".git/hooks/pre-commit", b"#!/bin/sh\nexit 1\n");
-        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(s, &hook, b"#!/bin/sh\nexit 1\n");
         let public = s
             .git(["commit", "-q", "--allow-empty", "-m", "public"])
             .from(&dir)

@@ -3,12 +3,12 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, Runs, Scenario, Tree, daily_state, holds, names, private_add, private_commit,
     region_rules, run_traced, unchanged, under_each_release, warnings_in_any_order, write,
+    write_executable,
 };
 
 fn fixture(s: &Scenario, name: &str) -> PathBuf {
@@ -32,11 +32,6 @@ fn private_head(s: &Scenario, dir: &Path) -> Vec<u8> {
 fn stage_change(s: &Scenario, dir: &Path) {
     write(dir, "notes/a.md", b"changed\n");
     private_add(s, dir, "notes/a.md");
-}
-
-fn hook(dir: &Path, path: &str, body: &[u8]) {
-    write(dir, path, body);
-    fs::set_permissions(dir.join(path), fs::Permissions::from_mode(0o755)).unwrap();
 }
 
 #[test]
@@ -212,9 +207,9 @@ fn a_private_hook_signal_becomes_the_shell_exit_status() {
     under_each_release(|s| {
         let dir = fixture(s, "workspace");
         stage_change(s, &dir);
-        hook(
-            &dir,
-            ".git/dupe/hooks/pre-commit",
+        write_executable(
+            s,
+            &dir.join(".git/dupe/hooks/pre-commit"),
             b"#!/bin/sh\nkill -TERM $PPID\n",
         );
         let head = private_head(s, &dir);
@@ -236,9 +231,9 @@ fn a_public_commit_hook_commits_the_private_index() {
     under_each_release(|s| {
         let dir = fixture(s, "workspace");
         stage_change(s, &dir);
-        hook(
-            &dir,
-            ".git/hooks/pre-commit",
+        write_executable(
+            s,
+            &dir.join(".git/hooks/pre-commit"),
             b"#!/bin/sh\ngit dupe commit -m inner\n",
         );
         write(&dir, "README.md", b"public change\n");

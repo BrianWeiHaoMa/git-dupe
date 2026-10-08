@@ -11,6 +11,7 @@ use std::path::Path;
 
 use crate::harness::{
     End, general_text, holds, oldest_supported, run_traced, under_each_release, usage_line,
+    write_executable,
 };
 
 #[test]
@@ -20,7 +21,8 @@ fn help_needs_only_the_installed_executable_outside_any_repository() {
         let installed = s.dir().join("installed");
         fs::create_dir(&installed).unwrap();
         let executable = installed.join("git-dupe");
-        fs::copy(built, &executable).unwrap();
+        write_executable(s, &executable, &fs::read(built).unwrap());
+        fs::set_permissions(&executable, fs::metadata(built).unwrap().permissions()).unwrap();
         assert_eq!(
             fs::metadata(&executable).unwrap().permissions().mode(),
             fs::metadata(built).unwrap().permissions().mode()

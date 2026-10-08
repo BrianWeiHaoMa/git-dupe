@@ -4,7 +4,8 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::Path;
 
-/// Writes `bytes` at `path` below `dir`, making the directories above it first.
+/// Writes `bytes` at `path` below `dir`, making the directories above it first. A file a
+/// scenario runs is written by `write_executable` instead.
 pub fn write(dir: &Path, path: &str, bytes: &[u8]) {
     let path = dir.join(path);
     fs::create_dir_all(path.parent().unwrap()).unwrap();

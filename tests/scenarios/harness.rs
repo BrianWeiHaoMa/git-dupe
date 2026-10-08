@@ -7,6 +7,7 @@ mod clean;
 mod concurrent;
 mod detach;
 mod exclude_lock;
+mod executable;
 mod files;
 mod fresh;
 mod front;
@@ -38,6 +39,7 @@ pub use detach::{
     daily_warnings, detached, now_visible, stale_file_timestamp, stale_timestamp, warnings,
 };
 pub use exclude_lock::{commands_wait_for_the_lock, hold_the_lock, lock_is_free};
+pub use executable::write_executable;
 pub use files::{copy, write};
 pub use fresh::FreshDirectory;
 pub use front::{general_text, usage_line};

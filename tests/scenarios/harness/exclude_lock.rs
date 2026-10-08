@@ -10,7 +10,7 @@
 //! script, whose parent is git-dupe. Before it runs the release's own `git`, the script
 //! reads `/proc/locks` for a lock its parent holds on the common Git directory.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::executable::write_executable;
 use super::output::Output;
 use super::scenario::Scenario;
 
@@ -104,19 +105,7 @@ impl Scenario {
     pub fn watching_the_lock(&self, name: &str, common: &Path) -> LockWatch<'_> {
         let control = self.dir().join(name);
         fs::create_dir(&control).unwrap_or_else(|cause| panic!("{}: {cause}", control.display()));
-        // Written by a process of its own, as `kill.rs` writes its script and for its
-        // reason: no descriptor of this process open to write it can reach a child.
-        let script = control.join("git");
-        self.program(
-            "/bin/sh",
-            [
-                OsStr::new("-c"),
-                OsStr::new(r#"cat > "$0" && chmod 755 "$0""#),
-                script.as_os_str(),
-            ],
-        )
-        .input(WATCHING.as_bytes())
-        .succeeds();
+        write_executable(self, &control.join("git"), WATCHING.as_bytes());
         let release = self.release_git().as_os_str().as_encoded_bytes();
         fs::write(control.join("release"), [release, b"\n"].concat()).unwrap();
         let inode = fs::metadata(common).unwrap().ino();

@@ -2,10 +2,11 @@
 
 use std::ffi::OsString;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use crate::harness::{End, Scenario, daily_edited, leaving_public_git, under_each_release, write};
+use crate::harness::{
+    End, Scenario, daily_edited, leaving_public_git, under_each_release, write, write_executable,
+};
 
 /// Read the staged changes and the blobs; both settings and hook runs must match these.
 fn private_staging(s: &Scenario, dir: &Path) -> Vec<u8> {
@@ -61,8 +62,7 @@ fn public_pre_commit_add_stages_only_in_the_private_index() {
         let dir = daily_edited(s, "hook");
         let public_paths = s.git(["ls-files", "-z"]).from(&dir).succeeds().stdout;
         let hook = dir.join(".git/hooks/pre-commit");
-        fs::write(&hook, b"#!/bin/sh\ngit dupe add .\n").unwrap();
-        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(s, &hook, b"#!/bin/sh\ngit dupe add .\n");
         write(&dir, "README.md", b"public change\n");
         s.git(["add", "README.md"]).from(&dir).succeeds();
         let output = s

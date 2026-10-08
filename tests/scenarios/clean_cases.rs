@@ -6,12 +6,12 @@
 //! (G16, S4, S5, S9).
 
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
     End, Scenario, Tree, Twin, changed_since, copy, holds, names, private_add, private_commit,
-    run_traced, under_each_release, write,
+    run_traced, under_each_release, write, write_executable,
 };
 
 /// An attached project whose `.gitignore`, committed, is `ignore`, with an untracked
@@ -467,8 +467,7 @@ fn from_a_pre_commit_hook_clean_spares_what_the_hooks_index_makes_a_nested_repos
         let settled = s.git(["dupe", "status"]).from(&dir).run();
         assert_eq!(settled.end, End::Code(0), "{settled:?}");
         let hook = dir.join(".git/hooks/pre-commit");
-        fs::write(&hook, b"#!/bin/sh\ngit dupe clean -ffdx\n").unwrap();
-        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(s, &hook, b"#!/bin/sh\ngit dupe clean -ffdx\n");
 
         let before = Tree::of(&dir);
         let output = s

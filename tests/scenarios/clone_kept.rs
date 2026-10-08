@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, Output, Scenario, Tree, holds, private_commit, region_rules, under_each_release,
-    warnings_in_any_order, write,
+    warnings_in_any_order, write, write_executable,
 };
 
 /// `path` below `dir`, from its bytes.
@@ -88,8 +88,7 @@ fn present_files_are_kept_and_named_and_absent_ones_written_as_committed() {
         // Private history beside `daily_state`'s: an executable, a symbolic link, files
         // whose names are no UTF-8 or hold a space, and the files the second machine has
         // its own of.
-        file(first, b"bin/run", b"#!/bin/sh\n");
-        fs::set_permissions(first.join("bin/run"), fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(s, &first.join("bin/run"), b"#!/bin/sh\n");
         symlink("notes/a.md", first.join("link")).unwrap();
         let committed: [(&[u8], &[u8]); 6] = [
             (b"same.txt", b"same\n"),

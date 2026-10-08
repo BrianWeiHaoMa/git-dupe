@@ -30,12 +30,13 @@
 //! when the scenario fails; no product hook or second forwarding script is needed.
 
 use std::cell::Cell;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use super::executable::write_executable;
 use super::output::{End, Output};
 use super::running::Running;
 use super::scenario::Scenario;
@@ -152,20 +153,7 @@ impl Scenario {
     pub fn killing(&self, name: &str, words: &[&str]) -> Killing<'_> {
         let control = self.dir().join(name);
         fs::create_dir(&control).unwrap_or_else(|cause| panic!("{}: {cause}", control.display()));
-        // Written by a process of its own: a descriptor of this process open to write it
-        // could be inherited by a child another scenario's thread is starting, and running
-        // the script while that child holds it fails with ETXTBSY.
-        let script = control.join("git");
-        self.program(
-            "/bin/sh",
-            [
-                OsStr::new("-c"),
-                OsStr::new(r#"cat > "$0" && chmod 755 "$0""#),
-                script.as_os_str(),
-            ],
-        )
-        .input(SCRIPT.as_bytes())
-        .succeeds();
+        write_executable(self, &control.join("git"), SCRIPT.as_bytes());
         fs::write(
             control.join("release"),
             [self.release_git().as_os_str().as_encoded_bytes(), b"\n"].concat(),

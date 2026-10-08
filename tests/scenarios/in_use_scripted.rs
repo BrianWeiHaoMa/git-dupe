@@ -4,12 +4,12 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use crate::harness::{
     End, Scenario, Tree, changed_since, daily_state, holds, leaving_public_git, names,
     region_rules, run_traced, staged_gitdupe, unchanged, under_each_release, usage_line, write,
+    write_executable,
 };
 
 fn usage_error(s: &Scenario, dir: &Path, command: &str, options: &[&str], word: &[u8]) {
@@ -212,8 +212,7 @@ fn agent_then_script_then_unguarded_git_walk() {
         assert_eq!(add.end, End::Code(0), "{add:?}");
         let editor = s.dir().join("editor");
         let record = s.dir().join("editor-record");
-        write(s.dir(), "editor", b"#!/bin/sh\nprintf '%s\\n' \"$GIT_TERMINAL_PROMPT\" \"$GIT_EDITOR\" \"$0\" \"$#\" \"$1\" > \"$EDITOR_RECORD\"\nprintf 'From editor\\n' > \"$1\"\n");
-        fs::set_permissions(&editor, fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(s, &editor, b"#!/bin/sh\nprintf '%s\\n' \"$GIT_TERMINAL_PROMPT\" \"$GIT_EDITOR\" \"$0\" \"$#\" \"$1\" > \"$EDITOR_RECORD\"\nprintf 'From editor\\n' > \"$1\"\n");
         let commit = leaving_public_git(
             &dir,
             s.git(["dupe", "commit"])
