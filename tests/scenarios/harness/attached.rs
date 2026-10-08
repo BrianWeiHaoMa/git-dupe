@@ -1,10 +1,11 @@
 //! Attached workspaces: a private repository made as `init` makes one, `init` itself for
 //! scenarios about something else, private runs for building fixtures and reading the
-//! private index, `.gitdupe` as staged there, and the managed region read back.
+//! private index, `.gitdupe` as staged there, and a worktree's region read back.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use super::output::End;
@@ -144,26 +145,47 @@ pub fn gitdupe_written_and_staged(s: &Scenario, dir: &Path, content: &[u8]) {
     assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), content);
 }
 
-/// The managed region of a workspace's `.git/info/exclude`, as bytes.
+/// One worktree's region of an exclude file, as bytes.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Region {
-    /// The bytes before the line `# BEGIN git-dupe`.
+    /// The bytes before the region's begin marker.
     pub before: Vec<u8>,
     /// The lines between the markers, without their newlines.
     pub rules: Vec<Vec<u8>>,
-    /// The bytes after the line `# END git-dupe`, empty when there is no end marker.
+    /// The bytes after the end marker's line, empty when there is no end marker.
     pub after: Vec<u8>,
 }
 
-/// The region of the workspace at `directory`, or `None` when the exclude file holds no
-/// begin marker or does not exist. The first begin marker and the first end marker after
-/// it bound the region; without an end marker it runs to the end of the file.
+/// The region of the main worktree of the workspace at `directory`, as `region_in` reads
+/// it from `<directory>/.git`.
 pub fn region(directory: &Path) -> Option<Region> {
-    let file = directory.join(".git/info/exclude");
+    region_in(&directory.join(".git"), None)
+}
+
+/// The region of the worktree `name`, the main worktree's for `None`, in
+/// `info/exclude` of the common Git directory `common_directory` — `<root>/.git`, or a
+/// bare repository's own directory — or `None` when the file holds no begin marker of
+/// that worktree or does not exist. The region begins at the first line that is exactly
+/// its begin marker, `# BEGIN git-dupe` or `# BEGIN git-dupe worktree <name>`, and ends
+/// at the first line after it that is an end marker of any worktree, `# END git-dupe` or
+/// `# END git-dupe worktree ` and a name, or at the end of the file.
+pub fn region_in(common_directory: &Path, name: Option<&OsStr>) -> Option<Region> {
+    let file = common_directory.join("info/exclude");
     let bytes = match fs::read(&file) {
         Ok(bytes) => bytes,
         Err(cause) if cause.kind() == io::ErrorKind::NotFound => return None,
         Err(cause) => panic!("{}: {cause}", file.display()),
+    };
+    let mut begin_marker = b"# BEGIN git-dupe".to_vec();
+    if let Some(name) = name {
+        begin_marker.extend_from_slice(b" worktree ");
+        begin_marker.extend_from_slice(name.as_bytes());
+    }
+    let is_end = |line: &[u8]| {
+        line == b"# END git-dupe"
+            || line
+                .strip_prefix(b"# END git-dupe worktree ")
+                .is_some_and(|name| !name.is_empty())
     };
     let mut offset = 0;
     let mut lines = Vec::new();
@@ -171,13 +193,11 @@ pub fn region(directory: &Path) -> Option<Region> {
         lines.push((offset, line.strip_suffix(b"\n").unwrap_or(line)));
         offset += line.len();
     }
-    let begin = lines
-        .iter()
-        .position(|(_, line)| *line == b"# BEGIN git-dupe")?;
+    let begin = lines.iter().position(|(_, line)| *line == begin_marker)?;
     let mut rules = Vec::new();
     let mut after = Vec::new();
     for (index, (_, line)) in lines.iter().enumerate().skip(begin + 1) {
-        if *line == b"# END git-dupe" {
+        if is_end(line) {
             let next = lines
                 .get(index + 1)
                 .map_or(bytes.len(), |(start, _)| *start);

@@ -182,7 +182,23 @@ impl Workspace {
     /// main working tree only and a word Git reads as a value fails as outside a
     /// repository (`Holds/G24`).
     pub fn help_directory(&self) -> PathBuf {
-        private_directory(&self.git_directory)
+        private_directory(self.git_directory())
+    }
+
+    /// The Git directory, absolute, as the locate run printed it: the common Git
+    /// directory in the main worktree, `<common Git directory>/worktrees/<name>` in a
+    /// linked one (S17).
+    pub fn git_directory(&self) -> &Path {
+        &self.git_directory
+    }
+
+    /// In a linked worktree, its name: the last component of the Git directory, as bytes
+    /// (E9, S17). The main worktree has none. Neither the root's name nor any other Git
+    /// run decides it, so that a worktree moved with `git worktree move` keeps it.
+    pub fn worktree_name(&self) -> Option<&OsStr> {
+        self.linked()
+            .then(|| self.git_directory().file_name())
+            .flatten()
     }
 
     /// Whether the locate run, made for a command that attaches, found a superproject:
@@ -234,6 +250,25 @@ impl Workspace {
         let root = root.as_os_str().as_bytes();
         let answer = [root, b"/.git\n", root, b"/.git\n", root, b"\n\n"].concat();
         Workspace::read(&answer, false).expect("an absolute root without a newline")
+    }
+
+    /// The linked worktree `name` of the common Git directory `common`, at `root`, all
+    /// absolute, as the locate run names it from that root.
+    pub fn linked_at(common: &Path, name: &[u8], root: &Path) -> Workspace {
+        let common = common.as_os_str().as_bytes();
+        let root = root.as_os_str().as_bytes();
+        let answer = [
+            common,
+            b"/worktrees/",
+            name,
+            b"\n",
+            common,
+            b"\n",
+            root,
+            b"\n\n",
+        ]
+        .concat();
+        Workspace::read(&answer, false).expect("absolute paths without a newline")
     }
 }
 
@@ -414,6 +449,57 @@ mod tests {
                 "{}",
                 answer.escape_ascii()
             );
+        }
+    }
+
+    #[test]
+    fn the_worktree_is_named_by_its_git_directory_alone() {
+        // The main worktree has no name, its Git directory the common one.
+        let main = read(b"/w/repo/.git\n/w/repo/.git\n/w/repo\nsub/\n");
+        assert_eq!(main.git_directory(), Path::new("/w/repo/.git"));
+        assert_eq!(main.worktree_name(), None);
+        // A linked worktree's name is its Git directory's last component, whatever its
+        // root is called: an ordinary repository's, a bare one's, and one whose name is
+        // not UTF-8.
+        for (answer, git_directory, name) in [
+            (
+                &b"/w/repo/.git/worktrees/agent\n/w/repo/.git\n/w/project-agent\n\n"[..],
+                &b"/w/repo/.git/worktrees/agent"[..],
+                &b"agent"[..],
+            ),
+            (
+                b"/w/bare.git/worktrees/one\n/w/bare.git\n/w/elsewhere/two\nsub/\n",
+                b"/w/bare.git/worktrees/one",
+                b"one",
+            ),
+            (
+                b"/w/repo/.git/worktrees/caf\xe9\xff\n/w/repo/.git\n/w/moved\n\n",
+                b"/w/repo/.git/worktrees/caf\xe9\xff",
+                b"caf\xe9\xff",
+            ),
+        ] {
+            let workspace = read(answer);
+            assert_eq!(
+                workspace.git_directory(),
+                Path::new(OsStr::from_bytes(git_directory)),
+                "{}",
+                answer.escape_ascii()
+            );
+            assert_eq!(
+                workspace.worktree_name(),
+                Some(OsStr::from_bytes(name)),
+                "{}",
+                answer.escape_ascii()
+            );
+            // Nothing else moves with the name: the private repository is still the
+            // common Git directory's, and a linked worktree is still not attached.
+            assert_eq!(
+                workspace.private_directory(),
+                private_directory(workspace.common_directory())
+            );
+            assert!(workspace.linked());
+            assert!(!workspace.attached());
+            assert!(!workspace.attached_now());
         }
     }
 

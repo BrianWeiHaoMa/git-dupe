@@ -98,3 +98,4 @@ mod usage;
 mod version;
 mod workspace;
 mod workspace_lifetime;
+mod worktree_regions;

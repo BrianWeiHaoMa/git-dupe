@@ -25,8 +25,8 @@ mod trace;
 mod tree;
 
 pub use attached::{
-    daily_edited, daily_state, gitdupe_written_and_staged, private_add, private_commit, region,
-    region_rules, staged_gitdupe,
+    Region, daily_edited, daily_state, gitdupe_written_and_staged, private_add, private_commit,
+    region, region_in, region_rules, staged_gitdupe,
 };
 pub use clean::{EVERY_KIND_SPARED, Twin, hidden_path_of_every_kind};
 pub use detach::{
