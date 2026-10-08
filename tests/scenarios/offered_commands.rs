@@ -2,9 +2,10 @@
 //! by a shell as the line shows it (G25): `clone`'s lines for a path it kept or a file in
 //! the way, `hide`'s hint, the route by which a path the project's Git tracks becomes
 //! private, and the alias G19 refuses. Each is offered for a path holding a space and a
-//! `$`, which a shell would split or expand if written raw, and, where the command reads
-//! a pathspec or an operand, for paths whose leading `:` or `*`, `?`, `[`, or `\` the
-//! command would read as magic or a pattern if written as they stand.
+//! `$`, which a shell would split or expand if written raw, `hide`'s also for one holding
+//! `!` and `'`, which an interactive shell would expand inside double quotes, and, where
+//! the command reads a pathspec or an operand, for paths whose leading `:` or `*`, `?`,
+//! `[`, or `\` the command would read as magic or a pattern if written as they stand.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -17,6 +18,10 @@ use crate::harness::{
 
 /// A path a shell reads as two words, the second expanded, unless it is quoted.
 const SPACED: &str = "two $words";
+
+/// A path whose `!!` an interactive shell replaces by its last command inside double
+/// quotes, and whose `'` ends single quotes.
+const BANGED: &str = "it's x!!y";
 
 /// Runs `command`, as a line offers it, through `/bin/sh` from `root`.
 fn run_as_offered(s: &Scenario, root: &Path, command: &[u8]) -> Output {
@@ -115,7 +120,7 @@ fn hides_offers_to_add_and_unhide_take_the_path_alone() {
         let root = s.dir().join("project");
         s.attached_project(&root);
         hidden_decoy(s, &root);
-        for path in [SPACED, ":colon"] {
+        for path in [SPACED, ":colon", BANGED] {
             let file = format!("{path}/a.md");
             write(&root, &file, b"note\n");
             let word = format!("./{path}");

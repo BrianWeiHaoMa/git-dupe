@@ -56,11 +56,16 @@ fn warning(path: &str, owners: &str, hideable: bool) -> Vec<u8> {
 }
 
 /// The path as the offered command shows it, so that a shell takes it as one word (G25):
-/// as it stands when no shell reads a byte of it specially, else double-quoted.
+/// as it stands when no shell reads a byte of it specially, else double-quoted, except
+/// single-quoted when it holds `!`, which an interactive shell expands from its history
+/// inside double quotes.
 fn one_word(path: &str) -> String {
     let plain = |byte: u8| byte.is_ascii_alphanumeric() || b"._/@%+=:,-".contains(&byte);
     if path.bytes().all(plain) {
         return path.to_string();
+    }
+    if path.contains('!') {
+        return format!("'{}'", path.replace('\'', "'\\''"));
     }
     let escaped: String = path
         .chars()

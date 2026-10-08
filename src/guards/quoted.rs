@@ -38,14 +38,28 @@ pub fn quoted(name: &[u8]) -> Vec<u8> {
 
 /// `word` as a POSIX shell reads it back as one word: as it stands when it holds only
 /// bytes no shell treats specially, else between double quotes, with `\`, `"`, `$`,
-/// and `` ` `` escaped. A byte above ASCII is no shell's concern, and a leading `-` is
-/// the command's, which writes `--` before the word.
+/// and `` ` `` escaped. A word holding `!` goes between single quotes instead, each `'`
+/// in it written `'\''`, because an interactive bash or zsh expands `!` from its history
+/// inside double quotes, where no escape stops it, and never inside single quotes. A
+/// byte above ASCII is no shell's concern, and a leading `-` is the command's, which
+/// writes `--` before the word.
 pub fn shell_word(word: &[u8]) -> Vec<u8> {
     let plain = |byte: &u8| {
         byte.is_ascii_alphanumeric() || b"._/@%+=:,-".contains(byte) || !byte.is_ascii()
     };
     if !word.is_empty() && word.iter().all(plain) {
         return word.to_vec();
+    }
+    if word.contains(&b'!') {
+        let mut quoted = vec![b'\''];
+        for &byte in word {
+            match byte {
+                b'\'' => quoted.extend_from_slice(b"'\\''"),
+                _ => quoted.push(byte),
+            }
+        }
+        quoted.push(b'\'');
+        return quoted;
     }
     let mut quoted = vec![b'"'];
     for &byte in word {
@@ -72,7 +86,15 @@ mod tests {
         assert_eq!(shell_word(b"a\"b\\c$d`e"), b"\"a\\\"b\\\\c\\$d\\`e\"");
         assert_eq!(shell_word(b"~home"), b"\"~home\"");
         assert_eq!(shell_word(b"#x;y&z|w"), b"\"#x;y&z|w\"");
-        assert_eq!(shell_word(b"!bang"), b"\"!bang\"");
+    }
+
+    #[test]
+    fn a_word_holding_a_bang_is_single_quoted_where_no_history_expansion_reaches_it() {
+        assert_eq!(shell_word(b"!bang"), b"'!bang'");
+        assert_eq!(shell_word(b"x!!y"), b"'x!!y'");
+        assert_eq!(shell_word(b"a b!$c\"d\\e`f"), b"'a b!$c\"d\\e`f'");
+        // A single quote ends the quoting, is escaped, and the quoting starts again.
+        assert_eq!(shell_word(b"it's!"), b"'it'\\''s!'");
     }
 
     #[test]

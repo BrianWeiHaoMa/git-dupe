@@ -676,9 +676,10 @@ fn foreign_and_released_hide_remedies_take_their_path_whole() {
     under_each_release(|s| {
         let main = main_worktree(s, "project");
         let wt = linked(s, &main, OsStr::new("agent"));
-        // Quotes and `$` a shell reads, and a leading `:` that `hide` reads as magic
+        // Quotes and `$` a shell reads, `!` that an interactive shell expands from its
+        // history inside double quotes, and a leading `:` that `hide` reads as magic
         // unless it is typed `./:colon`.
-        let paths = [":colon", "it's $HOME", "two words"];
+        let paths = [":colon", "it's $HOME", "it's x!!y", "two words"];
         for path in paths {
             s.git(["dupe", "hide", "--", &format!("./{path}")])
                 .from(&main.root)
@@ -698,7 +699,7 @@ fn foreign_and_released_hide_remedies_take_their_path_whole() {
         }
         assert_eq!(
             fs::read(wt.root.join(".gitdupe")).unwrap(),
-            b":colon\nit's $HOME\ntwo words\n"
+            b":colon\nit's $HOME\nit's x!!y\ntwo words\n"
         );
         let settled = s.git(["dupe", "status"]).from(&wt.root).succeeds();
         assert!(settled.lines("warning").is_empty(), "{settled:?}");
@@ -725,7 +726,7 @@ fn foreign_and_released_hide_remedies_take_their_path_whole() {
             .succeeds();
         assert_eq!(
             fs::read(wt.root.join(".gitdupe")).unwrap(),
-            b":colon\nit's $HOME\ntwo words\nown words\n"
+            b":colon\nit's $HOME\nit's x!!y\ntwo words\nown words\n"
         );
         let settled = s.git(["dupe", "status"]).from(&wt.root).succeeds();
         assert!(settled.lines("warning").is_empty(), "{settled:?}");
