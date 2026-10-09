@@ -5,8 +5,9 @@
   ?social appended for the social-preview variant (adds the title block and sizes
   the panel to exactly 1280x640).
 
-  The transcript is real git-dupe v0.1.0 output under Git 2.43.0, reproduced
-  byte for byte; the only edit is the shortened directory in the "Initialized" line.
+  The transcript is real git-dupe output under Git 2.43.0, from this repository's
+  tree after v0.1.0, reproduced byte for byte; the only edit is the shortened
+  directory in the "Initialized" line.
 
   Rendered from the repository root with Node 22 and Playwright (Chromium), with
   `node` on PATH and the playwright package resolvable by require() (a local
@@ -102,25 +103,23 @@
     <p>A second Git repo inside .git for the files that are yours, not the project's.</p>
   </header>
 <pre class="transcript"><span class="ps1">$ </span><span class="cmd">git status --short</span>
-<span class="untracked">?? CLAUDE.md</span>
+<span class="untracked">?? AGENTS.md</span>
 <span class="untracked">?? notes/</span>
 
 <span class="ps1">$ </span><span class="cmd">git dupe init</span>
 Initialized empty Git repository in /home/brian/code/project/.git/dupe/
-<span class="ps1">$ </span><span class="cmd">git dupe add notes/ CLAUDE.md</span>
+<span class="ps1">$ </span><span class="cmd">git dupe add notes/ AGENTS.md</span>
 <span class="hl">hint:</span> notes is now hidden from the project's Git; run from the root, 'git dupe unhide -- notes' stops hiding it
-<span class="ps1">$ </span><span class="cmd">git dupe add -f .env.local</span>
-<span class="ps1">$ </span><span class="cmd">git dupe commit -m "my private files"</span>
-[main (root-commit) 6ece80b] my private files
- 4 files changed, 4 insertions(+)
- create mode 100644 .env.local
+<span class="ps1">$ </span><span class="cmd">git dupe commit -m "Notes and agent instructions"</span>
+[main (root-commit) 3eb3af9] Notes and agent instructions
+ 3 files changed, 3 insertions(+)
  create mode 100644 .gitdupe
- create mode 100644 CLAUDE.md
+ create mode 100644 AGENTS.md
  create mode 100644 notes/todo.md
 
 <span class="ps1">$ </span><span class="cmd">git status --short</span>              <span class="comment"># the project: nothing</span>
 <span class="ps1">$ </span><span class="cmd">git dupe log --oneline</span>          <span class="comment"># your files</span>
-<span class="hl">6ece80b</span> my private files</pre>
+<span class="hl">3eb3af9</span> Notes and agent instructions</pre>
 </div>
 </body>
 </html>

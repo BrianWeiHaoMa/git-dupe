@@ -1,5 +1,5 @@
 A day of work, from the root of the project of the quick start. Since then
-you edited .env.local and wrote notes/today.md; new beside them are
+you edited AGENTS.md and wrote notes/today.md; new beside them are
 .vscode/settings.json, which the project's .gitignore ignores, docs/notes.md,
 and src/new.py, and a build left build/out.js.
 

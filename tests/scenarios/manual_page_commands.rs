@@ -3,17 +3,17 @@
 //! text as the repository holds it and run, in order, in the state the texts describe,
 //! each exiting 0; then what the texts say those commands did is observed through
 //! git-dupe's own statuses, the two indexes, the refs, and the files. The quick start
-//! runs in a project whose `.gitignore` ignores `.env.local`, on `main` and on a branch of
-//! another name, and the examples in the state it left.
+//! runs in a project whose `.gitignore` ignores `.vscode/` and `build/`, on `main` and on
+//! a branch of another name, and the examples in the state it left.
 //!
 //! A command line is indented, or the page fills it into a paragraph and nothing runs it.
 //! It holds `git dupe` and plain words, letters, digits, and `-_./:=@,+%`, a double-quoted
 //! run of them being one word, so that it runs here as `s.git(["dupe", …])`, with no
 //! shell. An option word holds no `/`, no other word nor a part of one after an `=` begins
 //! with `/`, and no word holds `..` among its parts, so that a line run from a root inside
-//! the scenario's directory names no place outside it. The one placeholder is
-//! `<private-url>`, the URL of the developer's private repository: it stands for the empty
-//! bare repository the quick start tells the developer to make, made here inside the
+//! the scenario's directory names no place outside it. The one placeholder is `<url>`,
+//! the URL of the developer's private repository: it stands for the empty bare
+//! repository the quick start tells the developer to make, made here inside the
 //! scenario's directory with the project's branch as its default. Each text's lines run
 //! from the root of the project, except that a `git dupe clone` line begins the second
 //! machine, a fresh `git clone` of the project, from whose root it and every later line of
@@ -31,7 +31,7 @@ use crate::harness::{
 };
 
 /// The placeholder for the URL of the developer's private repository.
-const PRIVATE_URL: &str = "<private-url>";
+const REMOTE_URL: &str = "<url>";
 
 /// The texts followed here, by file name. A text holding a command line is one of them.
 const QUICK_START: &str = "10-quick-start.txt";
@@ -42,8 +42,8 @@ const PLAIN: &[u8] = b"-_./:=@,+%<>";
 
 /// The words of a command line as a shell splits it when it holds only plain words: at
 /// single spaces, a double-quoted run of plain words and spaces being one word without its
-/// quotes. Fails on anything else a shell reads, on a placeholder other than
-/// `<private-url>`, and on a word that could name a place outside the root it runs from:
+/// quotes. Fails on anything else a shell reads, on a placeholder other than `<url>`,
+/// and on a word that could name a place outside the root it runs from:
 /// an option with a path attached, as `-f/tmp/x`, an absolute path, or a way up.
 fn words(line: &str) -> Vec<String> {
     let mut words = Vec::new();
@@ -75,7 +75,7 @@ fn words(line: &str) -> Vec<String> {
 
     for word in &words {
         assert!(
-            word == PRIVATE_URL || !word.contains(['<', '>']),
+            word == REMOTE_URL || !word.contains(['<', '>']),
             "a placeholder these scenarios do not know, in {word:?}: {line}"
         );
         let outside = (word.starts_with('-') && word.contains('/'))
@@ -137,7 +137,7 @@ impl Machines {
                 root = &self.second;
             }
             let words = words.iter().skip(1).map(|word| {
-                if word == PRIVATE_URL {
+                if word == REMOTE_URL {
                     self.private_remote.as_os_str().to_owned()
                 } else {
                     word.into()
@@ -249,17 +249,17 @@ fn follow_the_page(s: &Scenario, branch: &str) {
         let name = path.file_name().unwrap().to_str().unwrap().to_owned();
         match name.as_str() {
             QUICK_START => {
-                // The text's own words: notes/ holds notes of yours, and .env.local your
-                // settings, a file the project's .gitignore ignores.
+                // The text's own words: notes/ holds notes of yours, and AGENTS.md your
+                // instructions for a coding agent, neither of them the project's.
                 write(first, "notes/todo.md", b"todo\n");
-                write(first, ".env.local", b"settings\n");
+                write(first, "AGENTS.md", b"instructions\n");
                 machines.follow(s, &path, &text);
                 quick_start_holds(s, &machines, branch);
             }
             EXAMPLES => {
-                // The text's own words: since the quick start, .env.local edited,
+                // The text's own words: since the quick start, AGENTS.md edited,
                 // notes/today.md written, three new files, and a build product.
-                write(first, ".env.local", b"settings of the day\n");
+                write(first, "AGENTS.md", b"instructions of the day\n");
                 write(first, "notes/today.md", b"today\n");
                 write(first, ".vscode/settings.json", b"{}\n");
                 write(first, "docs/notes.md", b"notes on the docs\n");
@@ -298,7 +298,7 @@ fn follow_the_page(s: &Scenario, branch: &str) {
 /// same paths are hidden; neither machine's Git lists a private file.
 fn quick_start_holds(s: &Scenario, machines: &Machines, branch: &str) {
     let (first, second) = (&machines.first, &machines.second);
-    let tracked: Vec<Vec<u8>> = [".env.local", ".gitdupe", "notes/todo.md"]
+    let tracked: Vec<Vec<u8>> = [".gitdupe", "AGENTS.md", "notes/todo.md"]
         .map(|path| path.as_bytes().to_vec())
         .to_vec();
     assert_eq!(privately_tracked(s, first), tracked);
@@ -314,7 +314,7 @@ fn quick_start_holds(s: &Scenario, machines: &Machines, branch: &str) {
         assert_eq!(public_status(s, root), b"", "{}", root.display());
         assert_eq!(private_status(s, root), b"", "{}", root.display());
     }
-    for path in [".env.local", ".gitdupe", "notes/todo.md"] {
+    for path in [".gitdupe", "AGENTS.md", "notes/todo.md"] {
         assert_eq!(
             fs::read(second.join(path)).unwrap(),
             fs::read(first.join(path)).unwrap(),
@@ -331,9 +331,9 @@ fn examples_hold(s: &Scenario, machines: &Machines, ran: &Ran) {
     let first = &machines.first;
     assert_eq!(listed(first), [".vscode", "notes", "scratch"]);
     let private_files = [
-        ".env.local",
         ".gitdupe",
         ".vscode/settings.json",
+        "AGENTS.md",
         "docs/notes.md",
         "notes/today.md",
         "notes/todo.md",
@@ -347,11 +347,11 @@ fn examples_hold(s: &Scenario, machines: &Machines, ran: &Ran) {
         private_files.map(str::as_bytes),
         "src/new.py, which nothing hides, is not taken"
     );
-    let env = s
+    let instructions = s
         .private(first)
-        .git(["cat-file", "blob", "HEAD:.env.local"])
+        .git(["cat-file", "blob", "HEAD:AGENTS.md"])
         .succeeds();
-    assert_eq!(env.stdout, b"settings of the day\n");
+    assert_eq!(instructions.stdout, b"instructions of the day\n");
     let branch = s
         .private(first)
         .git(["symbolic-ref", "HEAD"])

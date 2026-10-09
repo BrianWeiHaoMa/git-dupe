@@ -1,5 +1,5 @@
 usage: git dupe [-h | --version] <command> [<args>]
-git-dupe versions private files: every Git command runs on their repository as
+git-dupe versions your own files: every Git command runs on their repository as
 "git dupe <command>". The project's Git ignores a hidden path: .gitdupe, a path
 it lists ("git dupe hide" or by hand), or a file "git dupe add <path>" tracks.
 

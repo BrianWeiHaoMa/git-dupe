@@ -26,6 +26,15 @@ Every change a user of git-dupe would notice, newest first, in the form of
   private repository is gone, after `git worktree remove` or `prune`, is dropped by
   the next such command, or `detach`, in any worktree.
 
+### Changed
+
+- The first line of `git dupe help` and the manual page's quick start and examples
+  present git-dupe as versioning the files of a checkout that are yours and not the
+  project's, notes and an instruction file for a coding agent among them: the quick
+  start runs `git dupe add notes/ AGENTS.md`, and the `-f` that a file the project
+  ignores takes is shown in the examples, with `.vscode/`, and explained under FILES
+  THE PROJECT IGNORES. No command changes.
+
 ### Fixed
 
 - Where a symbolic link or a file stands at `.git/dupe`, or at a linked worktree's
