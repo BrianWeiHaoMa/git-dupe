@@ -1,6 +1,6 @@
 [package]
 name = "git-dupe"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Versions the files in a checkout that are yours and not the project's, notes, scripts, and agent instruction files among them, in a second Git repository inside the project's own .git, driven with Git's own commands as git dupe"
 license = "MIT"
