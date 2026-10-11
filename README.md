@@ -186,11 +186,12 @@ files, or `cargo uninstall git-dupe` after an install from source.
 
 ## Limits
 
-- **Linux only, for now.** The specification promises behavior on Linux, on a local,
-  case-sensitive filesystem, and that is what the suite runs under. Nothing known rules
-  macOS out, but its default filesystem is case-insensitive, outside the envelope, so a
-  port is more than a rebuild. If you want one, say so in
-  [issue #1](https://github.com/BrianWeiHaoMa/git-dupe/issues/1).
+- **Linux today; macOS is specified and under way.** The specification now covers macOS
+  too, its default case-insensitive volume included, naming the one difference that
+  volume makes: git-dupe compares paths as spelled, so a path spelled in another case is
+  another path to it, while the project's Git ignores a hidden path in every spelling of
+  its ASCII case. The suite and the release run on Linux until the port lands;
+  [issue #1](https://github.com/BrianWeiHaoMa/git-dupe/issues/1) tracks it.
 - **Git 2.43.0 or newer, below 3.0.0.** No single feature needs it; it is the floor the
   suite covers, and Ubuntu 24.04's stock Git. [Install](#install) says what older
   distributions ship.
