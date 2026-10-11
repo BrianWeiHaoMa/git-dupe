@@ -10,7 +10,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    End, Scenario, Tree, Worktree, holds, locate_words, names, under_each_release,
+    End, Scenario, Tree, Worktree, holds, locate_words, name_accepted, names, under_each_release,
 };
 
 /// `git dupe <words>` from `directory` must be the refusal of an unattached repository:
@@ -162,10 +162,19 @@ fn a_linked_worktree_is_unattached_until_its_own_init_whatever_the_main_worktree
     under_each_release(|s| {
         // The main worktree unattached, and one that a directory at `.git/dupe` makes
         // attached: its linked worktrees are unattached all the same, and the refusal
-        // names no path of the main worktree's, one that is not UTF-8 included.
+        // names no path of the main worktree's, one that is not UTF-8 included where the
+        // filesystem holds such a name, and one of ASCII alone where it refuses it.
+        let suffix: &[u8] = match name_accepted(
+            s.dir(),
+            b"caf\xe9",
+            "workspace: a main worktree named by bytes that are no UTF-8",
+        ) {
+            true => b"-caf\xe9",
+            false => b"-cafe",
+        };
         for (name, attached) in [("plain", false), ("attached", true)] {
             let main = s.dir().join(OsStr::from_bytes(
-                [name.as_bytes(), b"-caf\xe9"].concat().as_slice(),
+                [name.as_bytes(), suffix].concat().as_slice(),
             ));
             let linked = s.dir().join(format!("linked-of-{name}"));
             s.repository(&main);

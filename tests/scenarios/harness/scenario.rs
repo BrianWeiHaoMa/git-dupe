@@ -225,11 +225,16 @@ impl Git<'_> {
         self
     }
 
-    /// A file to open for the run's standard output, in place of capturing it: a device
-    /// that refuses every write, for one. `Output::stdout` is then empty.
-    pub fn standard_output_to(mut self, file: &Path) -> Self {
-        self.stdout_to = Some(file.to_path_buf());
-        self
+    /// Its standard output a file that refuses every write, in place of capturing it: an
+    /// empty regular file in the scenario's directory, under `file_size_limit` of no block
+    /// with `SIGXFSZ` ignored, so that every write of the run to a file fails with `EFBIG`
+    /// and the writer goes on. A regular file, because the limit bounds files and not
+    /// pipes; not `/dev/full`, which macOS lacks. `Output::stdout` is then empty.
+    pub fn standard_output_refusing_writes(mut self) -> Self {
+        let file = self.scenario.dir().join("standard-output-refusing-writes");
+        fs::write(&file, b"").unwrap_or_else(|cause| panic!("{}: {cause}", file.display()));
+        self.stdout_to = Some(file);
+        self.file_size_limit(0).file_size_signal_ignored()
     }
 
     /// Bytes to feed on the run's standard input, in place of no input.

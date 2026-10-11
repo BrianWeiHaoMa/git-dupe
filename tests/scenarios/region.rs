@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, names, names_number, refused_stash_untracked, region,
-    region_rules, stash_refusal_first, stash_untracked_line, under_each_release,
+    End, Output, Scenario, Tree, name_accepted, names, names_number, refused_stash_untracked,
+    region, region_rules, stash_refusal_first, stash_untracked_line, under_each_release,
 };
 
 const ONLY_GITDUPE: &[u8] = b"# BEGIN git-dupe\n/.gitdupe\n# END git-dupe\n";
@@ -271,8 +271,14 @@ fn an_exclude_directory_warns_and_changes_nothing_under_git() {
 #[test]
 fn every_literal_rule_ignores_its_path_and_leaves_its_sibling_visible() {
     under_each_release(|s| {
-        let paths: [(&[u8], &[u8], &[u8]); 10] = [
-            (b"has space", b"has_space", b"/has\\ space"),
+        // A path that is not UTF-8 is left out where the filesystem refuses such a name.
+        let not_utf8 = name_accepted(
+            s.dir(),
+            b"caf\xe9",
+            "region: the rule of a path named by bytes that are no UTF-8",
+        );
+        let paths: Vec<(&[u8], &[u8], &[u8])> = [
+            (&b"has space"[..], &b"has_space"[..], &b"/has\\ space"[..]),
             (b"trail ", b"trail", b"/trail\\ "),
             (b"#hash", b"hash", b"/\\#hash"),
             (b"!bang", b"bang", b"/\\!bang"),
@@ -282,11 +288,14 @@ fn every_literal_rule_ignores_its_path_and_leaves_its_sibling_visible() {
             (b"back\\slash", b"backslash", b"/back\\\\slash"),
             (b"cr\rx", b"crx", b"/cr[\r]x"),
             (b"caf\xe9", b"cafe", b"/caf\xe9"),
-        ];
+        ]
+        .into_iter()
+        .filter(|(path, _, _)| not_utf8 || std::str::from_utf8(path).is_ok())
+        .collect();
         for below in [false, true] {
             let (dir, from) = fixture_workspace(s, below);
             let mut listed = Vec::new();
-            for (path, sibling, _) in paths {
+            for &(path, sibling, _) in &paths {
                 listed.extend_from_slice(path);
                 listed.push(b'\n');
                 fs::write(dir.join(OsStr::from_bytes(path)), b"private\n").unwrap();
@@ -317,7 +326,7 @@ fn every_literal_rule_ignores_its_path_and_leaves_its_sibling_visible() {
                 .run();
             assert_eq!(status.end, End::Code(0), "{status:?}");
             let records: Vec<&[u8]> = status.stdout.split(|&byte| byte == 0).collect();
-            for (path, sibling, _) in paths {
+            for &(path, sibling, _) in &paths {
                 for (prefix, name) in [(b"!! ".as_slice(), path), (b"?? ".as_slice(), sibling)] {
                     let expected = [prefix, name].concat();
                     assert!(

@@ -237,7 +237,7 @@ fn output_that_cannot_be_written_is_a_refusal_and_never_a_panic() {
         for words in invocations {
             let refusal = s
                 .git(["dupe"].iter().chain(words))
-                .standard_output_to(Path::new("/dev/full"))
+                .standard_output_refusing_writes()
                 .run();
             // One line of git-dupe's own, not a panic's text; 128, not a panic's 101.
             refusal.only_line("fatal");

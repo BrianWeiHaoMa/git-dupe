@@ -53,6 +53,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
+    use super::super::files::name_accepted;
     use super::super::output::End;
     use super::*;
 
@@ -63,7 +64,18 @@ mod tests {
     #[test]
     fn the_file_is_written_whole_and_runs_at_once() {
         let s = Scenario::of_the_first_release();
-        let name = OsStr::from_bytes(b"a b'c\"d $(touch ran) `touch ran`; * \xff");
+        // Its last byte, which is no UTF-8, is left out where the filesystem refuses such a
+        // name.
+        let whole: &[u8] = b"a b'c\"d $(touch ran) `touch ran`; * \xff";
+        let name = match name_accepted(
+            s.dir(),
+            whole,
+            "harness::executable: a file named by bytes that are no UTF-8",
+        ) {
+            true => whole,
+            false => &whole[..whole.len() - 1],
+        };
+        let name = OsStr::from_bytes(name);
         let path = s.dir().join("missing/below").join(name);
         let bytes: Vec<u8> = (0..1u32 << 20).map(|n| (n % 256) as u8).collect();
         write_executable(&s, &path, &bytes);

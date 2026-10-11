@@ -14,8 +14,8 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, holds, private_commit, region_rules, under_each_release,
-    warnings_in_any_order, write, write_executable,
+    End, Output, Scenario, Tree, holds, name_accepted, private_commit, region_rules,
+    under_each_release, warnings_in_any_order, write, write_executable,
 };
 
 /// `path` below `dir`, from its bytes.
@@ -84,21 +84,32 @@ fn present_files_are_kept_and_named_and_absent_ones_written_as_committed() {
         let m = s.second_machine("project");
         let (first, second) = (&m.first.root, &m.root);
         let url = &m.first.private_remote;
+        // A file whose name is no UTF-8 is left out of the story where the filesystem
+        // refuses such a name; everything else runs as written.
+        let not_utf8 = name_accepted(
+            s.dir(),
+            b"caf\xff",
+            "clone_kept: the files whose names are no UTF-8",
+        );
+        let in_the_story = |path: &[u8]| not_utf8 || std::str::from_utf8(path).is_ok();
 
         // Private history beside `daily_state`'s: an executable, a symbolic link, files
         // whose names are no UTF-8 or hold a space, and the files the second machine has
         // its own of.
         write_executable(s, &first.join("bin/run"), b"#!/bin/sh\n");
         symlink("notes/a.md", first.join("link")).unwrap();
-        let committed: [(&[u8], &[u8]); 6] = [
-            (b"same.txt", b"same\n"),
+        let committed: Vec<(&[u8], &[u8])> = [
+            (&b"same.txt"[..], &b"same\n"[..]),
             (b"conf", b"the private conf\n"),
             (b"kind", b"a regular file\n"),
             (b"notes/caf\xff", b"absent, its name no UTF-8\n"),
             (b"notes/with space", b"absent, its name with a space\n"),
             (b"notes/caf\xfe", b"private\n"),
-        ];
-        for (path, bytes) in committed {
+        ]
+        .into_iter()
+        .filter(|(path, _)| in_the_story(path))
+        .collect();
+        for (path, bytes) in &committed {
             file(first, path, bytes);
         }
         let mut paths: Vec<&[u8]> = committed.iter().map(|(path, _)| *path).collect();
@@ -112,29 +123,31 @@ fn present_files_are_kept_and_named_and_absent_ones_written_as_committed() {
         file(second, b".env.local", b"mine\n");
         file(second, b"conf/inner", b"the second machine's\n");
         symlink("same.txt", second.join("kind")).unwrap();
-        file(second, b"notes/caf\xfe", b"the second machine's\n");
+        if not_utf8 {
+            file(second, b"notes/caf\xfe", b"the second machine's\n");
+        }
         file(second, b".gitdupe", b"notes\nscratch\n");
         let before = Tree::working(second);
 
         let output = cloned(s, second, url);
-        warnings_in_any_order(
-            &output,
+        let mut kept: Vec<&[&[u8]]> = vec![
             &[
-                &[
-                    b".env.local was kept",
-                    b"differs",
-                    b"git dupe restore -- .env.local",
-                ],
-                &[
-                    b".gitdupe was kept",
-                    b"differs",
-                    b"git dupe restore -- .gitdupe",
-                ],
-                &[b"conf was kept", b"directory", b"git dupe restore -- conf"],
-                &[b"kind was kept", b"differs", b"git dupe restore -- kind"],
-                &[b"notes/caf\xfe was kept", b"differs"],
+                b".env.local was kept",
+                b"differs",
+                b"git dupe restore -- .env.local",
             ],
-        );
+            &[
+                b".gitdupe was kept",
+                b"differs",
+                b"git dupe restore -- .gitdupe",
+            ],
+            &[b"conf was kept", b"directory", b"git dupe restore -- conf"],
+            &[b"kind was kept", b"differs", b"git dupe restore -- kind"],
+        ];
+        if not_utf8 {
+            kept.push(&[b"notes/caf\xfe was kept", b"differs"]);
+        }
+        warnings_in_any_order(&output, &kept);
         // The warnings name each kept path, its cause, and the command that replaces it,
         // never the contents of either version.
         for contents in [
@@ -150,21 +163,25 @@ fn present_files_are_kept_and_named_and_absent_ones_written_as_committed() {
             }
         }
 
-        kept_and_added(
-            &before,
-            second,
-            &[
-                b"bin",
-                b"bin/run",
-                b"link",
-                b"notes/a.md",
-                b"notes/caf\xff",
-                b"notes/with space",
-                b".vscode",
-                b".vscode/settings.json",
-                b"docs/notes.md",
-            ],
-        );
+        let mut added: Vec<&[u8]> = [
+            &b"bin"[..],
+            b"bin/run",
+            b"link",
+            b"notes/a.md",
+            b"notes/caf\xff",
+            b"notes/with space",
+            b".vscode",
+            b".vscode/settings.json",
+            b"docs/notes.md",
+        ]
+        .into_iter()
+        .filter(|path| in_the_story(path))
+        .collect();
+        if !not_utf8 {
+            // No `notes/caf\xfe` of its own stood there: `notes` itself is new.
+            added.push(b"notes");
+        }
+        kept_and_added(&before, second, &added);
         let run = fs::symlink_metadata(second.join("bin/run")).unwrap();
         assert!(run.is_file() && run.permissions().mode() & 0o111 != 0);
         assert_eq!(fs::read(second.join("bin/run")).unwrap(), b"#!/bin/sh\n");
@@ -172,7 +189,10 @@ fn present_files_are_kept_and_named_and_absent_ones_written_as_committed() {
             fs::read_link(second.join("link")).unwrap(),
             Path::new("notes/a.md")
         );
-        for (path, bytes) in &committed[3..5] {
+        for (path, bytes) in committed
+            .iter()
+            .filter(|(_, bytes)| bytes.starts_with(b"absent"))
+        {
             assert_eq!(fs::read(at(second, path)).unwrap(), *bytes);
         }
 
@@ -185,7 +205,10 @@ fn present_files_are_kept_and_named_and_absent_ones_written_as_committed() {
             b"conf",
             b"kind",
             b"notes/caf\xfe",
-        ] {
+        ]
+        .into_iter()
+        .filter(|path| in_the_story(path))
+        {
             let found = changes.get(path).unwrap_or_else(|| panic!("{changes:?}"));
             assert_ne!(found[1], b' ', "{}: {changes:?}", path.escape_ascii());
         }
@@ -195,7 +218,10 @@ fn present_files_are_kept_and_named_and_absent_ones_written_as_committed() {
             b"link",
             b"notes/caf\xff",
             b"notes/with space",
-        ] {
+        ]
+        .into_iter()
+        .filter(|path| in_the_story(path))
+        {
             assert!(!changes.contains_key(path), "{changes:?}");
         }
 

@@ -298,8 +298,9 @@ mod tests {
 
     #[test]
     fn an_argument_the_kernel_refuses_is_the_too_long_outcome_and_nothing_runs() {
-        // One argument above the kernel's limit for a single one (32 pages, 128 KiB).
-        let argument = "a".repeat(200 * 1024);
+        // One argument both kernels refuse (S2): above Linux's 128 KiB for one argument and
+        // macOS's 1 MiB for all of them together, which a smaller one stays within.
+        let argument = "a".repeat(2 * 1024 * 1024);
         for captured in [false, true] {
             let mut run = Run::public([&argument]);
             if captured {

@@ -42,7 +42,7 @@ pub use detach::{
 };
 pub use exclude_lock::lock_is_free;
 pub use executable::write_executable;
-pub use files::{copy, write};
+pub use files::{copy, name_accepted, write};
 pub use fresh::FreshDirectory;
 pub use front::{general_text, usage_line};
 pub use kill::{ForwardEffect, Point};
@@ -55,7 +55,7 @@ pub use output::{
     End, Output, holds, lines_in_order, names, names_number, names_the_route_to_private, offered,
     records, warnings_in_any_order,
 };
-pub use platform::second_filesystem;
+pub use platform::{second_filesystem, word};
 pub use public::{
     EVERY_OBJECT, held_publicly, leaving_public_git, privately_tracked, public_git,
     publicly_tracked,

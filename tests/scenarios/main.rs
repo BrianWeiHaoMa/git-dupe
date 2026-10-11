@@ -73,6 +73,7 @@ mod init;
 mod init_template;
 mod isolation;
 mod killed;
+mod macos_volume;
 mod manual_page;
 mod manual_page_commands;
 mod offered_commands;

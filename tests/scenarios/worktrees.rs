@@ -8,8 +8,8 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, held_publicly, holds, names, names_number, records,
-    region_in, unchanged, under_each_release, write,
+    End, Output, Scenario, Tree, Worktree, held_publicly, holds, name_accepted, names,
+    names_number, records, region_in, unchanged, under_each_release, write,
 };
 
 fn refused(output: &Output, main: &Path) {
@@ -219,13 +219,22 @@ fn sanitized_colliding_and_non_utf8_roots_use_gits_admin_names_for_regions() {
         let main_wt = Worktree::read(s, &main);
         let main_region = main_wt.region_bytes();
         let main_private = Tree::of(&main_wt.private_directory());
-        let roots = [
+        let mut roots = vec![
             s.dir().join("with space"),
             s.dir().join("a:b"),
             s.dir().join("first/same"),
             s.dir().join("second/same"),
-            s.dir().join(OsStr::from_bytes(b"caf\xe9")),
         ];
+        // The root whose name is not UTF-8 is left out where the filesystem refuses such a
+        // name.
+        let not_utf8 = name_accepted(
+            s.dir(),
+            b"caf\xe9",
+            "worktrees: a linked root named by bytes that are no UTF-8",
+        );
+        if not_utf8 {
+            roots.push(s.dir().join(OsStr::from_bytes(b"caf\xe9")));
+        }
         let mut worktrees = Vec::new();
         for root in roots {
             fs::create_dir_all(root.parent().unwrap()).unwrap();
@@ -243,7 +252,9 @@ fn sanitized_colliding_and_non_utf8_roots_use_gits_admin_names_for_regions() {
                 && collision[4..].iter().all(u8::is_ascii_digit)
                 && collision.len() > 4
         );
-        assert_eq!(worktrees[4].name(), Some(OsStr::from_bytes(b"caf\xe9")));
+        if not_utf8 {
+            assert_eq!(worktrees[4].name(), Some(OsStr::from_bytes(b"caf\xe9")));
+        }
         for (index, wt) in worktrees.iter().enumerate() {
             let before: Vec<_> = worktrees.iter().map(Worktree::region_bytes).collect();
             let lists: Vec<_> = worktrees

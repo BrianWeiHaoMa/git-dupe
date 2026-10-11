@@ -14,6 +14,26 @@ use std::path::Path;
 
 use super::fresh::FreshDirectory;
 
+/// The platform the checks run on, for a check that holds on one of them alone: `linux`.
+#[cfg(target_os = "linux")]
+pub fn word() -> &'static str {
+    "linux"
+}
+
+/// The platform the checks run on, for a check that holds on one of them alone: `macos`.
+#[cfg(target_os = "macos")]
+pub fn word() -> &'static str {
+    "macos"
+}
+
+/// The number of `EILSEQ`, the error with which a filesystem refuses a name that is no
+/// valid encoding, as macOS's APFS refuses one whose bytes are no UTF-8; the standard
+/// library gives it no kind of its own.
+#[cfg(target_os = "linux")]
+pub const EILSEQ: i32 = 84;
+#[cfg(target_os = "macos")]
+pub const EILSEQ: i32 = 92;
+
 /// A fresh, empty directory, its path canonical, on a local filesystem whose device is not
 /// the one under which `FreshDirectory::create` makes the scenarios' directories. Dropped,
 /// the directory is removed and, on macOS, its ram disk detached: no path on it is used

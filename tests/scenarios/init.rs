@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, holds, locate_words, names, names_number,
+    End, Output, Scenario, Tree, Worktree, holds, locate_words, name_accepted, names, names_number,
     refused_stash_untracked, region, region_rules, unchanged, under_each_release, usage_line,
 };
 
@@ -609,6 +609,17 @@ fn a_linked_worktree_git_worktree_add_did_not_make_is_refused_naming_its_git_dir
         // still reads it as a linked worktree, but no `git worktree add` made it (E9).
         // Typed and through an alias, `init` and `clone` refuse it before any write,
         // naming its Git directory byte for byte; a linked worktree beside it attaches.
+        // Where the filesystem refuses a name that is not UTF-8, the directory's name is
+        // ASCII and the rest runs as written.
+        let not_utf8: &[u8] = b"elsewh\xe9re";
+        let elsewhere_name = match name_accepted(
+            s.dir(),
+            not_utf8,
+            "init: a Git directory moved by hand into a directory named by bytes that are no UTF-8",
+        ) {
+            true => not_utf8,
+            false => b"elsewhere",
+        };
         let main = s.dir().join("main");
         s.repository(&main);
         let remote = s.dir().join("private.git");
@@ -619,7 +630,7 @@ fn a_linked_worktree_git_worktree_add_did_not_make_is_refused_naming_its_git_dir
             .succeeds();
         let moved = s.dir().join("moved");
         s.linked_worktree(&main, &moved);
-        let elsewhere = main.join(OsStr::from_bytes(b".git/elsewh\xe9re"));
+        let elsewhere = main.join(".git").join(OsStr::from_bytes(elsewhere_name));
         fs::create_dir(&elsewhere).unwrap();
         let admin = elsewhere.join("moved");
         fs::rename(main.join(".git/worktrees/moved"), &admin).unwrap();

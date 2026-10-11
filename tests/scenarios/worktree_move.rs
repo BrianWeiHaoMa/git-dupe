@@ -8,7 +8,8 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Point, Scenario, Tree, Worktree, names, unchanged, under_each_release,
+    End, Output, Point, Scenario, Tree, Worktree, name_accepted, names, unchanged,
+    under_each_release,
 };
 
 fn git_directory(path: &Path) -> OsString {
@@ -320,15 +321,22 @@ fn linked_init_records_canonical_git_directory_and_non_utf8_root_bytes() {
         assert!(before.changed_in(&wt.public_git()).is_empty());
         relative_and_resolved(s, &wt);
         completed_hint(&init(s, &wt), false);
-        let bytes = linked(
-            s,
-            &main,
-            &s.dir().join(OsStr::from_bytes(b"caf\xe9")),
-            "bytes",
-        );
-        init(s, &bytes);
-        relative_and_resolved(s, &bytes);
-        completed_hint(&init(s, &bytes), false);
+        // Left out where the filesystem refuses a name that is not UTF-8.
+        if name_accepted(
+            s.dir(),
+            b"caf\xe9",
+            "worktree_move: a linked root named by bytes that are no UTF-8",
+        ) {
+            let bytes = linked(
+                s,
+                &main,
+                &s.dir().join(OsStr::from_bytes(b"caf\xe9")),
+                "bytes",
+            );
+            init(s, &bytes);
+            relative_and_resolved(s, &bytes);
+            completed_hint(&init(s, &bytes), false);
+        }
     });
 }
 

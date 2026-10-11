@@ -9,8 +9,8 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::Path;
 
 use crate::harness::{
-    End, Region, Tree, holds, names, refused_stash_untracked, region, region_in, run_traced,
-    unchanged, under_each_release, write,
+    End, Region, Tree, holds, name_accepted, names, refused_stash_untracked, region, region_in,
+    run_traced, unchanged, under_each_release, write,
 };
 
 /// The user's text before every region.
@@ -24,6 +24,10 @@ const BETWEEN: &[u8] = b"between\n";
 /// The region of a linked worktree whose name is not UTF-8.
 const CAFE: &[u8] =
     b"# BEGIN git-dupe worktree caf\xe9\n/caf\xe9\n# END git-dupe worktree caf\xe9\n";
+/// The region of the worktree that stands in its place where the filesystem refuses that
+/// name.
+const CAFE_IN_ASCII: &[u8] =
+    b"# BEGIN git-dupe worktree cafe\n/cafe\n# END git-dupe worktree cafe\n";
 /// The user's last line, without a newline.
 const LAST: &[u8] = b"# last, without a newline";
 
@@ -38,9 +42,10 @@ fn main_region(rules: &[&[u8]]) -> Vec<u8> {
     region
 }
 
-/// The whole file with the main worktree's region `main` between the others.
-fn around(main: &[u8]) -> Vec<u8> {
-    [TOP, AGENT, BETWEEN, main, CAFE, LAST].concat()
+/// The whole file with the main worktree's region `main` between the others, `cafe` the
+/// last of them, `CAFE` or `CAFE_IN_ASCII`.
+fn around(main: &[u8], cafe: &[u8]) -> Vec<u8> {
+    [TOP, AGENT, BETWEEN, main, cafe, LAST].concat()
 }
 
 /// The device and inode at `path`: the same pair after a command is the same file.
@@ -58,12 +63,22 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
     under_each_release(|s| {
         let root = s.dir().join("project");
         s.attached_repository(&root);
+        // Where the filesystem refuses a name that is not UTF-8, the last worktree is
+        // `cafe`, its region in the same place.
+        let (cafe_name, cafe): (&[u8], &[u8]) = match name_accepted(
+            s.dir(),
+            b"caf\xe9",
+            "worktree_regions: the region of a worktree named by bytes that are no UTF-8",
+        ) {
+            true => (b"caf\xe9", CAFE),
+            false => (b"cafe", CAFE_IN_ASCII),
+        };
         // G27: only live regions are copied; these foreign private directories stand.
-        for name in [OsStr::new("agent"), OsStr::from_bytes(b"caf\xe9")] {
+        for name in [OsStr::new("agent"), OsStr::from_bytes(cafe_name)] {
             fs::create_dir_all(root.join(".git/worktrees").join(name).join("dupe")).unwrap();
         }
         let exclude = root.join(".git/info/exclude");
-        fs::write(&exclude, around(&main_region(&[b"/.gitdupe"]))).unwrap();
+        fs::write(&exclude, around(&main_region(&[b"/.gitdupe"]), cafe)).unwrap();
         fs::set_permissions(&exclude, fs::Permissions::from_mode(0o640)).unwrap();
         // `shared` stands here and only the other worktree's region names it; a rule of
         // the user's makes public Git see it here, so that a false release would be named.
@@ -74,7 +89,7 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
         assert!(hide.lines("warning").is_empty(), "{hide:?}");
         assert_eq!(
             fs::read(&exclude).unwrap(),
-            around(&main_region(&[b"/.gitdupe", b"/notes"]))
+            around(&main_region(&[b"/.gitdupe", b"/notes"]), cafe)
         );
         assert_eq!(mode(&exclude), 0o640);
         // The named reader finds each region by its own markers, from the common Git
@@ -88,15 +103,15 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
                 after: [
                     BETWEEN,
                     &main_region(&[b"/.gitdupe", b"/notes"]),
-                    CAFE,
+                    cafe,
                     LAST
                 ]
                 .concat(),
             })
         );
         assert_eq!(
-            region_in(&common, Some(OsStr::from_bytes(b"caf\xe9"))).map(|found| found.rules),
-            Some(vec![b"/caf\xe9".to_vec()])
+            region_in(&common, Some(OsStr::from_bytes(cafe_name))).map(|found| found.rules),
+            Some(vec![[b"/", cafe_name].concat()])
         );
         assert_eq!(
             region(&root).map(|found| found.rules),
@@ -120,11 +135,10 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
             .from(&root)
             .succeeds();
         assert!(add.lines("warning").is_empty(), "{add:?}");
-        let three = around(&main_region(&[
-            b"/.gitdupe",
-            b"/docs/private.md",
-            b"/notes",
-        ]));
+        let three = around(
+            &main_region(&[b"/.gitdupe", b"/docs/private.md", b"/notes"]),
+            cafe,
+        );
         assert_eq!(fs::read(&exclude).unwrap(), three);
 
         // A refusal settles, and a composition equal to the file writes nothing.
@@ -142,7 +156,7 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
         names(warnings[0], b"notes");
         assert_eq!(
             fs::read(&exclude).unwrap(),
-            around(&main_region(&[b"/.gitdupe", b"/docs/private.md"]))
+            around(&main_region(&[b"/.gitdupe", b"/docs/private.md"]), cafe)
         );
         assert_eq!(mode(&exclude), 0o640);
 
@@ -155,7 +169,7 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
                 .any(|line| holds(line, b"shared") || holds(line, b"agent")),
             "{detach:?}"
         );
-        let without = [TOP, AGENT, BETWEEN, CAFE, LAST].concat();
+        let without = [TOP, AGENT, BETWEEN, cafe, LAST].concat();
         assert_eq!(fs::read(&exclude).unwrap(), without);
         assert!(!root.join(".git/dupe").exists());
         for path in ["notes/new.md", "docs/private.md", "shared", ".gitdupe"] {
@@ -188,7 +202,7 @@ fn detach_refuses_a_link_at_info_only_while_the_main_region_stands_beyond_it() {
             } else {
                 b""
             };
-            fs::write(target.join("exclude"), around(main)).unwrap();
+            fs::write(target.join("exclude"), around(main, CAFE)).unwrap();
             symlink(&target, &info).unwrap();
             s.init(&root);
             let link = fs::read_link(&info).unwrap();
@@ -215,7 +229,10 @@ fn detach_refuses_a_link_at_info_only_while_the_main_region_stands_beyond_it() {
             }
             assert_eq!(fs::read_link(&info).unwrap(), link);
             unchanged(&beyond, &target);
-            assert_eq!(fs::read(target.join("exclude")).unwrap(), around(main));
+            assert_eq!(
+                fs::read(target.join("exclude")).unwrap(),
+                around(main, CAFE)
+            );
         }
     });
 }

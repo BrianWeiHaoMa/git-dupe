@@ -1,7 +1,9 @@
 //! Another worktree's region hides files here without adopting them (G27, In use 11).
 //! Git decides exposure; a shared exclude file is only maintained where G6 allows it.
 
-use crate::harness::{End, Output, Scenario, Tree, Worktree, offered, under_each_release, write};
+use crate::harness::{
+    End, Output, Scenario, Tree, Worktree, name_accepted, offered, under_each_release, write,
+};
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
@@ -184,13 +186,22 @@ fn foreign_scratch_story_stages_the_previously_invisible_file() {
 #[test]
 fn foreign_owners_use_whole_worktree_names_and_preserve_non_utf8_bytes() {
     under_each_release(|s| {
+        // Where the filesystem refuses a name that is not UTF-8, the third owner is `cafe`.
+        let owner: &[u8] = match name_accepted(
+            s.dir(),
+            b"caf\xe9",
+            "worktree_foreign_paths: an owner named by bytes that are no UTF-8",
+        ) {
+            true => b"caf\xe9",
+            false => b"cafe",
+        };
         let main = main_worktree(s, "project");
         let agent = linked(s, &main, OsStr::new("agent"));
         let agent2 = linked(s, &main, OsStr::new("agent2"));
-        let bytes = linked(s, &main, OsStr::from_bytes(b"caf\xe9"));
+        let bytes = linked(s, &main, OsStr::from_bytes(owner));
         assert_eq!(agent.name(), Some(OsStr::new("agent")));
         assert_eq!(agent2.name(), Some(OsStr::new("agent2")));
-        assert_eq!(bytes.name(), Some(OsStr::from_bytes(b"caf\xe9")));
+        assert_eq!(bytes.name(), Some(OsStr::from_bytes(owner)));
         hide(s, &agent2, "scratch");
         hide(s, &bytes, "notes");
         write(&main.root, "scratch/a.py", b"scratch\n");
@@ -199,7 +210,7 @@ fn foreign_owners_use_whole_worktree_names_and_preserve_non_utf8_bytes() {
             s,
             &main,
             &[
-                foreign("notes", b"worktree caf\xe9", true),
+                foreign("notes", &[b"worktree ", owner].concat(), true),
                 foreign("scratch", b"worktree agent2", true),
             ],
         );
