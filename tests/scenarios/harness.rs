@@ -28,6 +28,7 @@ mod stash;
 mod sweep;
 mod trace;
 mod tree;
+mod watched_runs;
 mod worktrees;
 
 pub use attached::{
@@ -39,7 +40,7 @@ pub use concurrent::started_together;
 pub use detach::{
     daily_warnings, detached, now_visible, stale_file_timestamp, stale_timestamp, warnings,
 };
-pub use exclude_lock::{commands_wait_for_the_lock, hold_the_lock, lock_is_free};
+pub use exclude_lock::lock_is_free;
 pub use executable::write_executable;
 pub use files::{copy, write};
 pub use fresh::FreshDirectory;

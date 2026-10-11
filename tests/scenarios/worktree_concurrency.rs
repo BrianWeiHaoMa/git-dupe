@@ -12,15 +12,14 @@
 //! Git run while it holds the lock, from each Git run they start (R10).
 
 use std::collections::BTreeSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use crate::harness::{
-    End, Output, Point, Scenario, Tree, Worktree, commands_wait_for_the_lock, hold_the_lock,
-    lock_is_free, now_visible, started_together, under_each_release, write,
+    End, Output, Point, Scenario, Tree, Worktree, lock_is_free, now_visible, started_together,
+    under_each_release, write,
 };
 
 /// The user's text before the main worktree's region, between the two regions, and after
@@ -35,8 +34,15 @@ const TRACKED: &str = "plans/today.md";
 /// How many pairs of `hide` are started together.
 const PAIRS: usize = 50;
 
-/// How long a command is given to end once the lock is let go.
-const LIMIT: Duration = Duration::from_secs(30);
+/// The linked worktree whose command the harness stands in for while it holds the lock.
+const THIRD: &str = "lock-third";
+
+/// The region of the worktree `THIRD` holding `rules`, its markers included.
+fn third_region(rules: &[&str]) -> Vec<u8> {
+    let rules: String = rules.iter().map(|rule| format!("{rule}\n")).collect();
+    format!("# BEGIN git-dupe worktree {THIRD}\n{rules}# END git-dupe worktree {THIRD}\n")
+        .into_bytes()
+}
 
 /// The main worktree and a linked one of one project.
 struct Project {
@@ -199,46 +205,53 @@ fn private_refs(s: &Scenario, wt: &Worktree) -> Vec<u8> {
 fn both_worktrees_replace_and_delete_their_regions_under_the_one_lock() {
     under_each_release(|s| {
         let p = project(s, "lock", TOP);
-        let common = &p.main.common_directory;
-        let as_it_was = fs::read(p.exclude()).unwrap();
-        let held = hold_the_lock(common);
-        let mut main_hiding = s
-            .git(["dupe", "hide", "main-notes"])
-            .from(&p.main.root)
-            .start();
-        let mut agent_hiding = s
-            .git(["dupe", "hide", "agent-notes"])
-            .from(&p.agent.root)
-            .start();
-        commands_wait_for_the_lock(common, 2);
-        assert!(!main_hiding.finished() && !agent_hiding.finished());
+        let third = s.dir().join(THIRD);
+        s.linked_worktree(&p.main.root, &third);
+        s.init(&third);
+        let regions = [p.main.region_bytes(), p.agent.region_bytes()];
+        // The third worktree's region follows the user's last line, which gains its newline.
+        let after = [b"\n", &third_region(&["/.gitdupe"])[..]].concat();
+        let as_it_was = [around(TOP, &regions[0], &regions[1]), after].concat();
         exclude_holds(&p, &as_it_was);
-        drop(held);
-        ended_cleanly(&main_hiding.wait_within(LIMIT));
-        ended_cleanly(&agent_hiding.wait_within(LIMIT));
+        let watch = s.watching_the_lock("lock-control", &p.main.common_directory);
+        let held = watch.hold();
+        let main_hiding = watch.start(&p.main.root, &["hide", "main-notes"]);
+        let agent_hiding = watch.start(&p.agent.root, &["hide", "agent-notes"]);
+        let waiting = held.waiting_at_the_lock([main_hiding, agent_hiding]);
+        exclude_holds(&p, &as_it_was);
+        // The third worktree's region as its own `hide notes` leaves it under the lock.
+        let notes = third_region(&["/.gitdupe", "/notes"]);
+        let [main_hid, agent_hid] = waiting.let_go(Some(OsStr::new(THIRD)), &notes);
+        ended_cleanly(&main_hid);
+        ended_cleanly(&agent_hid);
         let (in_main, in_agent) = (["main-notes".to_owned()], ["agent-notes".to_owned()]);
         hides_exactly(s, &p.main, &in_main);
         hides_exactly(s, &p.agent, &in_agent);
         let main_region = region_holding(&p.main, &in_main);
+        let agent_region = region_holding(&p.agent, &in_agent);
+        let third_after = |region: &[u8]| [b"\n", region].concat();
         exclude_holds(
             &p,
-            &around(TOP, &main_region, &region_holding(&p.agent, &in_agent)),
+            &[
+                around(TOP, &main_region, &agent_region),
+                third_after(&notes),
+            ]
+            .concat(),
         );
 
-        let held = hold_the_lock(common);
-        let mut detaching = s
-            .git(["dupe", "detach", "--force"])
-            .from(&p.agent.root)
-            .start();
-        commands_wait_for_the_lock(common, 1);
-        assert!(!detaching.finished());
+        let held = watch.hold();
+        let detaching = watch.start(&p.agent.root, &["detach", "--force"]);
+        let waiting = held.waiting_at_the_lock([detaching]);
         assert!(p.agent.region().is_some() && p.agent.private_directory().join("HEAD").is_file());
-        drop(held);
-        let detached = detaching.wait_within(LIMIT);
+        let scratch = third_region(&["/.gitdupe", "/notes", "/scratch"]);
+        let [detached] = waiting.let_go(Some(OsStr::new(THIRD)), &scratch);
         assert_eq!(detached.end, End::Code(0), "{detached:?}");
         assert_eq!(p.agent.region(), None);
         assert!(fs::symlink_metadata(p.agent.private_directory()).is_err());
-        exclude_holds(&p, &[TOP, &main_region[..], BETWEEN, LAST].concat());
+        exclude_holds(
+            &p,
+            &[TOP, &main_region[..], BETWEEN, LAST, &third_after(&scratch)].concat(),
+        );
     });
 }
 

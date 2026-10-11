@@ -1,25 +1,35 @@
 //! The lock on the common Git directory under which `.git/info/exclude` is replaced and
 //! its region deleted (G28, `Holds/G28`, `State` "Region replacement"). The harness holds
 //! the lock as another worktree's command would: settle's replacement and `detach`'s
-//! deletion wait for it. A command killed while it holds the lock holds up none after it,
+//! deletion wait for it, and keep the other worktree's region as that command left it
+//! under the lock. A command killed while it holds the lock holds up none after it,
 //! and leaves the file as it was. A write that fails leaves the file and the private
 //! repository as they were and is named: settle keeps the command's status and still asks
 //! about exposure, and `detach` refuses.
 
 use std::collections::BTreeSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::time::Duration;
 
 use crate::harness::{
-    End, Output, Point, Scenario, commands_wait_for_the_lock, hold_the_lock, lock_is_free, region,
-    region_rules, under_each_release, write,
+    End, Output, Point, Scenario, lock_is_free, region, region_rules, under_each_release, write,
 };
 
-/// How long a command is given to end once the lock is let go.
+/// How long a command is given to end.
 const LIMIT: Duration = Duration::from_secs(30);
+
+/// The linked worktree whose command the harness stands in for while it holds the lock.
+const OTHER: &str = "other";
+
+/// The region of the worktree `OTHER` holding `rules`, its markers included.
+fn other_region(rules: &[&str]) -> Vec<u8> {
+    let rules: String = rules.iter().map(|rule| format!("{rule}\n")).collect();
+    format!("# BEGIN git-dupe worktree {OTHER}\n{rules}# END git-dupe worktree {OTHER}\n")
+        .into_bytes()
+}
 
 /// The device and inode of `path`, by `lstat`.
 fn identity(path: &Path) -> (u64, u64) {
@@ -44,30 +54,43 @@ fn a_replacement_and_a_deletion_wait_while_another_holds_the_lock() {
     under_each_release(|s| {
         let dir = s.dir().join("project");
         s.attached_project(&dir);
+        let other = s.dir().join(OTHER);
+        s.linked_worktree(&dir, &other);
+        s.init(&other);
         let common = dir.join(".git");
         let exclude = common.join("info/exclude");
+        let watch = s.watching_the_lock("watch", &common);
+        let main = region(&dir).unwrap();
+        assert_eq!(main.after, other_region(&["/.gitdupe"]));
 
-        let held = hold_the_lock(&common);
         let as_it_was = fs::read(&exclude).unwrap();
-        let mut hiding = s.git(["dupe", "hide", "x"]).from(&dir).start();
-        commands_wait_for_the_lock(&common, 1);
-        assert!(!hiding.finished());
+        let held = watch.hold();
+        let hiding = watch.start(&dir, &["hide", "x"]);
+        let waiting = held.waiting_at_the_lock([hiding]);
         assert_eq!(fs::read(&exclude).unwrap(), as_it_was);
-        drop(held);
-        let hidden = hiding.wait_within(LIMIT);
+        // The other worktree's region as its own `hide notes` leaves it under the lock.
+        let notes = other_region(&["/.gitdupe", "/notes"]);
+        let [hidden] = waiting.let_go(Some(OsStr::new(OTHER)), &notes);
         assert_eq!(hidden.end, End::Code(0), "{hidden:?}");
-        assert_eq!(region_rules(&dir), [&b"/.gitdupe"[..], b"/x"]);
+        let hidden = b"# BEGIN git-dupe\n/.gitdupe\n/x\n# END git-dupe\n";
+        assert_eq!(
+            fs::read(&exclude).unwrap(),
+            [&main.before[..], hidden, &notes].concat()
+        );
 
-        let held = hold_the_lock(&common);
-        let mut detaching = s.git(["dupe", "detach", "--force"]).from(&dir).start();
-        commands_wait_for_the_lock(&common, 1);
-        assert!(!detaching.finished());
+        let held = watch.hold();
+        let detaching = watch.start(&dir, &["detach", "--force"]);
+        let waiting = held.waiting_at_the_lock([detaching]);
         assert!(region(&dir).is_some() && common.join("dupe/HEAD").is_file());
-        drop(held);
-        let detached = detaching.wait_within(LIMIT);
+        let scratch = other_region(&["/.gitdupe", "/notes", "/scratch"]);
+        let [detached] = waiting.let_go(Some(OsStr::new(OTHER)), &scratch);
         assert_eq!(detached.end, End::Code(0), "{detached:?}");
         assert_eq!(region(&dir), None);
         assert!(!common.join("dupe").exists());
+        assert_eq!(
+            fs::read(&exclude).unwrap(),
+            [&main.before[..], &scratch].concat()
+        );
     });
 }
 

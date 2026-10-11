@@ -269,7 +269,6 @@ fn running_in(group: u32) -> Result<Vec<String>, String> {
 }
 
 /// Whether the process `process` has ended: gone, or a zombie.
-#[cfg(test)]
 pub(super) fn ended(process: &str) -> bool {
     let state = ps(&["-o", "stat=", "-p", process]).unwrap_or_else(|cause| panic!("{cause}"));
     state.trim().is_empty() || ended_in(state.trim())
