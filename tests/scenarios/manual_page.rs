@@ -53,11 +53,11 @@ fn sample_page(text: &str) -> String {
 #[test]
 fn the_built_page_shows_every_text_present_within_80_columns() {
     let narrow = shown_by_man(&built_page(), TERMINAL);
-    every_text_shown(&narrow, "`man -l` at 80 columns");
+    every_text_shown(&narrow, "`man` given its path at 80 columns");
     assert_eq!(wider_than(&narrow, TERMINAL), Vec::<&str>::new());
 
     let wide = shown_by_man(&built_page(), 120);
-    every_text_shown(&wide, "`man -l` at 120 columns");
+    every_text_shown(&wide, "`man` given its path at 120 columns");
     // No line of a text is wider than 80 columns, nor than 87 with its indentation: a
     // wider line is prose that `man` filled to the wider terminal.
     assert!(

@@ -5,10 +5,9 @@ use std::fs;
 use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-use std::path::Path;
 
 use crate::harness::{
-    End, FreshDirectory, Scenario, Tree, Worktree, names, report, under_each_release, write,
+    End, Scenario, Tree, Worktree, names, report, second_filesystem, under_each_release, write,
 };
 
 /// One refusal leaves both indexes, all working files, and the declared hidden list
@@ -70,9 +69,14 @@ fn replacement_refused(s: &Scenario, wt: &Worktree, words: &[&str], cause: &str)
 #[test]
 fn a_linked_worktree_on_another_filesystem_refuses_hidden_list_replacements() {
     under_each_release(|s| {
-        let Some(second) = FreshDirectory::create_in(Path::new("/dev/shm")) else {
-            report("no writable second filesystem at /dev/shm; replacement cases unavailable");
-            return;
+        let second = match second_filesystem() {
+            Ok(second) => second,
+            Err(reason) => {
+                report(&format!(
+                    "no second filesystem: {reason}; replacement cases unavailable"
+                ));
+                return;
+            }
         };
         let second_path = second.path().to_path_buf();
         let main = s.dir().join("project");
@@ -83,10 +87,7 @@ fn a_linked_worktree_on_another_filesystem_refuses_hidden_list_replacements() {
             report(&format!(
                 "worktree filesystems: scenario device {first_device}, second device {second_device}"
             ));
-            if first_device == second_device {
-                report("/dev/shm has the scenario directory's device; no second filesystem");
-                return;
-            }
+            assert_ne!(first_device, second_device, "one filesystem, not two");
             s.attached_project(&main);
             let root = second_path.join("linked");
             s.linked_worktree(&main, &root);

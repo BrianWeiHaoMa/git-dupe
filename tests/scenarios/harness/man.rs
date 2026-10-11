@@ -4,6 +4,10 @@
 //! beside it; each paragraph of prose with every word whole and in the order written; an
 //! empty line where the text has one, and nothing else. The texts are read from the
 //! repository when the check runs, so there is no list of them to extend.
+//!
+//! `man` is given the page by its path, which both platforms' `man` take, and never `-l`,
+//! which macOS's refuses; what it prints is read with its overstrikes removed, because
+//! macOS's writes bold as overstrikes where man-db writes plain text (S19).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -109,10 +113,15 @@ pub fn text_present(name: &str) -> String {
 }
 
 /// The lines `man` shows for a page read as a local file on a terminal `columns` wide,
-/// outside any manual path and outside any scenario.
+/// outside any manual path and outside any scenario. `page` holds a slash, so that `man`
+/// reads it as a file and never looks it up.
 pub fn shown_by_man(page: &Path, columns: usize) -> Vec<String> {
+    assert!(
+        page.as_os_str().as_encoded_bytes().contains(&b'/'),
+        "{}: a page given to `man` by its path holds a slash",
+        page.display()
+    );
     let man = Command::new("man")
-        .arg("-l")
         .arg(page)
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -122,7 +131,7 @@ pub fn shown_by_man(page: &Path, columns: usize) -> Vec<String> {
         .unwrap_or_else(|cause| panic!("this check needs `man`: {cause}"));
     assert!(
         man.status.success(),
-        "man -l {}: {}",
+        "man {}: {}",
         page.display(),
         String::from_utf8_lossy(&man.stderr)
     );
@@ -146,13 +155,33 @@ pub fn asking_for_the_page<'s>(s: &'s Scenario, manual_path: &Path) -> [Git<'s>;
     ]
 }
 
-/// What a run printed, as lines; it must be text.
+/// What `man` printed, as the lines it shows, its overstrikes removed; it must be text.
 pub fn lines_of(printed: &[u8]) -> Vec<String> {
-    String::from_utf8(printed.to_vec())
-        .unwrap_or_else(|cause| panic!("not text: {cause}"))
+    let printed =
+        String::from_utf8(printed.to_vec()).unwrap_or_else(|cause| panic!("not text: {cause}"));
+    without_overstrikes(&printed)
         .lines()
         .map(str::to_owned)
         .collect()
+}
+
+/// `text` as a terminal shows it: a character, a backspace, and a character, which a
+/// terminal prints in one place, read as the last, so that bold (`N\bN`) and underline
+/// (`_\bN`) read as the plain character and nothing else changes. A backspace at the
+/// start of a line moves nothing.
+fn without_overstrikes(text: &str) -> String {
+    let mut shown = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\u{8}' => {
+                if shown.chars().next_back().is_some_and(|last| last != '\n') {
+                    shown.pop();
+                }
+            }
+            character => shown.push(character),
+        }
+    }
+    shown
 }
 
 /// Whether `shown` holds `text`, of the `kind` given, right below the line `heading`, as
@@ -262,7 +291,30 @@ pub fn holds_a_line_of_the_general_text(printed: &[u8]) -> bool {
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect();
-    String::from_utf8_lossy(printed)
+    without_overstrikes(&String::from_utf8_lossy(printed))
         .lines()
         .any(|line| general.contains(&line.trim()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// macOS's `man` writes a heading in bold and may underline a word; man-db writes
+    /// neither where its output is not a terminal. Both read as the plain text, and a line
+    /// that holds `_` or a doubled letter, with no backspace, reads as written.
+    #[test]
+    fn what_man_printed_reads_as_the_plain_text() {
+        let printed =
+            b"N\x08NA\x08AM\x08ME\x08E\n       _\x08g_\x08i_\x08t dupe\n\x08  --dry-run commit\n";
+        assert_eq!(
+            lines_of(printed),
+            ["NAME", "       git dupe", "  --dry-run commit"]
+        );
+        let plain = "NAME\n       git_dupe add --dry-run commit\n\n";
+        assert_eq!(
+            lines_of(plain.as_bytes()),
+            plain.lines().collect::<Vec<_>>()
+        );
+    }
 }

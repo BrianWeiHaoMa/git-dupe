@@ -67,6 +67,7 @@ mod tests {
     use std::time::Instant;
 
     use super::super::output::End;
+    use super::super::running::ended;
     use super::super::scenario::Scenario;
     use super::*;
 
@@ -104,11 +105,7 @@ mod tests {
     fn ends(process: &str) {
         let deadline = Instant::now() + ENDING;
         loop {
-            let ended = fs::read_to_string(format!("/proc/{process}/stat")).map_or(true, |stat| {
-                stat.rsplit_once(") ")
-                    .is_some_and(|(_, after)| after.starts_with('Z'))
-            });
-            if ended {
+            if ended(process) {
                 return;
             }
             assert!(

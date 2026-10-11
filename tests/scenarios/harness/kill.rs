@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 
 use super::executable::write_executable;
 use super::output::{End, Output};
-use super::running::Running;
+use super::running::{Running, parent_name};
 use super::scenario::Scenario;
 
 const SIGKILL: i32 = 9;
@@ -48,14 +48,16 @@ const SIGXFSZ: i32 = 25;
 /// release's `git`; `kill`, the point to kill at, `before <n>` or `after <n>`, absent for
 /// none; `count`, the runs so far; `parents`, the name of each run's parent; `killed`, the
 /// point at which it killed and whom.
-const SCRIPT: &str = r#"#!/bin/sh
+const SCRIPT: &str = concat!(
+    r#"#!/bin/sh
 ulimit -S -f "$(ulimit -H -f)" || exit 125
 control=${0%/*}
 n=1
 if [ -f "$control/count" ]; then read -r n < "$control/count"; n=$((n + 1)); fi
 printf '%s\n' "$n" > "$control/count"
-read -r parent < "/proc/$PPID/comm"
-printf '%s\n' "$parent" >> "$control/parents"
+"#,
+    parent_name!(),
+    r#"printf '%s\n' "$parent" >> "$control/parents"
 unset GIT_EXEC_PATH
 read -r release < "$control/release"
 point=
@@ -123,7 +125,8 @@ if [ -f "$control/selection" ]; then
     fi
 fi
 exec "$release" "$@"
-"#;
+"#
+);
 
 /// Where a run of a `git dupe` command is killed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
