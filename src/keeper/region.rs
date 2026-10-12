@@ -313,28 +313,7 @@ fn update(
     let creates = matches!(change, Change::Set(_)).then_some(make_info);
     let (bytes, mode, link) = match inspect(&info, &exclude, creates).map_err(NotUpdated::Failed)? {
         Found::File { bytes, mode, link } => (bytes, mode, link),
-        Found::InfoLink => {
-            return match change {
-                Change::Set(_) => Err(NotUpdated::InfoLink),
-                // The link and what it leads to stay as they are; the deletion only asks
-                // whether the region stands beyond it, as `start` would read it.
-                Change::Remove => match fs::read(&exclude) {
-                    Ok(bytes) => {
-                        let found = sections::split(&bytes, own);
-                        if found.rules.is_some() {
-                            return Err(NotUpdated::InfoLink);
-                        }
-                        let (_, others) = standing(workspace.common_directory(), &found);
-                        Ok(Updated {
-                            others,
-                            ..Updated::default()
-                        })
-                    }
-                    Err(cause) if cause.kind() == io::ErrorKind::NotFound => Ok(Updated::default()),
-                    Err(cause) => Err(NotUpdated::Failed(cause)),
-                },
-            };
-        }
+        Found::InfoLink => return beyond_the_info_link(workspace, &exclude, change),
         Found::DanglingLink => return Err(NotUpdated::DanglingLink),
         // Only the deletion finds no `.git/info`: the replacement has made it.
         Found::NoInfo => return Ok(Updated::default()),
@@ -344,41 +323,63 @@ fn update(
     let paths = found.paths();
     let (kept, others) = standing(workspace.common_directory(), &found);
     let (composed, holding) = match change {
-        Change::Set(set) => {
-            let composed = found.set(own, set, &kept);
-            if mode.is_some() && !link && composed == bytes {
-                return Ok(Updated {
-                    paths,
-                    warning: None,
-                    others,
-                });
-            }
-            (
-                composed,
-                &b"what its target held and the managed region"[..],
-            )
-        }
-        Change::Remove => {
-            let composed = found.removed(&kept);
-            // Without the region, only a stale region's removal is written.
-            if found.rules.is_none() && composed == bytes {
-                return Ok(Updated {
-                    others,
-                    ..Updated::default()
-                });
-            }
-            (
-                composed,
-                &b"what its target held without the managed region"[..],
-            )
-        }
+        Change::Set(set) => (
+            found.set(own, set, &kept),
+            &b"what its target held and the managed region"[..],
+        ),
+        Change::Remove => (
+            found.removed(&kept),
+            &b"what its target held without the managed region"[..],
+        ),
     };
+    // A replacement equal to a regular file as read writes nothing; without the region, a
+    // deletion writes only a stale region's removal. Either way the region's paths are as
+    // read, none without the region.
+    let unchanged = match change {
+        Change::Set(_) => mode.is_some() && !link,
+        Change::Remove => found.rules.is_none(),
+    };
+    if unchanged && composed == bytes {
+        return Ok(Updated {
+            paths,
+            warning: None,
+            others,
+        });
+    }
     replace::whole(&workspace.private_directory(), &exclude, &composed, mode)
         .map_err(NotUpdated::Failed)?;
     Ok(Updated {
         paths,
         warning: link.then(|| link_replaced(&exclude, holding)),
         others,
+    })
+}
+
+/// What `update` does where `.git/info` is a symbolic link by `lstat`: the replacement
+/// leaves the region as it is. The link and what it leads to stay as they are; the
+/// deletion only asks whether the region stands beyond it, as `start` would read it, and
+/// hands back the other regions read there, the stale ones left out.
+fn beyond_the_info_link(
+    workspace: &Workspace,
+    exclude: &Path,
+    change: Change,
+) -> Result<Updated, NotUpdated> {
+    if let Change::Set(_) = change {
+        return Err(NotUpdated::InfoLink);
+    }
+    let bytes = match fs::read(exclude) {
+        Ok(bytes) => bytes,
+        Err(cause) if cause.kind() == io::ErrorKind::NotFound => return Ok(Updated::default()),
+        Err(cause) => return Err(NotUpdated::Failed(cause)),
+    };
+    let found = sections::split(&bytes, own(workspace));
+    if found.rules.is_some() {
+        return Err(NotUpdated::InfoLink);
+    }
+    let (_, others) = standing(workspace.common_directory(), &found);
+    Ok(Updated {
+        others,
+        ..Updated::default()
     })
 }
 

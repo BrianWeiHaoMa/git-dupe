@@ -45,6 +45,42 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
             &unlisted
         }
     };
+    let mut asked = asked(workspace, hidden, &deleted.paths, &foreign);
+    let listed = public_listing(workspace, hidden, &asked);
+    // A listing that failed names nothing as hidden by another worktree; one whose list
+    // did not fit refuses the command instead (G23).
+    if listed.warning.is_some() {
+        for (_, kind) in &mut asked {
+            if let Asked::Left { owners } | Asked::Released { owners, .. } = kind {
+                owners.clear();
+            }
+        }
+    }
+    let answered = exposure::warnings(workspace, &asked, &listed.tracked, &mut HashMap::new());
+    let warnings = deleted
+        .warning
+        .into_iter()
+        .chain(listed.warning)
+        .chain(answered.warnings)
+        .collect();
+    Ok(Answered {
+        warnings,
+        visible: answered.visible,
+        refused: listed.refused.or(answered.refused),
+        killed: listed.killed.or(answered.killed),
+    })
+}
+
+/// The paths the question asks about, in order: each hidden path as it stood that is still
+/// present by `lstat`, then each path of the deleted region neither among them nor below
+/// one that is present, released; each with the worktrees whose regions hold it or an
+/// ancestor of it.
+fn asked<'p, 'o>(
+    workspace: &Workspace,
+    hidden: &'p HiddenPaths,
+    deleted: &'p [Vec<u8>],
+    foreign: &Foreign<'o>,
+) -> Vec<(&'p [u8], Asked<'o>)> {
     let left = hidden
         .hidden
         .iter()
@@ -55,7 +91,6 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
             (path, Asked::Left { owners })
         });
     let released = deleted
-        .paths
         .iter()
         .map(Vec::as_slice)
         .filter(|path| !hidden.hides(path))
@@ -68,11 +103,29 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
             };
             (path, released)
         });
-    let mut asked: Vec<(&[u8], Asked)> = left.chain(released).collect();
-    let mut warnings: Vec<Vec<u8>> = deleted.warning.into_iter().collect();
-    let mut refused = None;
-    let mut killed = None;
-    let mut listing_failed = false;
+    left.chain(released).collect()
+}
+
+/// The public listing under the paths asked about, as `remove` reads it.
+struct Listed {
+    /// What public Git tracks under them; none where the listing failed.
+    tracked: BTreeSet<Vec<u8>>,
+    /// That the listing failed and why, unless its list did not fit.
+    warning: Option<Vec<u8>>,
+    /// The count of a list that did not fit, which refuses the command (G23).
+    refused: Option<usize>,
+    /// The failure of a listing killed by a signal.
+    killed: Option<Failed>,
+}
+
+/// Takes the public listing under the region paths and the released paths among `asked`.
+fn public_listing(workspace: &Workspace, hidden: &HiddenPaths, asked: &[(&[u8], Asked)]) -> Listed {
+    let mut listed = Listed {
+        tracked: BTreeSet::new(),
+        warning: None,
+        refused: None,
+        killed: None,
+    };
     // Under the region paths among the paths asked about, not every hidden path: each
     // hidden path present lies at or below a present region path, so the listing names
     // the same paths while its list stays one built from E8's budget, however many files
@@ -84,44 +137,26 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
         .filter(|(path, kind)| matches!(kind, Asked::Released { .. }) || region.contains(path))
         .map(|(path, _)| path.to_vec())
         .collect();
-    let tracked = if query.is_empty() {
-        BTreeSet::new()
-    } else {
-        listing::public(workspace, &query).unwrap_or_else(|failed| {
-            match failed {
-                Failed::TooLong(count) => refused = Some(count),
-                failed => {
-                    warnings.push(
-                        [
-                            b"cannot list what public Git tracks under the hidden paths (",
-                            &failed.cause()[..],
-                            b"); a path it tracks is visible to it and may not be named, \
-                              and none is named as hidden by another worktree",
-                        ]
-                        .concat(),
-                    );
-                    if let Failed::Exited(End::Signal(_)) = failed {
-                        killed = Some(failed);
-                    }
-                    listing_failed = true;
-                }
-            }
-            BTreeSet::new()
-        })
-    };
-    if listing_failed {
-        for (_, kind) in &mut asked {
-            if let Asked::Left { owners } | Asked::Released { owners, .. } = kind {
-                owners.clear();
+    if query.is_empty() {
+        return listed;
+    }
+    match listing::public(workspace, &query) {
+        Ok(tracked) => listed.tracked = tracked,
+        Err(Failed::TooLong(count)) => listed.refused = Some(count),
+        Err(failed) => {
+            listed.warning = Some(
+                [
+                    b"cannot list what public Git tracks under the hidden paths (",
+                    &failed.cause()[..],
+                    b"); a path it tracks is visible to it and may not be named, \
+                      and none is named as hidden by another worktree",
+                ]
+                .concat(),
+            );
+            if let Failed::Exited(End::Signal(_)) = failed {
+                listed.killed = Some(failed);
             }
         }
     }
-    let answered = exposure::warnings(workspace, &asked, &tracked, &mut HashMap::new());
-    warnings.extend(answered.warnings);
-    Ok(Answered {
-        warnings,
-        visible: answered.visible,
-        refused: refused.or(answered.refused),
-        killed: killed.or(answered.killed),
-    })
+    listed
 }

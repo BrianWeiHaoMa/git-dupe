@@ -23,6 +23,7 @@
 //! its count (G23).
 
 use std::collections::{BTreeSet, HashMap};
+use std::io;
 
 use super::exposure::{self, Asked};
 use super::foreign::Foreign;
@@ -48,20 +49,10 @@ enum Listing {
 }
 
 pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
-    let mut warnings = Vec::new();
     let listed = gitdupe::read(workspace);
-    for set_aside in &listed.set_aside {
-        warnings.push(set_aside_line(set_aside));
-    }
+    let mut warnings: Vec<Vec<u8>> = listed.set_aside.iter().map(set_aside_line).collect();
     if let Source::Unreadable(cause) = &listed.source {
-        warnings.push(
-            [
-                b".gitdupe cannot be read as a file (",
-                cause.to_string().as_bytes(),
-                b") and hides nothing",
-            ]
-            .concat(),
-        );
+        warnings.push(unreadable_line(cause));
     }
     let privately_tracked = match listing::private(workspace) {
         Ok(tracked) => tracked,
@@ -104,41 +95,12 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
         Err(failed) => return stopped(warnings, failed, Listing::Public),
     };
 
-    let hideable = |path: &[u8]| {
-        hideable(
-            path,
-            &listed.source,
-            &hidden.privately_tracked,
-            &publicly_tracked,
-        )
+    let listings = Listings {
+        hidden: &hidden,
+        publicly_tracked: &publicly_tracked,
+        gitdupe: &listed.source,
     };
-    let asked: Vec<(&[u8], Asked)> = hidden
-        .hidden
-        .iter()
-        .map(|path| {
-            let both = hidden.privately_tracked.contains(path) && publicly_tracked.contains(path);
-            let kind = if both {
-                Asked::TrackedByBoth
-            } else {
-                Asked::Hidden
-            };
-            (path.as_slice(), kind)
-        })
-        .chain(released.iter().map(|path| {
-            let released = Asked::Released {
-                hideable: hideable(path),
-                owners: foreign.holding(path),
-            };
-            (*path, released)
-        }))
-        .chain(standing.iter().map(|path| {
-            let foreign = Asked::Foreign {
-                hideable: hideable(path),
-                owners: foreign.holding(path),
-            };
-            (*path, foreign)
-        }))
-        .collect();
+    let asked = listings.asked(&released, &standing, &foreign);
     // A question that failed, a signal included, is its warning alone: the command keeps
     // its status (`Composition/Keeper`).
     let answered = exposure::warnings(workspace, &asked, &publicly_tracked, &mut known);
@@ -146,38 +108,73 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
     let refused = answered.refused;
 
     for path in publicly_tracked.intersection(&hidden.privately_tracked) {
-        warnings.push(
-            [
-                &path[..],
-                b" is tracked by both the public and the private repository; \
-                  'git rm --cached' or 'git dupe rm --cached' releases it from one",
-            ]
-            .concat(),
-        );
+        warnings.push(tracked_by_both_line(path));
     }
     Settled { warnings, refused }
 }
 
-/// Whether `git dupe hide -- <path>`, run from the root, would hide the released `path`
-/// again: a path whose offered operand `hide` reads as that literal path
-/// (`operand::offered`), a `.gitdupe` the keeper can rewrite,
-/// which one that cannot be read as a file is not (`edit`), and none of `hide`'s refusals
-/// over the listings settle took, which hold the path and `.gitdupe` (F5, G11).
-fn hideable(
-    path: &[u8],
-    gitdupe: &Source,
-    privately_tracked: &BTreeSet<Vec<u8>>,
-    publicly_tracked: &BTreeSet<Vec<u8>>,
-) -> bool {
-    operand::literal(&operand::offered(path)).is_ok()
-        && !matches!(gitdupe, Source::Unreadable(_))
-        && decision::refusal(
-            &[path.to_vec()],
-            gitdupe::NAME,
-            privately_tracked,
-            publicly_tracked,
-        )
-        .is_none()
+/// What settle's two listings and `.gitdupe` said, which each path it asks about is read
+/// against.
+struct Listings<'l> {
+    hidden: &'l HiddenPaths,
+    publicly_tracked: &'l BTreeSet<Vec<u8>>,
+    gitdupe: &'l Source,
+}
+
+impl<'l> Listings<'l> {
+    /// The paths the question asks about, in order, each with its kind: every hidden path,
+    /// tracked by both where the public listing names a privately tracked one (G8); every
+    /// released path; every foreign path standing here; the last two with whether `hide`
+    /// would take them and the worktrees whose regions hold them (G9, G27).
+    fn asked<'o>(
+        &self,
+        released: &[&'l [u8]],
+        standing: &[&'l [u8]],
+        foreign: &Foreign<'o>,
+    ) -> Vec<(&'l [u8], Asked<'o>)> {
+        let hidden = self.hidden.hidden.iter().map(|path| {
+            let both = self.hidden.privately_tracked.contains(path)
+                && self.publicly_tracked.contains(path);
+            let kind = if both {
+                Asked::TrackedByBoth
+            } else {
+                Asked::Hidden
+            };
+            (path.as_slice(), kind)
+        });
+        let released = released.iter().map(|path| {
+            let released = Asked::Released {
+                hideable: self.hideable(path),
+                owners: foreign.holding(path),
+            };
+            (*path, released)
+        });
+        let standing = standing.iter().map(|path| {
+            let foreign = Asked::Foreign {
+                hideable: self.hideable(path),
+                owners: foreign.holding(path),
+            };
+            (*path, foreign)
+        });
+        hidden.chain(released).chain(standing).collect()
+    }
+
+    /// Whether `git dupe hide -- <path>`, run from the root, would hide the released `path`
+    /// again: a path whose offered operand `hide` reads as that literal path
+    /// (`operand::offered`), a `.gitdupe` the keeper can rewrite,
+    /// which one that cannot be read as a file is not (`edit`), and none of `hide`'s
+    /// refusals over the listings settle took, which hold the path and `.gitdupe` (F5, G11).
+    fn hideable(&self, path: &[u8]) -> bool {
+        operand::literal(&operand::offered(path)).is_ok()
+            && !matches!(self.gitdupe, Source::Unreadable(_))
+            && decision::refusal(
+                &[path.to_vec()],
+                gitdupe::NAME,
+                &self.hidden.privately_tracked,
+                self.publicly_tracked,
+            )
+            .is_none()
+    }
 }
 
 /// Settle stopped at a listing: the private one before the replacement, the region left
@@ -209,6 +206,24 @@ fn stopped(mut warnings: Vec<Vec<u8>>, failed: Failed, listing: Listing) -> Sett
         warnings,
         refused: None,
     }
+}
+
+fn unreadable_line(cause: &io::Error) -> Vec<u8> {
+    [
+        b".gitdupe cannot be read as a file (",
+        cause.to_string().as_bytes(),
+        b") and hides nothing",
+    ]
+    .concat()
+}
+
+fn tracked_by_both_line(path: &[u8]) -> Vec<u8> {
+    [
+        path,
+        b" is tracked by both the public and the private repository; \
+          'git rm --cached' or 'git dupe rm --cached' releases it from one",
+    ]
+    .concat()
 }
 
 fn set_aside_line(set_aside: &SetAside) -> Vec<u8> {
