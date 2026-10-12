@@ -1,4 +1,5 @@
-//! The release archive this check command made from a release build: exactly the release
+//! The release archive this check command made from a release build, named for the
+//! platform and the architecture of the machine that made it: exactly the release
 //! executable, the page that build rendered, and the install note, under one directory;
 //! and the note followed, as written, into the scenario's own temporary home, where
 //! neither directory it names exists yet, after which Git finds git-dupe and `man` finds
@@ -9,8 +10,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, asking_for_the_page, every_text_shown, holds_a_line_of_the_general_text, install_note,
-    lines_of, note_commands, release_archive, under_each_release,
+    End, architecture, asking_for_the_page, every_text_shown, holds_a_line_of_the_general_text,
+    install_note, lines_of, note_commands, release_archive, under_each_release, word,
 };
 
 /// The directory every member lies in.
@@ -78,6 +79,17 @@ fn members_of(archive: &[u8]) -> Vec<Member> {
         "nothing after the end"
     );
     members
+}
+
+/// One archive per platform and architecture (P3): its name carries the platform's word
+/// and the machine's architecture as the platform module gives them, and it stands
+/// beside the executable it packs.
+#[test]
+fn the_archive_is_named_for_the_platform_and_the_architecture_beside_the_executable() {
+    let made = release_archive();
+    let name = format!("{}-{}-{}.tar", leading_directory(), word(), architecture());
+    assert_eq!(made.path, made.executable.with_file_name(name));
+    assert!(made.path.is_file(), "{}", made.path.display());
 }
 
 #[test]

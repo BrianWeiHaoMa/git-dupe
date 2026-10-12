@@ -138,7 +138,7 @@ jobs:
 
       # As in ci.yml: every scenario but `scale`, whose counted Git runs among 100,000
       # files and one-second bound the delivery check runs before the tag. Its
-      # `release_archive` scenarios make target/release/git-dupe-<version>.tar.
+      # `release_archive` scenarios make target/release/git-dupe-<version>-linux-x86_64.tar.
       - name: Scenarios under the oldest and the newest listed release
         env:
           GIT_DUPE_CHECK_RELEASES: ${{ steps.releases.outputs.selection }}
@@ -147,7 +147,7 @@ jobs:
       - name: Write the archive's checksum
         run: |
           cd target/release
-          archive=git-dupe-$VERSION.tar
+          archive=git-dupe-$VERSION-linux-x86_64.tar
           if [[ ! -f $archive ]]; then
             echo "the scenarios left no archive at target/release/$archive" >&2
             exit 1
@@ -162,4 +162,5 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            "target/release/git-dupe-$VERSION.tar" "target/release/git-dupe-$VERSION.tar.sha256"
+            "target/release/git-dupe-$VERSION-linux-x86_64.tar" \
+            "target/release/git-dupe-$VERSION-linux-x86_64.tar.sha256"

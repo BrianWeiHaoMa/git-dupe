@@ -55,7 +55,7 @@ pub use output::{
     End, Output, holds, lines_in_order, names, names_number, names_the_route_to_private, offered,
     records, warnings_in_any_order,
 };
-pub use platform::{second_filesystem, word};
+pub use platform::{architecture, second_filesystem, word};
 pub use public::{
     EVERY_OBJECT, held_publicly, leaving_public_git, privately_tracked, public_git,
     publicly_tracked,

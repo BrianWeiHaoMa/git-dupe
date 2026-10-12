@@ -1,10 +1,11 @@
 //! The release archive: this package built in the release profile, and the executable,
 //! the manual page that build rendered, and the install note `INSTALL` from the
-//! repository root packed into `git-dupe-<version>.tar` beside the executable, all three
-//! under the one directory `git-dupe-<version>`. It is made anew by every check command
-//! that needs it and replaces whole the one an earlier command made, which holds the
-//! binary of an earlier source; a build that fails ends the command's archive checks
-//! instead. Needs `tar`.
+//! repository root packed into `git-dupe-<version>-<platform>-<architecture>.tar` beside
+//! the executable, the platform's word and the architecture from the platform module
+//! (P3), all three under the one directory `git-dupe-<version>`. It is made anew by every
+//! check command that needs it and replaces whole the one an earlier command made, which
+//! holds the binary of an earlier source; a build that fails ends the command's archive
+//! checks instead. Needs `tar`.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -13,10 +14,11 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 use super::fresh::FreshDirectory;
+use super::platform::{architecture, word};
 
 /// What one check command made.
 pub struct ReleaseArchive {
-    /// `git-dupe-<version>.tar`, beside the release executable.
+    /// `git-dupe-<version>-<platform>-<architecture>.tar`, beside the release executable.
     pub path: PathBuf,
     /// The release executable, where Cargo named it for this build.
     pub executable: PathBuf,
@@ -71,8 +73,9 @@ fn make() -> Result<ReleaseArchive, String> {
 
     // Packed beside the archive and renamed over it, so that the path holds a whole
     // archive or none. The files are named one by one: no entry for their directory.
-    let path = executable.with_file_name(format!("{leading}.tar"));
-    let packing = executable.with_file_name(format!("{leading}.tar.{}", std::process::id()));
+    let name = format!("{leading}-{}-{}.tar", word(), architecture());
+    let path = executable.with_file_name(&name);
+    let packing = executable.with_file_name(format!("{name}.{}", std::process::id()));
     let mut tar = Command::new("tar");
     tar.arg("--create")
         .arg("--format=ustar")

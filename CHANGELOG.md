@@ -8,6 +8,12 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Changed
+
+- The release archive is named for the platform and the architecture it is built for,
+  `git-dupe-<version>-linux-x86_64.tar` for x86-64 Linux, where its name held the
+  version alone; what it holds and its install note are unchanged.
+
 ## [0.2.0] - 2026-10-09
 
 ### Added

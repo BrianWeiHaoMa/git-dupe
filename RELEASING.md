@@ -16,7 +16,9 @@ it has another name, read that name for `main` in them (`Set once`, below).
   `main`.
 - **The GitHub Release** of that tag is titled with the tag. Its notes are the version's
   section of [`CHANGELOG.md`](CHANGELOG.md), and its two files are
-  `git-dupe-<version>.tar` and `git-dupe-<version>.tar.sha256`. The archive holds the
+  `git-dupe-<version>-linux-x86_64.tar` and `git-dupe-<version>-linux-x86_64.tar.sha256`,
+  the archive named for the platform and the architecture of the machine that made it,
+  as `uname -m` prints the architecture there. The archive holds the
   executable, the manual page, and the install note [`INSTALL`](INSTALL), under
   `git-dupe-<version>/`. It is made only by the scenarios of `release_archive`, which
   build it from the source into `target/release/` and check what it holds, whether
@@ -26,8 +28,9 @@ it has another name, read that name for `main` in them (`Set once`, below).
   so that the executable runs with 2.34 or newer, the platform the README's install
   section names. An executable runs only where the library is at least as new as the one
   it was linked against, so a newer image would raise that floor. The `.sha256` names the
-  archive by its bare name, so that `sha256sum -c git-dupe-<version>.tar.sha256` checks a
-  download in its own directory.
+  archive by its bare name, so that
+  `sha256sum -c git-dupe-<version>-linux-x86_64.tar.sha256` checks a download in its own
+  directory.
 
 Pushing the tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml),
 which makes the Release. Before it checks or publishes anything, it refuses a tag that
@@ -183,10 +186,10 @@ run for `v<version>`. When it passes, the Release is at
 its two files. Download both into one directory and check them there:
 
 ```console
-$ sha256sum -c git-dupe-<version>.tar.sha256
+$ sha256sum -c git-dupe-<version>-linux-x86_64.tar.sha256
 ```
 
-It prints `git-dupe-<version>.tar: OK`.
+It prints `git-dupe-<version>-linux-x86_64.tar: OK`.
 
 ## When the release workflow fails
 
@@ -217,8 +220,8 @@ The log of the run names the step and why.
   $ git switch --detach v<version>
   $ cargo test --test scenarios release_archive
   $ cd target/release
-  $ sha256sum git-dupe-<version>.tar > git-dupe-<version>.tar.sha256
-  $ sha256sum -c git-dupe-<version>.tar.sha256
+  $ sha256sum git-dupe-<version>-linux-x86_64.tar > git-dupe-<version>-linux-x86_64.tar.sha256
+  $ sha256sum -c git-dupe-<version>-linux-x86_64.tar.sha256
   $ cd ../..
   ```
 
@@ -227,7 +230,7 @@ The log of the run names the step and why.
   in (`gh auth login`):
 
   ```console
-  $ gh release create v<version> --verify-tag --title v<version> --notes-file ../notes.md target/release/git-dupe-<version>.tar target/release/git-dupe-<version>.tar.sha256
+  $ gh release create v<version> --verify-tag --title v<version> --notes-file ../notes.md target/release/git-dupe-<version>-linux-x86_64.tar target/release/git-dupe-<version>-linux-x86_64.tar.sha256
   ```
 
   Or, on the repository's Releases page, draft a new release: choose the tag, title it

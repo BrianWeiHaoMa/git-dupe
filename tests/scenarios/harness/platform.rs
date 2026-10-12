@@ -4,6 +4,9 @@
 //! alike on both, `ps` or `man` given a page's path, is run where its purpose lives, not
 //! here.
 //!
+//! The platform's word and the machine's architecture together name the release archive
+//! (P3): its name takes both from here and spells neither itself.
+//!
 //! The second filesystem that F5's refusal across filesystems needs: a fresh directory on
 //! `/dev/shm` on Linux, which a machine may lack, and on macOS on a ram disk attached for
 //! it, without `sudo`, and detached when it is dropped, which every macOS has.
@@ -11,6 +14,7 @@
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
+use std::process::Command;
 
 use super::fresh::FreshDirectory;
 
@@ -24,6 +28,24 @@ pub fn word() -> &'static str {
 #[cfg(target_os = "macos")]
 pub fn word() -> &'static str {
     "macos"
+}
+
+/// The machine's architecture as `uname -m` prints it, without its newline: `x86_64`, or
+/// `arm64` on Apple silicon, where the compiler's own name for it is `aarch64` (P3).
+pub fn architecture() -> String {
+    let ran = Command::new("uname")
+        .arg("-m")
+        .output()
+        .unwrap_or_else(|cause| panic!("cannot run uname -m: {cause}"));
+    let printed = String::from_utf8_lossy(&ran.stdout);
+    let architecture = printed.strip_suffix('\n').unwrap_or(&printed);
+    assert!(
+        ran.status.success() && !architecture.is_empty(),
+        "uname -m {}: {printed:?}{}",
+        ran.status,
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    architecture.to_owned()
 }
 
 /// The number of `EILSEQ`, the error with which a filesystem refuses a name that is no
@@ -270,5 +292,29 @@ mod ram_disk {
                 "{said}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use super::architecture;
+
+    /// One word, as the archive's name needs it, and the machine's own: what `uname -m`
+    /// prints, asked through the shell, with nothing but its newline removed.
+    #[test]
+    fn the_architecture_is_one_word_as_uname_prints_it() {
+        let architecture = architecture();
+        assert!(
+            !architecture.is_empty() && !architecture.contains(char::is_whitespace),
+            "{architecture:?}"
+        );
+        let asked = Command::new("/bin/sh")
+            .args(["-c", "uname -m"])
+            .output()
+            .unwrap();
+        assert!(asked.status.success(), "{asked:?}");
+        assert_eq!(format!("{architecture}\n").into_bytes(), asked.stdout);
     }
 }

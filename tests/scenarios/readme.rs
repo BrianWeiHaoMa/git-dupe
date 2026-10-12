@@ -25,7 +25,10 @@ use crate::harness::{command_lines, install_note, note_commands, page_texts_pres
 
 /// The command lines the README shows before the install note's: unpacking a release
 /// archive. No scenario runs them; a line is added here once it has been run as written.
-const UNPACKING: [&str; 2] = ["tar -xf git-dupe-<version>.tar", "cd git-dupe-<version>"];
+const UNPACKING: [&str; 2] = [
+    "tar -xf git-dupe-<version>-<platform>-<architecture>.tar",
+    "cd git-dupe-<version>",
+];
 
 /// The command line the README shows after the install note's: installing from a clone.
 /// No scenario runs it; a line is added here once it has been run as written.

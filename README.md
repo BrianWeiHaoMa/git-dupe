@@ -118,24 +118,26 @@ git-dupe runs on Linux and needs Git 2.43.0 or newer, below 3.0.0, a release tha
 out yet and may change what git-dupe relies on. It is one executable, `git-dupe`, which
 Git runs for `git dupe …` when it stands in a directory on `PATH`.
 
-**From a release.** Download `git-dupe-<version>.tar` from the
+**From a release.** Download the archive for your machine,
+`git-dupe-<version>-<platform>-<architecture>.tar`, from the
 [releases](https://github.com/BrianWeiHaoMa/git-dupe/releases) and follow its `INSTALL`
 note, which installs the executable and the manual page, with `~/.local/bin` on `PATH`
 and `~/.local/share/man` on the manual path:
 
 ```sh
-tar -xf git-dupe-<version>.tar
+tar -xf git-dupe-<version>-<platform>-<architecture>.tar
 cd git-dupe-<version>
 mkdir -p ~/.local/bin ~/.local/share/man/man1
 cp git-dupe ~/.local/bin/
 cp git-dupe.1 ~/.local/share/man/man1/
 ```
 
-The release's executable is for x86-64 Linux with the GNU C library 2.34 or newer; on
-another machine, or where it does not start, install from source. Either way, the Git on
-`PATH` decides: `git --version` must say 2.43.0 or newer. Ubuntu 24.04 ships 2.43.0 and
-Debian 13 ships 2.47; Ubuntu 22.04 ships 2.34 and Debian 12 ships 2.39, so there a newer
-Git comes first, from the `git-core` PPA, a backport, or a build from source.
+The release's executable is for x86-64 Linux with the GNU C library 2.34 or newer, in
+`git-dupe-<version>-linux-x86_64.tar`; on another machine, or where it does not start,
+install from source. Either way, the Git on `PATH` decides: `git --version` must say
+2.43.0 or newer. Ubuntu 24.04 ships 2.43.0 and Debian 13 ships 2.47; Ubuntu 22.04 ships
+2.34 and Debian 12 ships 2.39, so there a newer Git comes first, from the `git-core` PPA,
+a backport, or a build from source.
 
 **From source.** In a clone of this repository, with Rust installed through rustup, which
 installs the toolchain the repository pins on first use:
