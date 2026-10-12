@@ -8,6 +8,8 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-12
+
 ### Added
 
 - macOS support, on Apple silicon and on Intel, the default case-insensitive volume
