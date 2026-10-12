@@ -22,6 +22,7 @@ use super::step;
 use crate::guards::operand;
 use crate::keeper::Failed;
 use crate::runner::Run;
+use crate::runner::locate::directory_at;
 use crate::runner::records;
 
 /// What the write step left as it was, each path relative to the root.
@@ -98,7 +99,7 @@ pub fn write(private: &Path, root: &Path) -> Result<Written, Failed> {
         }
         let why = match obstruction(root, &path, &mut known) {
             Some((link, _)) => Kept::BeyondALink(link.to_vec()),
-            None if is_directory(root, &path) => Kept::Directory,
+            None if directory_at(root, &path) => Kept::Directory,
             None => Kept::Differs,
         };
         kept.insert(path, why);
@@ -134,10 +135,6 @@ fn standing(root: &Path, path: &[u8]) -> Option<Standing> {
     } else {
         Some(Standing::File)
     }
-}
-
-fn is_directory(root: &Path, path: &[u8]) -> bool {
-    fs::symlink_metadata(root.join(OsStr::from_bytes(path))).is_ok_and(|found| found.is_dir())
 }
 
 #[cfg(test)]

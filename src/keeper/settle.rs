@@ -23,9 +23,6 @@
 //! its count (G23).
 
 use std::collections::{BTreeSet, HashMap};
-use std::ffi::OsStr;
-use std::fs;
-use std::os::unix::ffi::OsStrExt;
 
 use super::exposure::{self, Asked};
 use super::foreign::Foreign;
@@ -35,7 +32,7 @@ use super::region::{self, StartingRegion};
 use super::{Failed, listing};
 use crate::guards::hide as decision;
 use crate::guards::operand::{self, Cleaned};
-use crate::runner::locate::Workspace;
+use crate::runner::locate::{Workspace, present};
 
 /// What settle leaves for the front: its warnings, in order, and the count of a list
 /// that did not fit, which refuses the command.
@@ -79,7 +76,7 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
         .iter()
         .map(Vec::as_slice)
         .filter(|path| !hidden.hides(path))
-        .filter(|path| fs::symlink_metadata(root.join(OsStr::from_bytes(path))).is_ok())
+        .filter(|path| present(root, path))
         .collect();
 
     let replaced = region::replace(workspace, &hidden.region);

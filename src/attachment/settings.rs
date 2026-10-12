@@ -29,7 +29,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::step;
 use crate::keeper::Failed;
-use crate::runner::locate::Workspace;
+use crate::runner::locate::{Workspace, private_directory};
 use crate::runner::records;
 use crate::runner::{End, Run};
 
@@ -57,7 +57,7 @@ pub fn relative_work_tree(workspace: &Workspace) -> Result<Vec<u8>, Unresolved> 
             cause,
         })
     };
-    let private = canonical(workspace.git_directory())?.join("dupe");
+    let private = private_directory(&canonical(workspace.git_directory())?);
     let root = canonical(workspace.root())?;
     Ok(relative(&private, &root))
 }

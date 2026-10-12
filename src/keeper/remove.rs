@@ -18,9 +18,6 @@
 //! and so sees it, is not known (G7).
 
 use std::collections::{BTreeSet, HashMap};
-use std::ffi::OsStr;
-use std::fs;
-use std::os::unix::ffi::OsStrExt;
 
 use super::exposure::{self, Answered, Asked};
 use super::foreign::Foreign;
@@ -28,7 +25,7 @@ use super::hidden::HiddenPaths;
 use super::region::{self, NotDeleted};
 use super::{Failed, gitdupe, listing};
 use crate::runner::End;
-use crate::runner::locate::Workspace;
+use crate::runner::locate::{Workspace, present};
 
 /// Deletes the region and returns the warnings: that a link at the exclude file became a
 /// regular file, then the question's, a path another worktree's region still hides among
@@ -48,13 +45,11 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
             &unlisted
         }
     };
-    let present =
-        |path: &&[u8]| fs::symlink_metadata(workspace.root().join(OsStr::from_bytes(path))).is_ok();
     let left = hidden
         .hidden
         .iter()
         .map(Vec::as_slice)
-        .filter(present)
+        .filter(|path| present(workspace.root(), path))
         .map(|path| {
             let owners = foreign.hiding(path);
             (path, Asked::Left { owners })
@@ -64,7 +59,7 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
         .iter()
         .map(Vec::as_slice)
         .filter(|path| !hidden.hides(path))
-        .filter(present)
+        .filter(|path| present(workspace.root(), path))
         // No private repository stands once `detach` ends, so `hide` is not named (G4).
         .map(|path| {
             let released = Asked::Released {

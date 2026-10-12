@@ -7,6 +7,7 @@
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 
+use super::help;
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
 use crate::attachment::{self, Initialized, NotInitialized};
@@ -33,14 +34,7 @@ const AN_OPERAND: &[u8] =
 /// branch option takes the next word as its value, whatever it is, as Git's `init` does,
 /// and a later one replaces an earlier one; `--` ends the options, and nothing may follow.
 pub fn read(words: &[OsString]) -> Asked<'_> {
-    let end_of_options = words
-        .iter()
-        .position(|word| word.as_bytes() == b"--")
-        .unwrap_or(words.len());
-    if words[..end_of_options]
-        .iter()
-        .any(|word| matches!(word.as_bytes(), b"-h" | b"--help"))
-    {
+    if help::requested(words) {
         return Asked::Help;
     }
     let mut branch = None;

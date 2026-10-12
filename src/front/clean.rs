@@ -40,7 +40,7 @@ use super::table::{Entry, Read, Value};
 use crate::guards::clean::{self as patterns, Arrangement};
 use crate::guards::operand;
 use crate::keeper;
-use crate::runner::locate::Workspace;
+use crate::runner::locate::{Workspace, directory_at};
 use crate::runner::{Failure, Run};
 
 const DIRECTORIES: Entry = Entry::short(b'd', Value::None);
@@ -192,11 +192,10 @@ enum Found {
 }
 
 fn found_at(root: &Path, ancestor: &[u8]) -> Found {
-    let directory = root.join(OsStr::from_bytes(ancestor));
-    if !fs::symlink_metadata(&directory).is_ok_and(|found| found.is_dir()) {
+    if !directory_at(root, ancestor) {
         return Found::NotADirectory;
     }
-    match fs::symlink_metadata(directory.join(".git")) {
+    match fs::symlink_metadata(root.join(OsStr::from_bytes(ancestor)).join(".git")) {
         Ok(_) => Found::Repository,
         Err(_) => Found::Directory,
     }
@@ -209,10 +208,7 @@ fn found_at(root: &Path, ancestor: &[u8]) -> Found {
 fn directories_at(root: &Path, region: &[Vec<u8>]) -> BTreeSet<Vec<u8>> {
     region
         .iter()
-        .filter(|path| {
-            fs::symlink_metadata(root.join(OsStr::from_bytes(path)))
-                .is_ok_and(|found| found.is_dir())
-        })
+        .filter(|path| directory_at(root, path))
         .cloned()
         .collect()
 }

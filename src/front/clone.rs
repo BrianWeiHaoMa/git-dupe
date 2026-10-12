@@ -16,6 +16,7 @@
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 
+use super::help;
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
 use super::places;
@@ -48,14 +49,7 @@ const DASHED_BRANCH: &[u8] = b"the branch name cannot begin with '-'";
 /// Reads `clone URL [-b BRANCH]`, the options before or after `URL`, and `URL` after
 /// `--` too.
 pub fn read(words: &[OsString]) -> Asked<'_> {
-    let end_of_options = words
-        .iter()
-        .position(|word| word.as_bytes() == b"--")
-        .unwrap_or(words.len());
-    if words[..end_of_options]
-        .iter()
-        .any(|word| matches!(word.as_bytes(), b"-h" | b"--help"))
-    {
+    if help::requested(words) {
         return Asked::Help;
     }
     let (mut url, mut branch) = (None, None);

@@ -1,4 +1,5 @@
-//! The help texts, the usage lines, and the `help` command.
+//! The help texts, the usage lines, an own command's help request, and the `help`
+//! command.
 //!
 //! A text is a file in `help/` beside this one: `general.txt`, and `<command>.txt` named
 //! by the command's word as typed. The manual page is rendered from the same files at
@@ -109,6 +110,17 @@ fn text_of(word: &[u8]) -> Option<&'static str> {
         .map(|(_, text)| *text)
 }
 
+/// Whether an own command's words ask for its help: `-h` or `--help` anywhere before the
+/// first `--`, after which every word is an operand, `-h` included (`Composition/Front`).
+/// `git dupe git` reads a help word only as its first word, and a command with a table
+/// reads its words left to right (G26): neither asks here.
+pub fn requested(words: &[OsString]) -> bool {
+    words
+        .iter()
+        .take_while(|word| word.as_bytes() != b"--")
+        .any(|word| matches!(word.as_bytes(), b"-h" | b"--help"))
+}
+
 /// What the words after `help` ask for.
 #[derive(Debug, PartialEq, Eq)]
 enum Asked<'w> {
@@ -125,17 +137,14 @@ enum Asked<'w> {
 /// reading of dashed words, and a word after it is a command; a command cannot begin
 /// with `-`, there or before it, so that no word is ever an option of `git help`.
 fn read(words: &[OsString]) -> Asked<'_> {
+    if requested(words) {
+        return Asked::HelpOfHelp;
+    }
     let end_of_options = words
         .iter()
         .position(|word| word.as_bytes() == b"--")
         .unwrap_or(words.len());
     let (before, after) = words.split_at(end_of_options);
-    if before
-        .iter()
-        .any(|word| matches!(word.as_bytes(), b"-h" | b"--help"))
-    {
-        return Asked::HelpOfHelp;
-    }
     let mut commands = before.iter().chain(after.iter().skip(1));
     match (commands.next(), commands.next()) {
         (None, _) => Asked::General,
@@ -227,6 +236,22 @@ mod tests {
             Asked::Misused,
             "after `--`, `-h` is no request"
         );
+    }
+
+    #[test]
+    fn an_own_command_asks_for_help_with_a_help_word_before_the_end_of_options() {
+        for request in [&["-h"][..], &["x", "--help"], &["--help", "--", "y"]] {
+            assert!(requested(&words(request)), "{request:?}");
+        }
+        for other in [
+            &["--", "-h"][..],
+            &["x", "--", "--help"],
+            &[],
+            &["-help"],
+            &["--h"],
+        ] {
+            assert!(!requested(&words(other)), "{other:?}");
+        }
     }
 
     /// Every file in the texts' directory, by its name without `.txt`.

@@ -51,7 +51,7 @@ use std::path::{Path, PathBuf};
 
 use super::foreign::{self, Owner};
 use super::replace;
-use crate::runner::locate::Workspace;
+use crate::runner::locate::{Workspace, private_directory};
 use sections::{Sections, Worktree};
 
 /// This worktree's markers: the main worktree's, or the linked worktree's of its name.
@@ -420,7 +420,7 @@ fn repository_stands(common_directory: &Path, worktree: Worktree) -> bool {
             .join("worktrees")
             .join(OsStr::from_bytes(name)),
     };
-    match fs::symlink_metadata(git_directory.join("dupe")) {
+    match fs::symlink_metadata(private_directory(&git_directory)) {
         Ok(found) => found.is_dir(),
         Err(cause) => !matches!(
             cause.kind(),

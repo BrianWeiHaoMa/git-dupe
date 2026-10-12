@@ -24,6 +24,11 @@
 //! What a run answers is read in one of Git's machine forms (R5). `records` is the home
 //! of a reader of such a form, below every part that asks; a form that one caller alone
 //! reads, with checks of its own, may stay with that caller.
+//!
+//! `locate` is, for every part, the one spelling of a private Git directory's path
+//! (`private_directory`, F2) and the one reading of what stands at a root-relative path
+//! by `lstat`: `present` and `directory_at`. A site that asks `lstat` another question —
+//! the kind of what stands, a link, a file, `NotFound` alone — reads it itself.
 
 pub mod environment;
 pub mod locate;

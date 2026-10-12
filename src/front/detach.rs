@@ -10,6 +10,7 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
+use super::help;
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
 use crate::attachment::{self, NotDetached, NotRemoved};
@@ -34,16 +35,13 @@ const AN_OPERAND: &[u8] =
 /// Reads `detach [--force]`: `--force` as written, given once or more, and nothing else;
 /// `--` ends the options, and nothing may follow.
 pub fn read(words: &[OsString]) -> Asked {
+    if help::requested(words) {
+        return Asked::Help;
+    }
     let end_of_options = words
         .iter()
         .position(|word| word.as_bytes() == b"--")
         .unwrap_or(words.len());
-    if words[..end_of_options]
-        .iter()
-        .any(|word| matches!(word.as_bytes(), b"-h" | b"--help"))
-    {
-        return Asked::Help;
-    }
     let (options, after) = words.split_at(end_of_options);
     if after.len() > 1 {
         return Asked::Misused(AN_OPERAND);

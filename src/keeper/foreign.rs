@@ -20,15 +20,13 @@
 //! ignored.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::OsStr;
-use std::fs;
 use std::iter;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use super::hidden::HiddenPaths;
 use crate::guards::operand;
 use crate::guards::quoted::shell_word;
+use crate::runner::locate::present;
 
 /// Whose region another region is.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,7 +102,7 @@ impl<'r> Foreign<'r> {
             .copied()
             .filter(|path| !hidden.hides(path) && !released.contains(path))
             .filter(|path| !beyond_a_link(path))
-            .filter(|path| fs::symlink_metadata(root.join(OsStr::from_bytes(path))).is_ok())
+            .filter(|path| present(root, path))
             .collect()
     }
 }
@@ -153,6 +151,7 @@ fn named(owners: &[&Owner]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn region(owner: Owner, paths: &[&[u8]]) -> Region {
         Region {

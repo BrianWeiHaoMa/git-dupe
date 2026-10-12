@@ -16,7 +16,6 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::{OsStr, OsString};
-use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
@@ -29,7 +28,7 @@ use crate::guards::add::{self as decision, Found, Pathspecs, Scoped};
 use crate::guards::operand::{self, Cleaned};
 use crate::guards::pathspec;
 use crate::keeper::{self, Failed, GITDUPE};
-use crate::runner::locate::Workspace;
+use crate::runner::locate::{Workspace, directory_at, present};
 use crate::runner::{End, Failure, Run, records};
 
 const DRY_RUN: Entry = Entry::both(b'n', "dry-run", Value::None);
@@ -164,7 +163,7 @@ pub fn add(
     let to_hide: Vec<Vec<u8>> = scope
         .literals
         .iter()
-        .filter(|path| !hidden.paths.hides(path) && directory(root, path))
+        .filter(|path| !hidden.paths.hides(path) && directory_at(root, path))
         .cloned()
         .collect();
     let found = found(root, &scope.forms, &skipped);
@@ -263,11 +262,6 @@ fn staging(
     }
 }
 
-/// Whether `lstat` finds a directory at `path`, a symbolic link to one being no directory.
-fn directory(root: &Path, path: &[u8]) -> bool {
-    fs::symlink_metadata(root.join(OsStr::from_bytes(path))).is_ok_and(|found| found.is_dir())
-}
-
 /// What `lstat` finds for the forms' paths and the skipped paths.
 fn found(root: &Path, forms: &[Vec<u8>], skipped: &[Vec<u8>]) -> Found {
     let mut known = HashMap::new();
@@ -278,7 +272,7 @@ fn found(root: &Path, forms: &[Vec<u8>], skipped: &[Vec<u8>]) -> Found {
         }
     }
     for path in forms {
-        if fs::symlink_metadata(root.join(OsStr::from_bytes(path))).is_err() {
+        if !present(root, path) {
             found.absent.insert(path.clone());
         }
     }
