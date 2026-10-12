@@ -397,3 +397,49 @@ fn an_empty_private_remote_attaches_a_linked_worktree_with_one_hint_and_no_commi
         unchanged(&source, &main.private_directory());
     });
 }
+
+/// The main worktree's private repository made shallow by Git's own `fetch --depth=1`:
+/// `In use` 11's route still attaches a linked worktree with the branch checked out and
+/// the private files written, the new repository shallow as `git clone` of it would be
+/// (G2, `Holds/G2`, S12).
+#[test]
+fn a_shallow_main_private_repository_attaches_a_linked_worktree_with_its_branch() {
+    under_each_release(|s| {
+        let main = history(s);
+        write(&main.root, "notes/a.md", b"second private note\n");
+        private_add(s, &main.root, "notes/a.md");
+        private_commit(s, &main.root);
+        let remote = bare_remote(s, &main);
+        s.git([
+            OsStr::new("dupe"),
+            OsStr::new("remote"),
+            OsStr::new("add"),
+            OsStr::new("origin"),
+            remote.as_os_str(),
+        ])
+        .from(&main.root)
+        .succeeds();
+        s.git(["dupe", "fetch", "-q", "--depth=1", "origin"])
+            .from(&main.root)
+            .succeeds();
+        let shallow = |wt: &Worktree| {
+            wt.private(s)
+                .git(["rev-parse", "--is-shallow-repository"])
+                .succeeds()
+                .stdout
+        };
+        assert_eq!(shallow(&main), b"true\n");
+        let wt = linked(s, &main);
+        let url = main.private_directory();
+        let source = Tree::of(&url);
+        let output = clone(s, &wt, &url, None);
+        assert_eq!(output.end, End::Code(0), "{output:?}");
+        for level in ["warning", "hint", "fatal", "error"] {
+            assert!(output.lines(level).is_empty(), "{output:?}");
+        }
+        origin(s, &wt, &url);
+        arrived(s, &main, &wt);
+        assert_eq!(shallow(&wt), b"true\n");
+        unchanged(&source, &url);
+    });
+}

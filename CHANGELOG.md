@@ -33,6 +33,14 @@ Every change a user of git-dupe would notice, newest first, in the form of
   directory have their deletion staged, where it was refused once their paths together
   no longer fit on one command line; an untracked directory standing where they were is
   shown as one entry, as Git shows one.
+- `git dupe detach` removes the private repository when a hidden directory holds
+  thousands of private files whose paths together do not fit on one command line,
+  where it was refused, `--force` included, after removing the region, so that the
+  project's Git saw the private files until the next `git dupe` command.
+- `git dupe clone` of a shallow private repository, such as one made shallow by
+  `git dupe fetch --depth=1`, checks out its branch and writes the private files, the
+  new private repository shallow as `git clone` of it would be, where it checked out
+  nothing and said that the remote had no branch.
 
 ## [0.2.0] - 2026-10-09
 

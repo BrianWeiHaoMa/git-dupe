@@ -6,13 +6,15 @@
 //! a public place (G18), every word asked, `-b`'s value included. Step 1 is where the
 //! workspace becomes attached, so that a refusal leaves nothing behind.
 //!
-//! The steps: `init` as G1 does it without `-b`; `remote add origin URL`; `fetch origin`,
-//! its output Git's; `for-each-ref` of `origin`'s branches, whose empty answer ends the
-//! command with nothing checked out; without `-b`, `ls-remote --symref origin HEAD`, whose
-//! `ref:` line for `HEAD` names the branch, and whose lack of one refuses; `branch --track`
-//! from `refs/remotes/origin/BRANCH`, `symbolic-ref HEAD`, and `reset -q`, which sets the
-//! index and touches no file (S7); then
-//! the write step (`write`). No step passes `--force` or runs `checkout`, `switch`, or
+//! The steps: `init` as G1 does it without `-b`; `remote add origin URL`;
+//! `fetch --update-shallow origin`, its output Git's, which takes the refs of a shallow
+//! repository and makes this one shallow as `git clone` of it would, where a plain fetch
+//! rejects them and leaves no branch to check out (S12); `for-each-ref` of `origin`'s
+//! branches, whose empty answer ends the command with nothing checked out; without `-b`,
+//! `ls-remote --symref origin HEAD`, whose `ref:` line for `HEAD` names the branch, and
+//! whose lack of one refuses; `branch --track` from `refs/remotes/origin/BRANCH`,
+//! `symbolic-ref HEAD`, and `reset -q`, which sets the index and touches no file (S7);
+//! then the write step (`write`). No step passes `--force` or runs `checkout`, `switch`, or
 //! `restore`. The standard output of every step other than `init` and `fetch` is captured
 //! and dropped, `branch --track`'s line among it.
 //!
@@ -108,7 +110,10 @@ pub fn clone(
     let word = OsStr::new;
 
     quiet(&[word("remote"), word("add"), word("origin"), url])?;
-    step(run(&[word("fetch"), word("origin")]), &[0])?;
+    step(
+        run(&[word("fetch"), word("--update-shallow"), word("origin")]),
+        &[0],
+    )?;
     let branches = quiet(&[
         word("for-each-ref"),
         word("--format=%(refname)"),

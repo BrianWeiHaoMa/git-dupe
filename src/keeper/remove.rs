@@ -10,11 +10,12 @@
 //! `check-ignore` asks about each hidden path as it stood that is still present by
 //! `lstat`, and about each path of the deleted region that is neither among them nor below
 //! one and is present, released as settle releases a path of the starting region (G9);
-//! one public listing under the same paths names those public Git tracks, which it does
-//! not ignore whatever the question answers (`Holds/G3`). A listing that fails is one
-//! warning, as a question that fails is, and, as a failed question names no path as still
-//! hidden, no path is then named as one public Git ignores because another worktree hides
-//! it: whether public Git tracks it, and so sees it, is not known (G7).
+//! one public listing under the region paths and the released paths among them names
+//! those public Git tracks, which it does not ignore whatever the question answers
+//! (`Holds/G3`). A listing that fails is one warning, as a question that fails is, and,
+//! as a failed question names no path as still hidden, no path is then named as one
+//! public Git ignores because another worktree hides it: whether public Git tracks it,
+//! and so sees it, is not known (G7).
 
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsStr;
@@ -77,7 +78,17 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
     let mut refused = None;
     let mut killed = None;
     let mut listing_failed = false;
-    let query: Vec<Vec<u8>> = asked.iter().map(|(path, _)| path.to_vec()).collect();
+    // Under the region paths among the paths asked about, not every hidden path: each
+    // hidden path present lies at or below a present region path, so the listing names
+    // the same paths while its list stays one built from E8's budget, however many files
+    // a hidden directory holds (`Holds/G3`). A released path is a path of the deleted
+    // region, below no hidden path, so it is listed itself.
+    let region: BTreeSet<&[u8]> = hidden.region.iter().map(Vec::as_slice).collect();
+    let query: Vec<Vec<u8>> = asked
+        .iter()
+        .filter(|(path, kind)| matches!(kind, Asked::Released { .. }) || region.contains(path))
+        .map(|(path, _)| path.to_vec())
+        .collect();
     let tracked = if query.is_empty() {
         BTreeSet::new()
     } else {

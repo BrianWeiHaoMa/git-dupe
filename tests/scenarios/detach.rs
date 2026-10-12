@@ -5,6 +5,7 @@ use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::harness::{
     End, Output, Scenario, Transfer, Tree, changed_since, daily_warnings, detached, holds,
@@ -582,5 +583,58 @@ fn git_run_sequences_do_not_follow_private_file_counts() {
             }
             assert_eq!(sequences[0], sequences[1]);
         }
+    });
+}
+
+/// A hidden directory holding a few thousand privately tracked files (`Scale`) whose
+/// paths together exceed `ARG_MAX`, while the region paths are two (E8): `Remove`'s
+/// public listing is taken under the region paths, a list built from E8's budget, so
+/// `detach --force` completes and still names every file below the directory, each asked
+/// on the question's standard input (`Holds/G3`).
+#[test]
+fn force_detaches_a_hidden_directory_whose_files_exceed_one_command_line() {
+    under_each_release(|s| {
+        let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
+        assert!(limit.status.success());
+        let limit: usize = std::str::from_utf8(&limit.stdout)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        // Each path long enough that the files' paths alone exceed ARG_MAX, in components
+        // no filesystem refuses.
+        let count = 2_000;
+        let length = limit / count + 1;
+        let long_path = |index: usize| {
+            let mut path = String::from("notes/");
+            while length - path.len() > 250 {
+                path.push_str(&"d".repeat(199));
+                path.push('/');
+            }
+            let name = format!("{index:07}");
+            path.push_str(&"f".repeat(length - path.len() - name.len()));
+            path + &name
+        };
+        let root = s.dir().join("workspace");
+        s.attached_project(&root);
+        write(&root, ".gitdupe", b"notes\n");
+        let files: Vec<String> = (0..count).map(long_path).collect();
+        for path in &files {
+            write(&root, path, b"private\n");
+        }
+        private_add(s, &root, "notes");
+        private_add(s, &root, ".gitdupe");
+        private_commit(s, &root);
+        s.git(["dupe", "status"]).from(&root).succeeds();
+        assert_eq!(region_rules(&root), [&b"/.gitdupe"[..], b"/notes"]);
+        let before = Tree::working(&root);
+        let output = s.git(["dupe", "detach", "--force"]).from(&root).run();
+        succeeded(&output);
+        let mut expected = vec![now_visible(".gitdupe"), now_visible("notes")];
+        expected.extend(files.iter().map(|path| now_visible(path)));
+        warnings(&output, expected);
+        detached(&root);
+        assert!(changed_since(&before, &root).is_empty());
+        visible(s, &root, &["notes/", ".gitdupe"]);
     });
 }
