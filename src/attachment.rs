@@ -24,7 +24,8 @@
 //! - `detach` deletes the region before it removes the private repository, and removes
 //!   it only once no region stands, so that a kill at any point leaves what
 //!   `detach --force` completes (`State` "`detach`"). That removal is the one deletion
-//!   git-dupe makes of its own (R8).
+//!   git-dupe makes of its own of a file or directory it did not just write itself; the
+//!   other is the keeper's removal of its own fresh file when a replacement fails (R8).
 
 mod clone;
 mod detach;

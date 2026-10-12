@@ -8,8 +8,9 @@
 //! - The `git dupe` lines are the page's command lines from its first, in the page's
 //!   order and none left out, as far as the README goes: the quick start's, then, when
 //!   the README goes on, the examples' from their first. Typed in order, they are what
-//!   `manual_page_commands` runs, in the state the texts describe. A command line of a
-//!   page text that changes fails here until the README follows it.
+//!   `manual_page_commands` runs, in the state the texts describe. A change to the page's
+//!   command lines as far as the README shows them fails here until the README follows
+//!   it; a line after the last one it shows is not compared.
 //! - The other lines are, in order, `UNPACKING`, the install note's command lines as
 //!   `release_archive` follows them, all of them and as the note holds them, and
 //!   `FROM_SOURCE`. A changed line of the note fails here until the README follows it.

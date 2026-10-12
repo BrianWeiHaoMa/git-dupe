@@ -26,10 +26,11 @@
 //! renders, read with this machine's `man`, and the release archive's members — is a
 //! plain `#[test]`, kept in `manual_page` or `release_archive` beside the scenarios that
 //! install what it checks. The check of `README.md` is a plain `#[test]` too, in
-//! `readme`: the `git dupe` lines the README shows are the ones `manual_page_commands`
-//! runs, and the install note's lines it shows are the ones `release_archive` follows, so
-//! that a changed command line of a page text or of the note fails there until the README
-//! follows it.
+//! `readme`: the `git dupe` lines the README shows are the page's first command lines,
+//! in order, which `manual_page_commands` runs, and its other command lines hold the
+//! install note's, all of them, which `release_archive` follows, so that a change to the
+//! page's command lines as far as the README shows them, or to any of the note's, fails
+//! there until the README follows it.
 
 mod harness;
 

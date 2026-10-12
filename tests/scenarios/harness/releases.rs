@@ -3,7 +3,7 @@
 use std::ffi::OsStr;
 
 /// Every minor release from the oldest git-dupe supports to the newest, raised as new
-/// ones appear. This is the only place that names a release: scenarios never do.
+/// ones appear: the one list of the releases the checks run under.
 pub const LISTED: [&str; 14] = [
     "2.43.0", "2.44.0", "2.45.0", "2.46.0", "2.47.0", "2.48.0", "2.49.0", "2.50.0", "2.51.0",
     "2.52.0", "2.53.0", "2.54.0", "2.55.0", "2.56.0",

@@ -12,13 +12,14 @@
 //! which refuse every leading `:` (G11), use `literal` and `resolve`.
 //!
 //! The ancestor relation between root-relative paths is here too, and written nowhere
-//! else: `ancestors` and `at_or_below` are every test of whether a path lies at, below,
-//! or above another (R9). They take paths as they cross a boundary, clean, without a
-//! leading or trailing slash, the root being the empty path, and compare whole
-//! components of the bytes as given: nothing is normalized and the filesystem is never
-//! asked. The root is an ancestor of nothing and at or below nothing but itself; a caller
-//! that means everything under the root does not ask. The region rule form and its
-//! reading back are the keeper's (`keeper::rule`).
+//! else: `ancestors` and `at_or_below`, and over a set of paths `any_at_or_below` and
+//! `any_below`, are every test of whether a path lies at, below, or above another (R9).
+//! They take paths as they cross a boundary, clean, without a leading or trailing slash,
+//! the root being the empty path, and compare whole components of the bytes as given:
+//! nothing is normalized and the filesystem is never asked. The root is an ancestor of
+//! nothing and at or below nothing but itself; a caller that means everything under the
+//! root does not ask. The region rule form and its reading back are the keeper's
+//! (`keeper::rule`).
 
 use std::collections::BTreeSet;
 use std::ops::Bound;

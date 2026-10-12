@@ -39,6 +39,9 @@
 //! exposure question or `detach`'s removal of the private repository, starts while it is
 //! held (R10). A lock that cannot be taken is no wait: nothing is looked at, and the
 //! caller says why.
+//!
+//! The file is full at one concern, the one replacement of `.git/info/exclude` and what
+//! it reads there; a new keeper concern goes in a sibling file.
 
 mod sections;
 
