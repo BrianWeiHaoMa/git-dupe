@@ -15,13 +15,19 @@
 //! and in no handler (R3), and so follows a `clone` wherever it ends attached. `detach`,
 //! typed or reached through an alias, leaves the sequence before step (6), so that it
 //! neither starts from the region nor settles, whatever it returns. Where no workspace is
-//! attached, a help request after a word passed through, after `stash`, or
-//! after `push`, `pull`, `fetch`, or `remote`, and a help request or usage error of a
-//! command an alias reaches, are answered alone, and nothing settles (`Holds/G24`,
+//! attached, a help request after a word passed through, after `stash`, or after `push`,
+//! `pull`, `fetch`, or `remote`, and, of a command an alias reaches, a help request or a
+//! usage error step (2) answers at once (a word a table does not hold, a Git global option
+//! after `git`), are answered alone, and nothing settles; a misuse held of such a command
+//! ends as a typed one does, with Git's message or step (5)'s refusal (`Holds/G24`,
 //! `Holds/G4`). Each of the three sites that runs a command Git runs as itself — step (5),
 //! step (7), and `answered_unlocated` — hands `Passed::run` the facts of where the command
 //! stands and the repository its run is made against, so that the transfer commands'
 //! guard compares at every one of them (`Holds/G18`).
+//!
+//! The file is full at one concern, the sequence and the wiring of every command: each step
+//! with a body is a function here, which calls the sibling module that owns what the step
+//! asks (`alias`, a command's own module, the keeper); a new concern goes in a sibling file.
 //!
 //! A new command is wired in at these sites, each a plain line that search finds:
 //!
@@ -64,7 +70,7 @@ use super::passthrough::Passed;
 use super::status;
 use super::table::{self, Entry, Fault, Reading};
 use crate::keeper::{self, StartingRegion};
-use crate::runner::locate::{self, NotLocated, Unlocated, Workspace};
+use crate::runner::locate::{self, NotLocated, Workspace};
 use crate::runner::{self, Against};
 
 const VERSION_LINE: &str = concat!("git-dupe version ", env!("CARGO_PKG_VERSION"), "\n");
@@ -81,144 +87,61 @@ pub fn run(words: &[OsString]) -> u8 {
 
 fn sequence(words: &[OsString]) -> Outcome {
     // (1) Bare `git dupe`, `--version`, `-h` alone, and every other dashed first word.
-    // Nothing runs before this.
-    let Some((first, rest)) = words.split_first() else {
-        return outcome::print(help::general_usage_line(), Outcome::BareUsage);
+    let first = match first_word(words) {
+        Ok(first) => first,
+        Err(answered) => return answered,
     };
-    let first = first.as_bytes();
-    if first == b"--version" {
-        return outcome::print(VERSION_LINE.as_bytes(), Outcome::Answered);
-    }
-    if first == b"-h" && rest.is_empty() {
-        return help::general();
-    }
-    if first.starts_with(b"-") {
-        // Git's global options, unknown dashed words, and `-h` with a word after it are
-        // not told apart: nothing else dashed is read here.
-        return outcome::usage_error(DASHED_FIRST_WORD, help::general_usage_line());
-    }
 
     // (2) The words of an own, changed, or guarded command, read before locating; a misuse
     // is held. Any other word waits for step (4).
     let literal = commands::named(first);
-    let read = match literal {
-        Some(command) => match read_words(command, words) {
-            Words::Answered(answered) => return answered,
-            Words::Read(read) => Some(read),
-        },
+    let read = match literal.map(|command| read_words(command, words)) {
+        Some(Words::Answered(answered)) => return answered,
+        Some(Words::Read(read)) => Some(read),
         None => None,
     };
 
-    // (3) The runner locates the workspace; its failure ends the command as Git ended, but
-    // for what is answered where the failed locate leaves it, unread and with nothing
-    // settled: a help request after a word passed through, after `stash`, or after a
-    // transfer command, and a help request or usage error of a command the first word
-    // reaches through an alias.
+    // (3) The runner locates the workspace; its failure ends the command as Git ended it,
+    // but for what `answered_unlocated` answers where the failed locate leaves it.
     let workspace = match locate::locate(literal.is_some_and(Command::attaches)) {
         Ok(workspace) => workspace,
         Err(not_located) => {
-            if let NotLocated::Refused {
-                unlocated: Some(unlocated),
-                ..
-            } = &not_located
-                && let Some(answered) = answered_unlocated(read, words, unlocated)
-            {
-                return answered;
-            }
-            return not_located_end(not_located);
+            return answered_unlocated(read, words, &not_located)
+                .unwrap_or_else(|| not_located_end(not_located));
         }
     };
 
-    // (4) A first word F6 does not name is resolved through the aliases, asked where its
-    // run would be made: it passes through as received, is dispatched as the command its
-    // chain reaches, read as step (2) reads that command typed, or is the usage error G19
-    // names, held for after step (5). A lookup Git failed ends the command as Git ended it,
-    // settled in an attached workspace (R3). Where something other than a directory stands
-    // at the private Git directory, no lookup is made through it: the word passes through
-    // unresolved, and step (5) refuses it.
-    let expanded: Vec<OsString>;
+    // (4) A first word F6 does not name is resolved through the aliases where its run
+    // would be made (`through_aliases`); a lookup Git failed ends the command, settled
+    // where attached (R3), and a command that attaches, so reached, is located again
+    // (`relocated`).
+    let mut expanded = None;
     let (command, read) = match read {
         Some(read) => (literal, read),
-        None => {
-            let private = workspace.private_directory();
-            let against = Against::Private {
-                git_directory: &private,
-                root: workspace.root(),
-            };
-            let resolved = match workspace.obstruction() {
-                Some(_) => Ok(Resolved::PassThrough),
-                None => alias::resolve(words, against),
-            };
-            match resolved {
-                Err(ended) => return ended_early(&workspace, ended),
-                Ok(Resolved::PassThrough) => (None, Ok(Read::Passed(Passed::Word(words)))),
-                Ok(Resolved::Dispatch {
-                    command,
-                    words: dispatched,
-                    prefix,
-                }) => {
-                    runner::carry_prefix(prefix);
-                    expanded = dispatched;
-                    match read_words(command, &expanded) {
-                        Words::Answered(answered) => return answered,
-                        Words::Read(read) => (Some(command), read),
-                    }
-                }
-                Ok(Resolved::Ambiguous(reached)) => (None, Err(alias::ambiguous(&reached, first))),
-            }
-        }
+        None => match aliased(&workspace, words, &mut expanded) {
+            Reached::Read(command, read) => (command, read),
+            Reached::Answered(answered) => return answered,
+            Reached::Failed(ended) => return ended_early(&workspace, ended),
+        },
     };
-
-    // An alias that reaches `init` was located as a command that does not attach: it is
-    // located again as `init` locates it, which also asks for the superproject (G4). That
-    // run carries the chain's prefix, and its failure ends the command as Git ended it,
-    // settled where the first locate found the workspace attached (R3).
     let attaching = command.is_some_and(Command::attaches);
-    let workspace = if attaching && literal.is_none() {
-        match locate::locate(true) {
-            Ok(relocated) => relocated,
-            Err(not_located) => return ended_early(&workspace, not_located_end(not_located)),
-        }
-    } else {
-        workspace
-    };
-
-    // The private repository, which a command Git runs as itself is made against.
-    let private = workspace.private_directory();
-    let against = Against::Private {
-        git_directory: &private,
-        root: workspace.root(),
+    let workspace = match relocated(workspace, attaching && literal.is_none()) {
+        Ok(workspace) => workspace,
+        Err(ended) => return ended,
     };
 
     // (5) Every command but the ones that attach requires this worktree to be attached,
-    // whatever the other worktrees hold, but for a help request after a word passed
-    // through, after `stash`, or after a transfer command, which Git answers alone, after
-    // the command's guard, against this worktree's private Git directory, which no `init`
-    // has made, so that it never selects the public repository nor another worktree's
-    // private one. Where something other than a directory stands there, Git would follow
-    // it, and the request is refused naming it instead.
+    // whatever the other worktrees hold (`unattached`).
     if !workspace.attached() && !attaching {
-        if let Some(passed) = help_request(&read) {
-            if let Some(obstruction) = workspace.obstruction() {
-                return outcome::obstructed(&obstruction);
-            }
-            return passed.run(against, || Some(workspace.facts()));
-        }
-        return outcome::refuse_unattached();
+        return unattached(&workspace, &read);
     }
 
     // A misuse held from (2) or (4), then an operand that names the root or a path outside
     // it, which only the user's directory below the root reveals: no settle follows a
-    // usage error. The usage line is the command's, or the general one where no command
-    // was reached.
+    // usage error.
     let handler = match read.and_then(|read| handler(read, &workspace, command)) {
         Ok(handler) => handler,
-        Err(fault) => {
-            let usage_line = command.map_or(help::general_usage_line(), |command| {
-                help::command_usage_line(command.word())
-            });
-            return outcome::usage_error(&fault, usage_line);
-        }
+        Err(fault) => return misused(&fault, command),
     };
 
     // `detach` is no command G6 covers: it ends here, without the starting region of step
@@ -235,21 +158,31 @@ fn sequence(words: &[OsString]) -> Outcome {
         StartingRegion::default()
     };
 
-    // (7) The handler.
-    let handled = match handler {
-        Handler::Init(branch) => init::run(&workspace, branch),
-        Handler::Clone { words, url, branch } => clone::run(&workspace, words, url, branch),
-        Handler::Hide(paths) => hide::hide(&workspace, &paths),
-        Handler::Unhide(paths) => hide::unhide(&workspace, &paths),
-        Handler::Status(read, paths) => status::status(&workspace, &read, paths.as_deref()),
-        Handler::Add(read, words, operands) => add::add(&workspace, &read, words, &operands),
-        Handler::Clean(read, words) => clean::clean(&workspace, &read, words),
-        Handler::Passed(passed) => passed.run(against, || Some(workspace.facts())),
-        Handler::Detach(_) => unreachable!("detach ends before step (6)"),
-    };
-
-    // (8) Settle, in a workspace attached after the handler.
+    // (7) The handler, then (8) settle, in a workspace attached after it.
+    let handled = handle(handler, &workspace);
     settle(&workspace, &starting, handled)
+}
+
+/// Step (1): the first word, or the outcome the command ends with before anything runs:
+/// bare `git dupe`, `--version`, `-h` alone, and every other dashed first word.
+fn first_word(words: &[OsString]) -> Result<&[u8], Outcome> {
+    let usage_line = help::general_usage_line();
+    let Some((first, rest)) = words.split_first() else {
+        return Err(outcome::print(usage_line, Outcome::BareUsage));
+    };
+    let first = first.as_bytes();
+    if first == b"--version" {
+        return Err(outcome::print(VERSION_LINE.as_bytes(), Outcome::Answered));
+    }
+    if first == b"-h" && rest.is_empty() {
+        return Err(help::general());
+    }
+    if first.starts_with(b"-") {
+        // Git's global options, unknown dashed words, and `-h` with a word after it are
+        // not told apart: nothing else dashed is read here.
+        return Err(outcome::usage_error(DASHED_FIRST_WORD, usage_line));
+    }
+    Ok(first)
 }
 
 /// Step (2): the words of `command`, read before locating when typed, and in step (4)
@@ -313,49 +246,155 @@ fn read_words(command: Command, words: &[OsString]) -> Words<'_> {
 }
 
 /// Step (3) where the locate failed: what is answered there without a repository, its
-/// runs and the alias lookups made as `Composition/Runner` says; `None` for every other
-/// command, which ends with Git's message. A lookup Git failed ends the command as Git
-/// ended it. Where something other than a directory stands at the private Git directory,
-/// nothing is looked up or run through it, and a help request is refused naming it.
+/// runs and the alias lookups made as `Composition/Runner` says: what step (2) answers at
+/// once of a command an alias reaches, and a help request after a word passed through,
+/// after `stash`, or after a transfer command. `None` for every other command, a held
+/// misuse included, which ends with Git's message; a lookup Git failed ends the command as
+/// Git ended it. Where something other than a directory stands at the private Git
+/// directory, nothing is looked up or run through it, and a help request is refused there.
 fn answered_unlocated(
     read: Option<Result<Read, Vec<u8>>>,
     words: &[OsString],
-    unlocated: &Unlocated,
+    not_located: &NotLocated,
 ) -> Option<Outcome> {
+    let NotLocated::Refused {
+        unlocated: Some(unlocated),
+        ..
+    } = not_located
+    else {
+        return None;
+    };
     let against = unlocated.against();
     let obstruction = unlocated.obstruction();
-    let expanded: Vec<OsString>;
+    let mut expanded = None;
     let read = match read {
         Some(read) => read,
-        None => {
-            let resolved = match obstruction {
-                Some(_) => Ok(Resolved::PassThrough),
-                None => alias::resolve(words, against),
-            };
-            match resolved {
-                Err(ended) => return Some(ended),
-                Ok(Resolved::PassThrough) => Ok(Read::Passed(Passed::Word(words))),
-                Ok(Resolved::Dispatch {
-                    command,
-                    words: dispatched,
-                    prefix,
-                }) => {
-                    runner::carry_prefix(prefix);
-                    expanded = dispatched;
-                    match read_words(command, &expanded) {
-                        Words::Answered(answered) => return Some(answered),
-                        Words::Read(read) => read,
-                    }
-                }
-                Ok(Resolved::Ambiguous(_)) => return None,
-            }
-        }
+        None => match through_aliases(words, against, obstruction.is_some(), &mut expanded) {
+            Reached::Read(_, read) => read,
+            Reached::Answered(answered) | Reached::Failed(answered) => return Some(answered),
+        },
     };
     let passed = help_request(&read)?;
     Some(match obstruction {
         Some(obstruction) => outcome::obstructed(obstruction),
         None => passed.run(against, || unlocated.facts()),
     })
+}
+
+/// Step (4), located or not: a first word F6 does not name, resolved through the aliases
+/// with the lookups made `against` where its run would be made (`alias`), or passed through
+/// unresolved where something other than a directory stands at the private Git directory
+/// (`obstructed`). A chain's prefix is carried before the command it reaches is read from
+/// the expansion, which `expanded` keeps, as step (2) reads that command typed.
+fn through_aliases<'w>(
+    words: &'w [OsString],
+    against: Against,
+    obstructed: bool,
+    expanded: &'w mut Option<Vec<OsString>>,
+) -> Reached<'w> {
+    let resolved = if obstructed {
+        Ok(Resolved::PassThrough)
+    } else {
+        alias::resolve(words, against)
+    };
+    match resolved {
+        Err(ended) => Reached::Failed(ended),
+        Ok(Resolved::PassThrough) => Reached::Read(None, Ok(Read::Passed(Passed::Word(words)))),
+        Ok(Resolved::Dispatch {
+            command,
+            words: dispatched,
+            prefix,
+        }) => {
+            runner::carry_prefix(prefix);
+            match read_words(command, expanded.insert(dispatched)) {
+                Words::Answered(answered) => Reached::Answered(answered),
+                Words::Read(read) => Reached::Read(Some(command), read),
+            }
+        }
+        Ok(Resolved::Ambiguous(reached)) => {
+            Reached::Read(None, Err(alias::ambiguous(&reached, words[0].as_bytes())))
+        }
+    }
+}
+
+/// Step (4) where the locate found the workspace: the lookups are made against its private
+/// repository, attached or not (`Holds/G4`); where something other than a directory stands
+/// at its path, the word passes through unresolved, and step (5) refuses it.
+fn aliased<'w>(
+    workspace: &Workspace,
+    words: &'w [OsString],
+    expanded: &'w mut Option<Vec<OsString>>,
+) -> Reached<'w> {
+    let private = workspace.private_directory();
+    let against = Against::Private {
+        git_directory: &private,
+        root: workspace.root(),
+    };
+    through_aliases(words, against, workspace.obstruction().is_some(), expanded)
+}
+
+/// After step (4): a command that attaches, reached through an alias, was located as one
+/// that does not; it is located again as one that attaches is, which also asks for the
+/// superproject (G4). That run carries the chain's prefix, and its failure ends the command
+/// as Git ended it, settled where the first locate found the workspace attached (R3).
+fn relocated(workspace: Workspace, aliased_attaching: bool) -> Result<Workspace, Outcome> {
+    if !aliased_attaching {
+        return Ok(workspace);
+    }
+    locate::locate(true)
+        .map_err(|not_located| ended_early(&workspace, not_located_end(not_located)))
+}
+
+/// Step (5) in an unattached worktree, for a command that does not attach: refused naming
+/// `git dupe init`, but for a help request after a word passed through, after `stash`, or
+/// after a transfer command, which Git answers alone, after the command's guard, against
+/// this worktree's private Git directory, which no `init` has made, so that it never
+/// selects the public repository nor another worktree's private one. Where something other
+/// than a directory stands there, Git would follow it, and the request is refused naming it.
+fn unattached(workspace: &Workspace, read: &Result<Read, Vec<u8>>) -> Outcome {
+    let Some(passed) = help_request(read) else {
+        return outcome::refuse_unattached();
+    };
+    match workspace.obstruction() {
+        Some(obstruction) => outcome::obstructed(&obstruction),
+        None => run_passed(passed, workspace),
+    }
+}
+
+/// The usage error of a misuse held from step (2) or (4), or of an operand `handler`
+/// refuses: the fault, then the usage line of the command reached, or the general one
+/// where no command was reached.
+fn misused(fault: &[u8], command: Option<Command>) -> Outcome {
+    let usage_line = command.map_or(help::general_usage_line(), |command| {
+        help::command_usage_line(command.word())
+    });
+    outcome::usage_error(fault, usage_line)
+}
+
+/// Step (7): the handler.
+fn handle(handler: Handler, workspace: &Workspace) -> Outcome {
+    match handler {
+        Handler::Init(branch) => init::run(workspace, branch),
+        Handler::Clone { words, url, branch } => clone::run(workspace, words, url, branch),
+        Handler::Hide(paths) => hide::hide(workspace, &paths),
+        Handler::Unhide(paths) => hide::unhide(workspace, &paths),
+        Handler::Status(read, paths) => status::status(workspace, &read, paths.as_deref()),
+        Handler::Add(read, words, operands) => add::add(workspace, &read, words, &operands),
+        Handler::Clean(read, words) => clean::clean(workspace, &read, words),
+        Handler::Passed(passed) => run_passed(passed, workspace),
+        Handler::Detach(_) => unreachable!("detach ends before step (6)"),
+    }
+}
+
+/// A command Git runs as itself, in step (5) or (7): run against this worktree's private
+/// repository, attached or not, its guard comparing from where the workspace stands.
+fn run_passed(passed: Passed, workspace: &Workspace) -> Outcome {
+    let private = workspace.private_directory();
+    let against = Against::Private {
+        git_directory: &private,
+        root: workspace.root(),
+    };
+    passed.run(against, || Some(workspace.facts()))
 }
 
 /// How a command ends where the workspace was not located: with Git's message and status,
@@ -433,6 +472,20 @@ enum Words<'w> {
     /// What the handler is resolved from, or the fault of a misuse, reported before step
     /// (6).
     Read(Result<Read<'w>, Vec<u8>>),
+}
+
+/// What step (4) made of a first word F6 does not name.
+enum Reached<'w> {
+    /// The command its chain reached, `None` where the words pass through or no release
+    /// reads it alike, and what step (2) read of that command's words; or the fault held for
+    /// after step (5): that command's misuse, or the usage error G19 names.
+    Read(Option<Command>, Result<Read<'w>, Vec<u8>>),
+    /// What step (2) answers at once of the command reached: the command ends with it,
+    /// unsettled.
+    Answered(Outcome),
+    /// A lookup Git failed: the command ends as Git ended it, settled by a caller that
+    /// located an attached workspace (R3).
+    Failed(Outcome),
 }
 
 /// What step (2) read from a command's words. A misuse is not one: it is its fault,
