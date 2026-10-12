@@ -10,35 +10,44 @@ it has another name, read that name for `main` in them (`Set once`, below).
 
 - **The version**, `<major>.<minor>.<patch>`, is set in one place, `version` in
   `Cargo.toml`, which `Cargo.lock` follows (step 3): `git dupe --version` prints it, and
-  the archive is named by it. The README names no version of git-dupe, so setting one
+  the archives are named by it. The README names no version of git-dupe, so setting one
   never edits it.
 - **The tag** is an annotated tag `v<version>` on a commit of the default branch,
   `main`.
 - **The GitHub Release** of that tag is titled with the tag. Its notes are the version's
-  section of [`CHANGELOG.md`](CHANGELOG.md), and its two files are
-  `git-dupe-<version>-linux-x86_64.tar` and `git-dupe-<version>-linux-x86_64.tar.sha256`,
-  the archive named for the platform and the architecture of the machine that made it,
-  as `uname -m` prints the architecture there. The archive holds the
-  executable, the manual page, and the install note [`INSTALL`](INSTALL), under
-  `git-dupe-<version>/`. It is made only by the scenarios of `release_archive`, which
-  build it from the source into `target/release/` and check what it holds, whether
-  `cargo test --test scenarios release_archive` runs them or a wider check does; it is
-  never packed by hand. Its executable is built for the machine that makes it: x86-64
-  Linux with the GNU C library, on the workflow's `ubuntu-22.04`, whose library is 2.35,
-  so that the executable runs with 2.34 or newer, the platform the README's install
-  section names. An executable runs only where the library is at least as new as the one
-  it was linked against, so a newer image would raise that floor. The `.sha256` names the
+  section of [`CHANGELOG.md`](CHANGELOG.md), and its six files are three archives, each
+  with a `.sha256` beside it:
+
+  | Archive | Made on the workflow's runner | Its executable runs on |
+  |---|---|---|
+  | `git-dupe-<version>-linux-x86_64.tar` | `ubuntu-24.04` | x86-64 Linux with the GNU C library 2.39 or newer |
+  | `git-dupe-<version>-macos-arm64.tar` | `macos-26` | macOS 11.0 or newer on Apple silicon |
+  | `git-dupe-<version>-macos-x86_64.tar` | `macos-26-intel` | macOS 10.12 or newer on Intel |
+
+  Each archive is named for the platform and the architecture of the machine that made
+  it, as `uname -m` prints the architecture there, and holds that machine's executable,
+  the manual page, and the install note [`INSTALL`](INSTALL), one text for both
+  platforms, under `git-dupe-<version>/`. It is made only by the scenarios of
+  `release_archive`, which build it from the source into `target/release/` and check
+  what it holds, whether `cargo test --test scenarios release_archive` runs them or a
+  wider check does, on a machine of its platform and architecture; it is never packed by
+  hand or built for another machine. Each floor is the making machine's: a Linux
+  executable runs only where the GNU C library is at least as new as the one it was
+  linked against, the runner image's 2.39, so a newer image would raise that floor; a
+  macOS executable runs on the macOS releases the pinned Rust toolchain supports for its
+  architecture, 11.0 on Apple silicon and 10.12 on Intel. Each `.sha256` names its
   archive by its bare name, so that
-  `sha256sum -c git-dupe-<version>-linux-x86_64.tar.sha256` checks a download in its own
-  directory.
+  `shasum -a 256 -c git-dupe-<version>-<platform>-<architecture>.tar.sha256`, or
+  `sha256sum -c` where that is installed, checks a download in its own directory.
 
 Pushing the tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml),
 which makes the Release. Before it checks or publishes anything, it refuses a tag that
 is not `v` followed by `Cargo.toml`'s version, a `Cargo.lock` that names another version,
 a tag that is not annotated, a tag whose commit is not on the default branch, and a
 `CHANGELOG.md` without the version's section. Then it runs the checks
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs, and publishes only when they
-pass.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on each of the three runners,
+whose `release_archive` scenarios make that runner's archive, and publishes the six files
+only when the checks passed on all three.
 
 ## Which number to raise
 
@@ -146,11 +155,12 @@ $ cargo fmt --check
 $ cargo clippy --all-targets -- -D warnings
 ```
 
-All three pass on your machine. `cargo test` is the delivery check: every unit check, and
-every scenario under every listed Git release, the 100,000-file scenario `scale` among
-them. The workflows run a focused form that leaves `scale` out, so this run is the one
-that holds a release to the counted Git runs among 100,000 files and their one-second
-bound. What the checks need, and what each costs, is in the `Checks` section of
+All three pass on a Linux machine and on a Mac, since a release ships for both.
+`cargo test` is the delivery check: every unit check, and every scenario under every
+listed Git release, the 100,000-file scenario `scale` among them. The workflows run a
+focused form that leaves `scale` out, so these runs are the ones that hold a release to
+the counted Git runs among 100,000 files and their one-second bound, on each platform.
+What the checks need, and what each costs, is in the `Checks` section of
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ### 6. Commit the release
@@ -183,13 +193,14 @@ Both are pushed, or neither. The branch runs `ci.yml`; the tag runs `release.yml
 Open `https://github.com/BrianWeiHaoMa/git-dupe/actions/workflows/release.yml` and the
 run for `v<version>`. When it passes, the Release is at
 `https://github.com/BrianWeiHaoMa/git-dupe/releases/tag/v<version>`, with its notes and
-its two files. Download both into one directory and check them there:
+its six files. Download them into one directory and check them there:
 
 ```console
-$ sha256sum -c git-dupe-<version>-linux-x86_64.tar.sha256
+$ shasum -a 256 -c git-dupe-<version>-*.tar.sha256
 ```
 
-It prints `git-dupe-<version>-linux-x86_64.tar: OK`.
+It prints `git-dupe-<version>-<platform>-<architecture>.tar: OK` for each of the three
+archives.
 
 ## When the release workflow fails
 
@@ -212,37 +223,42 @@ The log of the run names the step and why.
   only on the runner is still a finding: read its log, and do not skip, weaken, or
   re-run it until it passes.
 - **The workflow cannot run or cannot publish**, as when GitHub Actions is unavailable:
-  make the Release by hand, from the tagged commit, on an x86-64 Linux machine with the
-  GNU C library no newer than the workflow's 2.35, so that the executable runs where the
-  workflow's would, after the checks of step 5 passed on it:
+  make the Release by hand, from the tagged commit, with each archive made on a machine
+  of its platform and architecture: an x86-64 Linux machine with the GNU C library no
+  newer than the workflow image's 2.39, a Mac with Apple silicon, and an Intel Mac, each
+  after the checks of step 5 passed on it, and on a Mac with `MACOSX_DEPLOYMENT_TARGET`
+  unset, so that each executable runs where the workflow's would. On each, with
+  `<platform>-<architecture>` the archive's, `linux-x86_64`, `macos-arm64`, or
+  `macos-x86_64`:
 
   ```console
   $ git switch --detach v<version>
   $ cargo test --test scenarios release_archive
   $ cd target/release
-  $ sha256sum git-dupe-<version>-linux-x86_64.tar > git-dupe-<version>-linux-x86_64.tar.sha256
-  $ sha256sum -c git-dupe-<version>-linux-x86_64.tar.sha256
+  $ shasum -a 256 git-dupe-<version>-<platform>-<architecture>.tar > git-dupe-<version>-<platform>-<architecture>.tar.sha256
+  $ shasum -a 256 -c git-dupe-<version>-<platform>-<architecture>.tar.sha256
   $ cd ../..
   ```
 
-  Copy the text of the version's section of `CHANGELOG.md`, without its heading, into a
-  file `notes.md` outside the clone, as `../notes.md`. Then, with the GitHub CLI signed
-  in (`gh auth login`):
+  Gather the six files into one directory beside one of the clones, as `../release/`, and
+  copy the text of the version's section of `CHANGELOG.md`, without its heading, into a
+  file `notes.md` there, as `../notes.md`. Then, from that clone, with the GitHub CLI
+  signed in (`gh auth login`):
 
   ```console
-  $ gh release create v<version> --verify-tag --title v<version> --notes-file ../notes.md target/release/git-dupe-<version>-linux-x86_64.tar target/release/git-dupe-<version>-linux-x86_64.tar.sha256
+  $ gh release create v<version> --verify-tag --title v<version> --notes-file ../notes.md ../release/git-dupe-<version>-*.tar ../release/git-dupe-<version>-*.tar.sha256
   ```
 
   Or, on the repository's Releases page, draft a new release: choose the tag, title it
-  with the tag, paste the notes, attach the two files, and publish. Then
-  `git switch main`.
+  with the tag, paste the notes, attach the six files, and publish. A Release holds all
+  six or is not published. Then `git switch main`.
 
 ## Set once
 
 - **Before the first release**, the repository on GitHub holds the project on `main`,
-  and `ci.yml` has passed there once; its first run also builds the two Git releases it
-  checks under, which later runs, the release's included, take from its cache while
-  GitHub keeps it.
+  and `ci.yml` has passed there once, on each of its three runners; its first run also
+  builds, on each runner, the two Git releases it checks under, which later runs on the
+  same runner, the release's included, take from its cache while GitHub keeps it.
 - **The default branch is `main`.** `ci.yml` runs on every push to `main` and every pull
   request. If the public repository's default branch has another name, change `main` in
   `ci.yml`'s `on: push: branches:` to it, and read it for `main` in the steps above.

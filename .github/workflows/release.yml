@@ -1,9 +1,11 @@
 # Publishes the GitHub Release of a pushed tag v<version>, as RELEASING.md describes.
 # Before any check runs, the tag is refused unless it is v followed by the version
 # Cargo.toml and Cargo.lock name, annotated, and on the default branch, and unless
-# CHANGELOG.md has the version's section; then the checks of ci.yml run, and the Release is published only
-# when they pass, with the archive the checks made, its checksum, and that section as
-# its notes.
+# CHANGELOG.md has the version's section (`check`). Then the checks of ci.yml run on a
+# runner of each platform and architecture a release ships for, and each runner's
+# `release_archive` scenarios make its archive (`build`). The Release is published only
+# when every runner's checks passed, with the three archives, their checksums, and that
+# section as its notes (`publish`).
 name: Release
 
 on:
@@ -18,9 +20,11 @@ defaults:
     shell: bash
 
 jobs:
-  release:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -29,6 +33,7 @@ jobs:
       # would bring a stale one along silently, and the tag's own sources would then not
       # build with --locked.
       - name: Check that the tag is v followed by the version Cargo.toml and Cargo.lock name
+        id: version
         run: |
           version=$(sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"$/\1/p' Cargo.toml)
           if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -45,6 +50,7 @@ jobs:
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Check that the tag is annotated and on the default branch
         run: |
@@ -95,12 +101,49 @@ jobs:
           fi
           cat "$RUNNER_TEMP/notes.md"
 
+      - name: Keep the notes for the publishing job
+        uses: actions/upload-artifact@v7
+        with:
+          name: notes
+          path: ${{ runner.temp }}/notes.md
+          if-no-files-found: error
+
+  # Each archive is made by the scenarios on a runner of the platform and architecture
+  # its suffix names, never cross-built, so that an archive exists only where the checks
+  # passed on its platform (P3); the suffix is the expectation that pins it there.
+  build:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            suffix: linux-x86_64
+            timeout: 60
+          # A macOS runner is slower, the Intel one most, and builds the two Git
+          # releases itself on a cache miss.
+          - runner: macos-26
+            suffix: macos-arm64
+            timeout: 90
+          - runner: macos-26-intel
+            suffix: macos-x86_64
+            timeout: 90
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
       - name: Install the toolchain rust-toolchain.toml pins
         run: |
           rustup toolchain install
           rustup show active-toolchain
 
+      # macOS has man, and its Command Line Tools the zlib headers.
       - name: Install man and the zlib headers
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends man-db zlib1g-dev
@@ -120,12 +163,12 @@ jobs:
           echo "cache-selection=${selection//,/-}" >> "$GITHUB_OUTPUT"
 
       # The same key as ci.yml's: a tag's run restores what a run on the default branch
-      # saved.
+      # saved on the same image and architecture.
       - name: Restore the built Git releases
         uses: actions/cache@v6
         with:
           path: gits
-          key: gits-ubuntu-22.04-${{ runner.arch }}-${{ steps.releases.outputs.cache-selection }}-${{ hashFiles('tests/scenarios/harness/releases.rs', 'tests/scenarios/harness/provision.rs') }}
+          key: gits-${{ matrix.runner }}-${{ runner.arch }}-${{ steps.releases.outputs.cache-selection }}-${{ hashFiles('tests/scenarios/harness/releases.rs', 'tests/scenarios/harness/provision.rs') }}
 
       - name: Format
         run: cargo fmt --check
@@ -138,29 +181,67 @@ jobs:
 
       # As in ci.yml: every scenario but `scale`, whose counted Git runs among 100,000
       # files and one-second bound the delivery check runs before the tag. Its
-      # `release_archive` scenarios make target/release/git-dupe-<version>-linux-x86_64.tar.
+      # `release_archive` scenarios make target/release/git-dupe-<version>-<suffix>.tar.
       - name: Scenarios under the oldest and the newest listed release
         env:
           GIT_DUPE_CHECK_RELEASES: ${{ steps.releases.outputs.selection }}
         run: cargo test --test scenarios -- --skip scale
 
+      # From the archive's own directory, so that the .sha256 names it by its bare name;
+      # shasum is on every runner and every Mac, and its line is the one RELEASING.md checks.
       - name: Write the archive's checksum
         run: |
           cd target/release
-          archive=git-dupe-$VERSION-linux-x86_64.tar
+          archive=git-dupe-$VERSION-${{ matrix.suffix }}.tar
           if [[ ! -f $archive ]]; then
             echo "the scenarios left no archive at target/release/$archive" >&2
             exit 1
           fi
-          sha256sum "$archive" > "$archive.sha256"
-          sha256sum -c "$archive.sha256"
+          shasum -a 256 "$archive" > "$archive.sha256"
+          shasum -a 256 -c "$archive.sha256"
+
+      - name: Keep the archive and its checksum for the publishing job
+        uses: actions/upload-artifact@v7
+        with:
+          name: archive-${{ matrix.suffix }}
+          path: |
+            target/release/git-dupe-${{ env.VERSION }}-${{ matrix.suffix }}.tar
+            target/release/git-dupe-${{ env.VERSION }}-${{ matrix.suffix }}.tar.sha256
+          if-no-files-found: error
+
+  # Runs only when every build passed, and publishes the six files in one command, so
+  # that a Release never holds fewer.
+  publish:
+    needs: [check, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - name: Gather the archives and their checksums
+        uses: actions/download-artifact@v8
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: release
+
+      - name: Gather the notes
+        uses: actions/download-artifact@v8
+        with:
+          name: notes
+          path: ${{ runner.temp }}
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          cd release
+          files=()
+          for suffix in linux-x86_64 macos-arm64 macos-x86_64; do
+            archive=git-dupe-$VERSION-$suffix.tar
+            shasum -a 256 -c "$archive.sha256"
+            files+=("$archive" "$archive.sha256")
+          done
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
-            "target/release/git-dupe-$VERSION-linux-x86_64.tar" \
-            "target/release/git-dupe-$VERSION-linux-x86_64.tar.sha256"
+            --notes-file "$RUNNER_TEMP/notes.md" "${files[@]}"

@@ -15,8 +15,9 @@ codes.
 
 "Dupe" as in a duplicate of your checkout that only you see: a second repository laid
 over the same working tree, each path belonging to one repository or the other. It has
-nothing to do with duplicate files. Linux only and Git 2.43 or newer, for now. What it
-does not do yet is under [Limits](#limits), and `git dupe detach` takes it back out.
+nothing to do with duplicate files. It runs on Linux and macOS with Git 2.43 or newer.
+What it does not do yet is under [Limits](#limits), and `git dupe detach` takes it back
+out.
 
 <img src="docs/demo.png" width="880" alt="A terminal transcript. git status --short lists AGENTS.md and notes/ as untracked. After git dupe init, git dupe add notes/ AGENTS.md, and git dupe commit -m 'Notes and agent instructions', git status --short prints nothing, and git dupe log --oneline shows that one commit.">
 
@@ -114,9 +115,10 @@ What there is to learn fits the one screen of `git dupe help`:
 
 ## Install
 
-git-dupe runs on Linux and needs Git 2.43.0 or newer, below 3.0.0, a release that is not
-out yet and may change what git-dupe relies on. It is one executable, `git-dupe`, which
-Git runs for `git dupe …` when it stands in a directory on `PATH`.
+git-dupe runs on Linux and on macOS and needs Git 2.43.0 or newer, below 3.0.0, a
+release that is not out yet and may change what git-dupe relies on. It is one
+executable, `git-dupe`, which Git runs for `git dupe …` when it stands in a directory on
+`PATH`.
 
 **From a release.** Download the archive for your machine,
 `git-dupe-<version>-<platform>-<architecture>.tar`, from the
@@ -132,12 +134,28 @@ cp git-dupe ~/.local/bin/
 cp git-dupe.1 ~/.local/share/man/man1/
 ```
 
-The release's executable is for x86-64 Linux with the GNU C library 2.34 or newer, in
-`git-dupe-<version>-linux-x86_64.tar`; on another machine, or where it does not start,
-install from source. Either way, the Git on `PATH` decides: `git --version` must say
-2.43.0 or newer. Ubuntu 24.04 ships 2.43.0 and Debian 13 ships 2.47; Ubuntu 22.04 ships
-2.34 and Debian 12 ships 2.39, so there a newer Git comes first, from the `git-core` PPA,
-a backport, or a build from source.
+A release has one archive for each kind of machine, its executable built and checked on
+that kind of machine, the Macs' on macOS 26:
+
+| Archive | For |
+|---|---|
+| `git-dupe-<version>-linux-x86_64.tar` | x86-64 Linux with the GNU C library 2.39 or newer |
+| `git-dupe-<version>-macos-arm64.tar` | a Mac with Apple silicon, on macOS 11.0 or newer |
+| `git-dupe-<version>-macos-x86_64.tar` | an Intel Mac, on macOS 10.12 or newer |
+
+On a Mac, a browser marks the archive it downloads as quarantined, the mark passes to the
+files unpacked from it, and macOS holds the executable, which Apple has not notarized,
+instead of running it: remove the mark once, after installing and before its first run,
+with
+`xattr -d com.apple.quarantine ~/.local/bin/git-dupe`, or download with `curl -LO`,
+which sets none.
+
+On another machine, or where the executable does not start, install from source. Either
+way, the Git on `PATH` decides: `git --version` must say 2.43.0 or newer. Ubuntu 24.04
+ships 2.43.0 and Debian 13 ships 2.47; Ubuntu 22.04 ships 2.34 and Debian 12 ships 2.39,
+so there a newer Git comes first, from the `git-core` PPA, a backport, or a build from
+source. On a Mac, Apple's Git, which the Command Line Tools for Xcode install, will do,
+2.50.1 in their version 26.6, and so will Homebrew's.
 
 **From source.** In a clone of this repository, with Rust installed through rustup, which
 installs the toolchain the repository pins on first use:
@@ -188,12 +206,10 @@ files, or `cargo uninstall git-dupe` after an install from source.
 
 ## Limits
 
-- **Linux today; macOS is specified and under way.** The specification now covers macOS
-  too, its default case-insensitive volume included, naming the one difference that
-  volume makes: git-dupe compares paths as spelled, so a path spelled in another case is
-  another path to it, while the project's Git ignores a hidden path in every spelling of
-  its ASCII case. The suite and the release run on Linux until the port lands;
-  [issue #1](https://github.com/BrianWeiHaoMa/git-dupe/issues/1) tracks it.
+- **Paths are compared as spelled, on macOS's case-insensitive volume too.** That
+  volume, macOS's default, makes one difference: git-dupe compares paths as spelled, so
+  a path spelled in another case is another path to it, while the project's Git ignores
+  a hidden path in every spelling of its ASCII case.
 - **Git 2.43.0 or newer, below 3.0.0.** No single feature needs it; it is the floor the
   suite covers, and Ubuntu 24.04's stock Git. [Install](#install) says what older
   distributions ship.
@@ -291,12 +307,13 @@ a specification. [`PRODUCT_SPECIFICATION.md`](PRODUCT_SPECIFICATION.md) says, in
 numbered lines, what git-dupe does, the guarantees it keeps, and what it never does;
 [`TECHNICAL_SPECIFICATION.md`](TECHNICAL_SPECIFICATION.md) says how each guarantee holds.
 The code follows both, and a change of behavior amends the specification first. The
-scenario suite, the specification's own `Done when` among it, runs on every push under
-Git 2.43.0 and 2.56.0, the oldest and the newest release it lists
+scenario suite, the specification's own `Done when` among it, runs on every push on
+Linux, on an Apple silicon Mac, and on an Intel Mac, under Git 2.43.0 and 2.56.0, the
+oldest and the newest release it lists
 ([CI](https://github.com/BrianWeiHaoMa/git-dupe/actions/workflows/ci.yml)), all but
 its timing of six commands among 100,000 files, which a shared runner decides as much
-as git-dupe does, and in full before each release under every minor release between
-them, fourteen at this writing, each built from source.
+as git-dupe does, and in full before each release, on Linux and on macOS, under every
+minor release between them, fourteen at this writing, each built from source there.
 
 **How it was built.** I wrote the product specification and own every decision in it:
 the command surface, what is refused, what is left to plain Git, and the tradeoffs

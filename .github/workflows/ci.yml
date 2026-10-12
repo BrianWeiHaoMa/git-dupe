@@ -1,6 +1,7 @@
 # The checks of CONTRIBUTING.md in their focused form, on every push to main and every
-# pull request. The delivery check, `cargo test`, is run before every release
-# (RELEASING.md); this workflow is not it.
+# pull request, on a runner of each platform and architecture a release ships for. The
+# delivery check, `cargo test`, is run before every release (RELEASING.md); this
+# workflow is not it.
 name: CI
 
 on:
@@ -18,8 +19,20 @@ defaults:
 
 jobs:
   checks:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            timeout: 60
+          # A macOS runner is slower, the Intel one most, and builds the two Git
+          # releases itself on a cache miss.
+          - runner: macos-26
+            timeout: 90
+          - runner: macos-26-intel
+            timeout: 90
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -29,7 +42,9 @@ jobs:
           rustup toolchain install
           rustup show active-toolchain
 
+      # macOS has man, and its Command Line Tools the zlib headers.
       - name: Install man and the zlib headers
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends man-db zlib1g-dev
@@ -49,13 +64,14 @@ jobs:
           echo "cache-selection=${selection//,/-}" >> "$GITHUB_OUTPUT"
 
       # Saved only when the job succeeds, so a set built while a check failed is never
-      # kept; a changed list or build gives a new key. The image is in the key: a Git
-      # built on one image may not run on an older image's C library.
+      # kept; a changed list or build gives a new key. The image and the architecture are
+      # in the key: a Git built on one runner may not run on another's system or
+      # processor.
       - name: Restore the built Git releases
         uses: actions/cache@v6
         with:
           path: gits
-          key: gits-ubuntu-22.04-${{ runner.arch }}-${{ steps.releases.outputs.cache-selection }}-${{ hashFiles('tests/scenarios/harness/releases.rs', 'tests/scenarios/harness/provision.rs') }}
+          key: gits-${{ matrix.runner }}-${{ runner.arch }}-${{ steps.releases.outputs.cache-selection }}-${{ hashFiles('tests/scenarios/harness/releases.rs', 'tests/scenarios/harness/provision.rs') }}
 
       - name: Format
         run: cargo fmt --check

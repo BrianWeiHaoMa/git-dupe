@@ -8,11 +8,24 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Added
+
+- macOS support, on Apple silicon and on Intel, the default case-insensitive volume
+  included. A release has an archive for each kind of Mac,
+  `git-dupe-<version>-macos-arm64.tar` for macOS 11.0 or newer on Apple silicon and
+  `git-dupe-<version>-macos-x86_64.tar` for macOS 10.12 or newer on Intel, each built
+  and checked on a Mac of its kind, with the same manual page and install note as the
+  Linux archive. On a case-insensitive volume git-dupe compares paths as spelled, so a
+  path spelled in another case is another path to it, while the project's Git ignores
+  a hidden path in every spelling of its ASCII case.
+
 ### Changed
 
 - The release archive is named for the platform and the architecture it is built for,
   `git-dupe-<version>-linux-x86_64.tar` for x86-64 Linux, where its name held the
   version alone; what it holds and its install note are unchanged.
+- The Linux executable is built on Ubuntu 24.04 and needs the GNU C library 2.39 or
+  newer, where it needed 2.34; on an older system, install from source.
 
 ## [0.2.0] - 2026-10-09
 
