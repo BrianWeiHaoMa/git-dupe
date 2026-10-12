@@ -71,6 +71,12 @@ impl Runs {
     }
 }
 
+/// `words` as `Runs::words` gives one run's, each word its bytes: the run a scenario
+/// expects.
+pub fn run_words(words: &[&str]) -> Vec<Vec<u8>> {
+    words.iter().map(|word| word.as_bytes().to_vec()).collect()
+}
+
 /// Runs `git` as `Git::run` does, with Git's trace2 event log written to `log`, which is
 /// emptied first, and returns what it printed and the Git processes it made.
 pub fn run_traced(git: Git<'_>, log: &Path) -> (Output, Runs) {

@@ -27,7 +27,8 @@ use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, Output, Scenario, command_lines, held_publicly, leaving_public_git, page_texts_present,
-    privately_tracked, publicly_tracked, records, text_present, under_each_release, write,
+    private_head, privately_tracked, publicly_tracked, records, text_present, under_each_release,
+    write,
 };
 
 /// The placeholder for the URL of the developer's private repository.
@@ -157,8 +158,9 @@ impl Machines {
     }
 }
 
-/// `git status --porcelain` of the project at `root`: what public Git lists there.
-fn public_status(s: &Scenario, root: &Path) -> Vec<u8> {
+/// `git status --porcelain` of the project at `root`: what public Git lists there, in Git's
+/// own untracked mode, which collapses an untracked directory.
+fn public_status_collapsed(s: &Scenario, root: &Path) -> Vec<u8> {
     s.git(["status", "--porcelain"])
         .from(root)
         .succeeds()
@@ -192,11 +194,6 @@ fn held_publicly_of_private_history(s: &Scenario, root: &Path) -> Vec<Vec<u8>> {
 /// The commit `name` names in the repository at `directory`.
 fn commit(s: &Scenario, directory: &Path, name: &str) -> Vec<u8> {
     s.git(["rev-parse", name]).from(directory).succeeds().stdout
-}
-
-/// The commit the private `HEAD` at `root` names.
-fn private_head(s: &Scenario, root: &Path) -> Vec<u8> {
-    s.private(root).git(["rev-parse", "HEAD"]).succeeds().stdout
 }
 
 /// The lines of `.gitdupe` at `root`, sorted.
@@ -311,7 +308,7 @@ fn quick_start_holds(s: &Scenario, machines: &Machines, branch: &str) {
         assert_eq!(on.stdout, format!("refs/heads/{branch}\n").as_bytes());
         assert_eq!(private_head(s, root), head, "{}", root.display());
         assert_eq!(privately_tracked(s, root), tracked, "{}", root.display());
-        assert_eq!(public_status(s, root), b"", "{}", root.display());
+        assert_eq!(public_status_collapsed(s, root), b"", "{}", root.display());
         assert_eq!(private_status(s, root), b"", "{}", root.display());
     }
     for path in [".gitdupe", "AGENTS.md", "notes/todo.md"] {
@@ -369,7 +366,7 @@ fn examples_hold(s: &Scenario, machines: &Machines, ran: &Ran) {
     for kept in private_files.iter().chain(&["README.md", "docs/design.md"]) {
         assert!(first.join(kept).is_file(), "{kept}");
     }
-    assert_eq!(public_status(s, first), b"");
+    assert_eq!(public_status_collapsed(s, first), b"");
 
     let porcelain = ran.of("git dupe status --porcelain");
     assert_eq!(porcelain.stdout, b"", "{porcelain:?}");
@@ -379,7 +376,7 @@ fn examples_hold(s: &Scenario, machines: &Machines, ran: &Ran) {
     // Whatever is written in scratch/ later is hidden from the project's Git, and private
     // Git sees it.
     write(first, "scratch/plan.md", b"plan\n");
-    assert_eq!(public_status(s, first), b"");
+    assert_eq!(public_status_collapsed(s, first), b"");
     assert_eq!(private_status(s, first), b"?? scratch/\n");
 }
 

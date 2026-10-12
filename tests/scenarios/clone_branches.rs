@@ -11,15 +11,9 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, names, private_add, private_commit, region_rules, under_each_release,
-    usage_line, write,
+    End, Scenario, dupe_clone, names, private_add, private_commit, region_rules,
+    under_each_release, usage_line, write,
 };
-
-/// `git dupe clone <words>` from `dir`.
-fn clone(s: &Scenario, dir: &Path, words: &[&OsStr]) -> Output {
-    let dupe = [OsStr::new("dupe"), OsStr::new("clone")];
-    s.git(dupe.iter().chain(words)).from(dir).run()
-}
 
 /// `git dupe detach --force` from `dir`, which must succeed.
 fn detached(s: &Scenario, dir: &Path) {
@@ -74,7 +68,7 @@ fn b_checks_out_that_branch_tracking_origin() {
             .succeeds();
 
         let url = m.first.private_remote.as_os_str();
-        let output = clone(s, second, &[url, OsStr::new("-b"), OsStr::new("other")]);
+        let output = dupe_clone(s, second, &[url, OsStr::new("-b"), OsStr::new("other")]);
         assert_eq!(output.end, End::Code(0), "{output:?}");
         assert!(output.lines("fatal").is_empty(), "{output:?}");
         let head = s.private(second).git(["symbolic-ref", "HEAD"]).succeeds();
@@ -98,7 +92,7 @@ fn a_branch_the_remote_lacks_ends_with_gits_status_attached_and_starts_over() {
         let m = s.second_machine("project");
         let (first, second) = (&m.first.root, &m.root);
         let url = m.first.private_remote.as_os_str();
-        let failed = clone(s, second, &[url, OsStr::new("-b"), OsStr::new("missing")]);
+        let failed = dupe_clone(s, second, &[url, OsStr::new("-b"), OsStr::new("missing")]);
         attached_and_settled(second);
         // What was done stays: `origin` configured and fetched.
         let origin = s
@@ -127,7 +121,7 @@ fn a_branch_the_remote_lacks_ends_with_gits_status_attached_and_starts_over() {
         assert!(local_branches(s, second).is_empty());
 
         detached(s, second);
-        let again = clone(s, second, &[url]);
+        let again = dupe_clone(s, second, &[url]);
         assert_eq!(again.end, End::Code(0), "{again:?}");
         attached_on_main(s, second, first);
     });
@@ -151,7 +145,7 @@ fn the_default_branch_is_checked_out_whatever_tags_or_dashes_the_remote_holds() 
         s.git(["update-ref", "refs/tags/origin/main", hash])
             .from(remote)
             .succeeds();
-        let output = clone(s, second, &[url]);
+        let output = dupe_clone(s, second, &[url]);
         assert_eq!(output.end, End::Code(0), "{output:?}");
         attached_on_main(s, second, first);
         detached(s, second);
@@ -160,7 +154,7 @@ fn the_default_branch_is_checked_out_whatever_tags_or_dashes_the_remote_holds() 
         s.git(["update-ref", "refs/tags/refs/remotes/origin/main", hash])
             .from(remote)
             .succeeds();
-        let output = clone(s, second, &[url]);
+        let output = dupe_clone(s, second, &[url]);
         assert_eq!(output.end, End::Code(0), "{output:?}");
         attached_on_main(s, second, first);
         detached(s, second);
@@ -173,7 +167,7 @@ fn the_default_branch_is_checked_out_whatever_tags_or_dashes_the_remote_holds() 
         s.git(["symbolic-ref", "HEAD", "refs/heads/--list"])
             .from(remote)
             .succeeds();
-        let failed = clone(s, second, &[url]);
+        let failed = dupe_clone(s, second, &[url]);
         attached_and_settled(second);
         let gits = s
             .private(second)
@@ -191,7 +185,7 @@ fn the_default_branch_is_checked_out_whatever_tags_or_dashes_the_remote_holds() 
         assert!(local_branches(s, second).is_empty());
         detached(s, second);
         let b_main = [url, OsStr::new("-b"), OsStr::new("main")];
-        let cloned = clone(s, second, &b_main);
+        let cloned = dupe_clone(s, second, &b_main);
         assert_eq!(cloned.end, End::Code(0), "{cloned:?}");
         attached_on_main(s, second, first);
     });
@@ -220,7 +214,7 @@ fn a_url_or_branch_beginning_with_a_dash_is_a_usage_error_and_dot_slash_is_a_pat
             &[OsStr::new("--"), OsStr::new("-x")],
             &[OsStr::new("-b"), OsStr::new("-"), url],
         ] {
-            let output = clone(s, second, words);
+            let output = dupe_clone(s, second, words);
             assert_eq!(output.end, End::Code(129), "{words:?}: {output:?}");
             assert!(output.stdout.is_empty(), "{output:?}");
             output.line_then("error", usage_line(&text));
@@ -232,7 +226,7 @@ fn a_url_or_branch_beginning_with_a_dash_is_a_usage_error_and_dot_slash_is_a_pat
         let words = [OsStr::new("clone"), OsStr::new("-q"), OsStr::new("--bare")];
         s.git(words.iter().chain([&url, &dashed.as_os_str()]))
             .succeeds();
-        let output = clone(s, second, &[OsStr::new("./-x")]);
+        let output = dupe_clone(s, second, &[OsStr::new("./-x")]);
         assert_eq!(output.end, End::Code(0), "{output:?}");
         attached_on_main(s, second, first);
         let configured = s
@@ -250,7 +244,7 @@ fn a_remote_without_a_branch_attaches_with_origin_and_no_commit() {
         let second = &m.root;
         let empty = s.dir().join("empty.git");
         s.bare_repository(&empty);
-        let output = clone(s, second, &[empty.as_os_str()]);
+        let output = dupe_clone(s, second, &[empty.as_os_str()]);
         assert_eq!(output.end, End::Code(0), "{output:?}");
         assert!(output.lines("fatal").is_empty(), "{output:?}");
         assert!(output.lines("warning").is_empty(), "{output:?}");
@@ -328,7 +322,7 @@ fn a_remote_head_naming_no_branch_is_refused_naming_b_and_b_clones() {
         // the route the line names, then `-b`, clones. The first starts over by plain
         // `detach`, which the line names, the second by `detach --force`.
         for (remote, force) in [(&hashed, false), (&missing, true)] {
-            let refused = clone(s, second, &[remote.as_os_str()]);
+            let refused = dupe_clone(s, second, &[remote.as_os_str()]);
             assert_eq!(refused.end, End::Code(128), "{refused:?}");
             let fatal = refused.lines("fatal");
             assert_eq!(fatal.len(), 1, "{refused:?}");
@@ -344,7 +338,7 @@ fn a_remote_head_naming_no_branch_is_refused_naming_b_and_b_clones() {
             assert!(!fetched.stdout.is_empty());
 
             let b_main = [remote.as_os_str(), OsStr::new("-b"), OsStr::new("main")];
-            let attached = clone(s, second, &b_main);
+            let attached = dupe_clone(s, second, &b_main);
             assert_eq!(attached.end, End::Code(128), "{attached:?}");
             names(attached.only_line("fatal"), b"already attached");
             if force {
@@ -353,7 +347,7 @@ fn a_remote_head_naming_no_branch_is_refused_naming_b_and_b_clones() {
                 let plain = s.git(["dupe", "detach"]).from(second).run();
                 assert_eq!(plain.end, End::Code(0), "{plain:?}");
             }
-            let cloned = clone(s, second, &b_main);
+            let cloned = dupe_clone(s, second, &b_main);
             assert_eq!(cloned.end, End::Code(0), "{cloned:?}");
             attached_on_main(s, second, first);
             detached(s, second);
@@ -367,7 +361,7 @@ fn a_url_that_is_no_repository_ends_with_fetchs_status_attached_and_starts_over(
         let m = s.second_machine("project");
         let (first, second) = (&m.first.root, &m.root);
         let nothing = s.dir().join("nothing-here");
-        let failed = clone(s, second, &[nothing.as_os_str()]);
+        let failed = dupe_clone(s, second, &[nothing.as_os_str()]);
         attached_and_settled(second);
         let gits = s.private(second).git(["fetch", "origin"]).run();
         assert_ne!(gits.end, End::Code(0), "{gits:?}");
@@ -375,7 +369,7 @@ fn a_url_that_is_no_repository_ends_with_fetchs_status_attached_and_starts_over(
         assert!(failed.stderr.ends_with(&gits.stderr), "{failed:?}");
 
         detached(s, second);
-        let again = clone(s, second, &[m.first.private_remote.as_os_str()]);
+        let again = dupe_clone(s, second, &[m.first.private_remote.as_os_str()]);
         assert_eq!(again.end, End::Code(0), "{again:?}");
         attached_on_main(s, second, first);
     });

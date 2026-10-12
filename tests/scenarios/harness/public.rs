@@ -4,11 +4,12 @@
 //! The story's own public commands change the public repository rightly, so the
 //! comparison is made around each `git dupe` command, never across a whole story. When a
 //! story ends, the public repository holds no object of the private history and no path
-//! the private index tracks: the listings that show it are here.
+//! the private index tracks: the listings that show it are here, with the public status a
+//! story reads between its commands.
 
 use std::path::Path;
 
-use super::output::{Output, records};
+use super::output::{End, Output, records};
 use super::scenario::{Git, Scenario};
 use super::tree::Tree;
 
@@ -32,6 +33,28 @@ pub fn leaving_public_git(dir: &Path, git: Git<'_>) -> Output {
         "the public repository changed: {changed:?}; {output:?}"
     );
     output
+}
+
+/// `git dupe <words>` in the workspace at `root`, run from `from`, as `leaving_public_git`
+/// runs it; it may end as it ends.
+pub fn watched_dupe(s: &Scenario, root: &Path, from: &Path, words: &[&str]) -> Output {
+    leaving_public_git(root, s.git(["dupe"].iter().chain(words)).from(from))
+}
+
+/// `watched_dupe` from the root, which must exit 0.
+pub fn watched_dupe_succeeds(s: &Scenario, root: &Path, words: &[&str]) -> Output {
+    let output = watched_dupe(s, root, root, words);
+    assert_eq!(output.end, End::Code(0), "git dupe {words:?}: {output:?}");
+    output
+}
+
+/// Public `git status --porcelain --untracked-files=all` from `dir`, which must exit 0:
+/// every change public Git sees there, each untracked file by itself.
+pub fn public_status(s: &Scenario, dir: &Path) -> Vec<u8> {
+    s.git(["status", "--porcelain", "--untracked-files=all"])
+        .from(dir)
+        .succeeds()
+        .stdout
 }
 
 pub fn privately_tracked(s: &Scenario, dir: &Path) -> Vec<Vec<u8>> {

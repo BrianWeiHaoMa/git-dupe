@@ -5,12 +5,11 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
-use std::path::Path;
+use std::os::unix::fs::{PermissionsExt, symlink};
 
 use crate::harness::{
-    End, Region, Tree, holds, name_accepted, names, refused_stash_untracked, region, region_in,
-    run_traced, unchanged, under_each_release, write,
+    End, Region, Tree, holds, inode, mode, name_accepted, names, refused_stash_untracked, region,
+    region_in, run_traced, unchanged, under_each_release, write,
 };
 
 /// The user's text before every region.
@@ -46,16 +45,6 @@ fn main_region(rules: &[&[u8]]) -> Vec<u8> {
 /// last of them, `CAFE` or `CAFE_IN_ASCII`.
 fn around(main: &[u8], cafe: &[u8]) -> Vec<u8> {
     [TOP, AGENT, BETWEEN, main, cafe, LAST].concat()
-}
-
-/// The device and inode at `path`: the same pair after a command is the same file.
-fn identity(path: &Path) -> (u64, u64) {
-    let found = fs::symlink_metadata(path).unwrap();
-    (found.dev(), found.ino())
-}
-
-fn mode(path: &Path) -> u32 {
-    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o7777
 }
 
 #[test]
@@ -142,12 +131,12 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
         assert_eq!(fs::read(&exclude).unwrap(), three);
 
         // A refusal settles, and a composition equal to the file writes nothing.
-        let written = identity(&exclude);
+        let written = inode(&exclude);
         let refused = s.git(["dupe", "stash", "-u"]).from(&root).run();
         refused_stash_untracked(s, &refused);
         assert!(refused.lines("warning").is_empty(), "{refused:?}");
         assert_eq!(fs::read(&exclude).unwrap(), three);
-        assert_eq!(identity(&exclude), written);
+        assert_eq!(inode(&exclude), written);
 
         // The released directory is named; the path only the other region names is not.
         let unhide = s.git(["dupe", "unhide", "notes"]).from(&root).succeeds();
@@ -180,11 +169,11 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
         s.init(&root);
         let appended = [&without[..], b"\n", &main_region(&[b"/.gitdupe"])].concat();
         assert_eq!(fs::read(&exclude).unwrap(), appended);
-        let written = identity(&exclude);
+        let written = inode(&exclude);
         let status = s.git(["dupe", "status"]).from(&root).succeeds();
         assert!(status.lines("warning").is_empty(), "{status:?}");
         assert_eq!(fs::read(&exclude).unwrap(), appended);
-        assert_eq!(identity(&exclude), written);
+        assert_eq!(inode(&exclude), written);
     });
 }
 

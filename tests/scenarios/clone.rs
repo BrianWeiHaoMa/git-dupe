@@ -7,7 +7,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, leaving_public_git, names, region_rules, under_each_release, write,
+    End, Output, Scenario, Tree, leaving_public_git, names, private_config_value, private_head,
+    region_rules, under_each_release, write,
 };
 
 /// The privately tracked files of `daily_state`, the first machine's private history.
@@ -18,21 +19,6 @@ const PRIVATE: [&str; 5] = [
     ".vscode/settings.json",
     "docs/notes.md",
 ];
-
-/// The value of `name` in the private local configuration of the workspace at `dir`.
-fn key(s: &Scenario, dir: &Path, name: &str, expected: &str) {
-    let output = s
-        .private(dir)
-        .git(["config", "--local", "--get-all", name])
-        .run();
-    assert_eq!(output.end, End::Code(0), "{name}: {output:?}");
-    assert_eq!(output.stdout, format!("{expected}\n").as_bytes(), "{name}");
-}
-
-/// The commit the private `HEAD` of the workspace at `dir` names.
-fn private_head(s: &Scenario, dir: &Path) -> Vec<u8> {
-    s.private(dir).git(["rev-parse", "HEAD"]).succeeds().stdout
-}
 
 /// `git dupe <words>` from `dir`, with an identity for a commit.
 fn dupe(s: &Scenario, dir: &Path, words: &[&str]) -> Output {
@@ -123,14 +109,14 @@ fn a_second_machine_attaches_and_keeps_its_own_differing_env_local() {
 
         // The private repository is configured as F2 says, `origin` as typed, the branch
         // tracking it, the identity of the second machine's own local configuration.
-        key(s, second, "status.showUntrackedFiles", "no");
-        key(s, second, "advice.statusHints", "false");
-        key(s, second, "core.worktree", "../..");
-        key(s, second, "user.name", "Second Name");
-        key(s, second, "user.email", "second@example.invalid");
-        key(s, second, "remote.origin.url", url.to_str().unwrap());
-        key(s, second, "branch.main.remote", "origin");
-        key(s, second, "branch.main.merge", "refs/heads/main");
+        private_config_value(s, second, "status.showUntrackedFiles", "no");
+        private_config_value(s, second, "advice.statusHints", "false");
+        private_config_value(s, second, "core.worktree", "../..");
+        private_config_value(s, second, "user.name", "Second Name");
+        private_config_value(s, second, "user.email", "second@example.invalid");
+        private_config_value(s, second, "remote.origin.url", url.to_str().unwrap());
+        private_config_value(s, second, "branch.main.remote", "origin");
+        private_config_value(s, second, "branch.main.merge", "refs/heads/main");
         let head = s.private(second).git(["symbolic-ref", "HEAD"]).succeeds();
         assert_eq!(head.stdout, b"refs/heads/main\n");
         assert_eq!(private_head(s, second), private_head(s, first));

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, Output, Runs, Scenario, Tree, copy, daily_state, locate_words, names, region_rules,
-    run_traced, under_each_release, usage_line, write,
+    run_traced, run_words, under_each_release, usage_line, write,
 };
 
 /// A command's text, through its own help where no repository is.
@@ -42,10 +42,6 @@ fn clean_run(runs: &Runs) -> Vec<Vec<u8>> {
         .collect();
     assert_eq!(cleans.len(), 1, "{runs:?}");
     cleans.into_iter().next().unwrap()
-}
-
-fn bytes(words: &[&str]) -> Vec<Vec<u8>> {
-    words.iter().map(|word| word.as_bytes().to_vec()).collect()
 }
 
 #[test]
@@ -82,7 +78,11 @@ fn the_users_words_reach_git_in_order_with_the_patterns_before_the_users_end_of_
                 .chain(after)
                 .copied()
                 .collect();
-            assert_eq!(clean_run(&runs), bytes(&expected), "{words:?}: {output:?}");
+            assert_eq!(
+                clean_run(&runs),
+                run_words(&expected),
+                "{words:?}: {output:?}"
+            );
         }
     });
 }
@@ -110,7 +110,7 @@ fn an_exclude_lacking_its_value_runs_the_users_words_alone_and_git_refuses_them(
                 .chain(words)
                 .copied()
                 .collect();
-            assert_eq!(clean_run(&runs), bytes(&typed), "{words:?}: {output:?}");
+            assert_eq!(clean_run(&runs), run_words(&typed), "{words:?}: {output:?}");
             assert_eq!(output.end, expected.end, "{words:?}: {output:?}");
             assert_ne!(output.end, End::Code(0), "{words:?}: {output:?}");
             let changed =

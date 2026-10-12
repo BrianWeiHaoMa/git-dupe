@@ -15,11 +15,11 @@ use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::harness::{
-    End, Output, Point, Scenario, Tree, Worktree, lock_is_free, now_visible, started_together,
-    under_each_release, write,
+    End, Output, Point, Scenario, Tree, Worktree, entry_names, lock_is_free, now_visible,
+    started_together, under_each_release, write,
 };
 
 /// The user's text before the main worktree's region, between the two regions, and after
@@ -367,14 +367,6 @@ fn comment() -> Vec<u8> {
     comment
 }
 
-/// The names in the directory `directory`.
-fn entries(directory: &Path) -> BTreeSet<OsString> {
-    fs::read_dir(directory)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name())
-        .collect()
-}
-
 /// In a fresh project `name`, a `hide` in one worktree, the main one when `main_killed`,
 /// is killed inside its write of the exclude file, while a `hide` in the other, started
 /// together with it, runs to its end; then the killed one is run again.
@@ -418,7 +410,7 @@ fn killed_beside_another_hide(s: &Scenario, name: &str, main_killed: bool) {
     let listing_length: usize = in_target.iter().map(|path| path.len() + 1).sum();
     assert!(listing_length < 512);
     let private = target.private_directory();
-    let private_before = entries(&private);
+    let private_before = entry_names(&private);
 
     let killing = s.killing(&format!("{name}-control"), &["hide", target_path.as_str()]);
     let (_killed, peer_hid) = started_together(
@@ -434,7 +426,7 @@ fn killed_beside_another_hide(s: &Scenario, name: &str, main_killed: bool) {
     // fresh exclude file in its own private Git directory, before the rename: its region
     // stands as it was, and the other worktree's holds that worktree's new path.
     lists(s, target, in_target);
-    let left: Vec<OsString> = entries(&private)
+    let left: Vec<OsString> = entry_names(&private)
         .difference(&private_before)
         .cloned()
         .collect();

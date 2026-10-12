@@ -1,6 +1,7 @@
-//! Attached workspaces: a private repository made as `init` makes one, `init` itself for
-//! scenarios about something else, private runs for building fixtures and reading the
-//! private index, `.gitdupe` as staged there, and a worktree's region read back.
+//! Attached workspaces: a private repository made as `init` makes one, `init` and any
+//! other `git dupe` command that must succeed for scenarios about something else, private
+//! runs for building fixtures and reading the private index, `HEAD`, and configuration,
+//! `.gitdupe` as staged there, and a worktree's region read back.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -8,7 +9,7 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-use super::output::End;
+use super::output::{End, Output};
 use super::scenario::{Git, Scenario};
 
 impl Scenario {
@@ -100,6 +101,39 @@ pub fn private_commit(s: &Scenario, dir: &Path) {
     ];
     let output = s.private(dir).git(words).run();
     assert_eq!(output.end, End::Code(0), "{output:?}");
+}
+
+/// `git dupe <words>` from `dir`, which must exit 0: for a step of a scenario about
+/// something else. A story that also watches the public `.git` around each command uses
+/// `watched_dupe_succeeds`.
+pub fn dupe_succeeds(s: &Scenario, dir: &Path, words: &[&str]) -> Output {
+    s.git(["dupe"].iter().chain(words)).from(dir).succeeds()
+}
+
+/// The commit the private `HEAD` of the workspace at `dir` names, as `rev-parse` prints it.
+pub fn private_head(s: &Scenario, dir: &Path) -> Vec<u8> {
+    s.private(dir).git(["rev-parse", "HEAD"]).succeeds().stdout
+}
+
+/// What the private index of the workspace at `dir` stages against `HEAD`, as
+/// `diff --cached --name-status -z` prints it.
+pub fn privately_staged(s: &Scenario, dir: &Path) -> Vec<u8> {
+    s.private(dir)
+        .git(["diff", "--cached", "--name-status", "-z"])
+        .succeeds()
+        .stdout
+}
+
+/// The local configuration of the private repository of the workspace at `dir` holds
+/// exactly one value under `name`, `expected`, and Git reads it without a message.
+pub fn private_config_value(s: &Scenario, dir: &Path, name: &str, expected: &str) {
+    let output = s
+        .private(dir)
+        .git(["config", "--local", "--get-all", name])
+        .run();
+    assert_eq!(output.end, End::Code(0), "{name}: {output:?}");
+    assert_eq!(output.stdout, format!("{expected}\n").as_bytes(), "{name}");
+    assert!(output.stderr.is_empty(), "{output:?}");
 }
 
 /// Makes `dir` the project of `Scenario::attached_project` in daily use: `.gitdupe`

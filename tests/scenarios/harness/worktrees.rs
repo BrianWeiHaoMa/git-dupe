@@ -3,7 +3,8 @@
 //! so that a scenario of a linked worktree — of an ordinary repository or a bare one, and
 //! after `git worktree move` — finds its private repository and its region where Git puts
 //! them, never by its root's name (F2, F3, S17). The facts are a snapshot: read them again
-//! after a move.
+//! after a move. A linked worktree on a branch of its own is added here too; a detached one
+//! by `Scenario::linked_worktree`.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -14,6 +15,22 @@ use super::attached::{Private, Region, region_in};
 use super::output::records;
 use super::scenario::Scenario;
 use super::tree::Tree;
+
+/// Adds a linked worktree of the repository at `main` at `root`, on the new branch
+/// `branch`, and reads it.
+pub fn linked_on_branch(s: &Scenario, main: &Path, root: &Path, branch: &str) -> Worktree {
+    s.git([
+        OsStr::new("worktree"),
+        OsStr::new("add"),
+        OsStr::new("-q"),
+        root.as_os_str(),
+        OsStr::new("-b"),
+        OsStr::new(branch),
+    ])
+    .from(main)
+    .succeeds();
+    Worktree::read(s, root)
+}
 
 /// One worktree, as Git answered for it.
 #[derive(Debug, Clone, PartialEq, Eq)]

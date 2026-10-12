@@ -7,15 +7,15 @@
 //! repository as they were and is named: settle keeps the command's status and still asks
 //! about exposure, and `detach` refuses.
 
-use std::collections::BTreeSet;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 
 use crate::harness::{
-    End, Output, Point, Scenario, lock_is_free, region, region_rules, under_each_release, write,
+    End, Output, Point, Scenario, entry_names, inode, lock_is_free, mode, region, region_rules,
+    under_each_release, write,
 };
 
 /// How long a command is given to end.
@@ -29,24 +29,6 @@ fn other_region(rules: &[&str]) -> Vec<u8> {
     let rules: String = rules.iter().map(|rule| format!("{rule}\n")).collect();
     format!("# BEGIN git-dupe worktree {OTHER}\n{rules}# END git-dupe worktree {OTHER}\n")
         .into_bytes()
-}
-
-/// The device and inode of `path`, by `lstat`.
-fn identity(path: &Path) -> (u64, u64) {
-    let found = fs::symlink_metadata(path).unwrap();
-    (found.dev(), found.ino())
-}
-
-fn mode(path: &Path) -> u32 {
-    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o7777
-}
-
-/// The names in the directory `directory`.
-fn entries(directory: &Path) -> BTreeSet<OsString> {
-    fs::read_dir(directory)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name())
-        .collect()
 }
 
 #[test]
@@ -115,7 +97,7 @@ fn a_command_killed_while_it_holds_the_lock_holds_up_none_after_it() {
         let link = s.dir().join("exclude-as-it-was");
         fs::hard_link(&exclude, &link).unwrap();
         let private = common.join("dupe");
-        let private_before = entries(&private);
+        let private_before = entry_names(&private);
 
         let killing = s.killing("control", &["status"]);
         for blocks in [0, 1] {
@@ -124,10 +106,10 @@ fn a_command_killed_while_it_holds_the_lock_holds_up_none_after_it() {
             assert_eq!(fs::read(&link).unwrap(), as_it_was);
             run.wait();
             assert_eq!(fs::read(&exclude).unwrap(), as_it_was);
-            assert_eq!(identity(&exclude), identity(&link));
+            assert_eq!(inode(&exclude), inode(&link));
             assert_eq!(fs::read(&link).unwrap(), as_it_was);
             assert_eq!(mode(&exclude), 0o640);
-            for left in entries(&private).difference(&private_before) {
+            for left in entry_names(&private).difference(&private_before) {
                 let name = left.to_string_lossy();
                 assert!(
                     name.starts_with("git-dupe-") && name.ends_with(".new"),
@@ -171,9 +153,9 @@ fn a_write_that_fails_leaves_the_file_and_the_private_repository_and_is_named() 
         fs::set_permissions(&exclude, fs::Permissions::from_mode(0o640)).unwrap();
         write(&dir, ".gitdupe", b"scratch\n");
         let as_it_was = fs::read(&exclude).unwrap();
-        let file = identity(&exclude);
+        let file = inode(&exclude);
         let private = common.join("dupe");
-        let private_before = entries(&private);
+        let private_before = entry_names(&private);
         let not_written = |output: &Output| {
             let named = [
                 b"cannot replace the managed region of ",
@@ -193,9 +175,9 @@ fn a_write_that_fails_leaves_the_file_and_the_private_repository_and_is_named() 
                 "{output:?}"
             );
             assert_eq!(fs::read(&exclude).unwrap(), as_it_was);
-            assert_eq!(identity(&exclude), file);
+            assert_eq!(inode(&exclude), file);
             assert_eq!(mode(&exclude), 0o640);
-            assert_eq!(entries(&private), private_before);
+            assert_eq!(entry_names(&private), private_before);
         };
 
         // A command that succeeds keeps its status.
@@ -225,9 +207,9 @@ fn a_write_that_fails_leaves_the_file_and_the_private_repository_and_is_named() 
             "{detach:?}"
         );
         assert_eq!(fs::read(&exclude).unwrap(), as_it_was);
-        assert_eq!(identity(&exclude), file);
+        assert_eq!(inode(&exclude), file);
         assert!(private.join("HEAD").is_file());
-        assert_eq!(entries(&private), private_before);
+        assert_eq!(entry_names(&private), private_before);
 
         // Then every command writes the region as it would have.
         s.git(["dupe", "status"]).from(&dir).succeeds();

@@ -8,15 +8,11 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Runs, Scenario, Transfer, holds, names, run_traced, under_each_release,
+    End, Output, Runs, Scenario, Transfer, holds, names, run_traced, text, under_each_release,
 };
 
 /// The words of the hint that no line of Git's holds.
 const HINT: &[u8] = b"'git dupe remote add <name> <url>'";
-
-fn text(path: &Path) -> &str {
-    path.to_str().expect("a UTF-8 scenario path")
-}
 
 /// `git dupe <words>` from the root `from`, and Git's own run of the words against the
 /// private repository there, after `-c help.autocorrect=0` as git-dupe runs them, in the

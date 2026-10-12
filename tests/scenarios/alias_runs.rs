@@ -2,10 +2,11 @@
 //! the files either repository holds.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::harness::{
-    End, Runs, Scenario, private_add, private_commit, run_traced, under_each_release, write,
+    End, Runs, Scenario, private_add, private_alias, private_commit, run_traced,
+    under_each_release, write,
 };
 
 fn fixture(s: &Scenario, name: &str, count: usize) -> PathBuf {
@@ -28,12 +29,6 @@ fn fixture(s: &Scenario, name: &str, count: usize) -> PathBuf {
     dir
 }
 
-fn alias(s: &Scenario, dir: &Path, name: &str, expansion: &str) {
-    s.private(dir)
-        .git(["config", &format!("alias.{name}"), expansion])
-        .succeeds();
-}
-
 fn with_questions<'a>(runs: &'a Runs, questions: &[&'a [u8]]) -> Vec<&'a [u8]> {
     let commands = runs.commands();
     assert_eq!(&commands[..2], &[b"dupe".as_slice(), b"rev-parse"]);
@@ -52,7 +47,7 @@ fn aliased_status_add_and_log_runs_do_not_grow_with_private_files() {
         for count in [5, 500] {
             let dir = fixture(s, &format!("workspace-{count}"), count);
             for (name, expansion) in [("sa", "status"), ("aa", "add -A"), ("l", "log -1")] {
-                alias(s, &dir, name, expansion);
+                private_alias(s, &dir, name, expansion);
             }
             write(&dir, "notes/0.md", b"changed\n");
             let (status, status_runs) = run_traced(
@@ -137,7 +132,7 @@ fn a_second_alias_link_adds_only_one_lookup() {
     under_each_release(|s| {
         let dir = fixture(s, "workspace", 5);
         for (name, expansion) in [("a", "b"), ("b", "status"), ("c", "status")] {
-            alias(s, &dir, name, expansion);
+            private_alias(s, &dir, name, expansion);
         }
         let (one, one_runs) =
             run_traced(s.git(["dupe", "c"]).from(&dir), &s.dir().join("one-link"));
@@ -169,7 +164,7 @@ fn command_listing_is_shared_by_all_links_and_readings() {
             ("log", "show"),
             ("history", "log"),
         ] {
-            alias(s, &dir, name, expansion);
+            private_alias(s, &dir, name, expansion);
         }
         let (status, status_runs) = run_traced(
             s.git(["dupe", "status"]).from(&dir),
@@ -191,7 +186,7 @@ fn command_listing_is_shared_by_all_links_and_readings() {
         assert!(plain_runs.of("") <= 1);
 
         // This section's record has a form the releases read differently.
-        alias(s, &dir, "odd.command", "log");
+        private_alias(s, &dir, "odd.command", "log");
         for (word, questions) in [
             ("log", vec![b"config".as_slice(), b"", b"config"]),
             (
@@ -227,7 +222,7 @@ fn a_word_without_an_alias_record_needs_one_lookup_and_no_listing() {
     under_each_release(|s| {
         let dir = fixture(s, "workspace", 5);
         // An unrelated record must not cause the commands to be listed.
-        alias(s, &dir, "sa", "status");
+        private_alias(s, &dir, "sa", "status");
         let expected = s
             .private(&dir)
             .git(["-c", "help.autocorrect=0", "log", "-1"])

@@ -8,7 +8,7 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Point, Scenario, Tree, Worktree, holds, names, now_visible, unchanged,
+    End, Point, Scenario, Tree, Worktree, after_git, holds, names, now_visible, unchanged,
     under_each_release, write,
 };
 
@@ -109,19 +109,6 @@ fn pushed(s: &Scenario, fixture: &Attached, name: &str) {
     ])
     .from(&fixture.linked.root)
     .succeeds();
-}
-
-/// Git can write its own diagnostic before git-dupe's refusal or warning.
-fn after_git(output: &Output, git: &Output) -> Output {
-    Output {
-        stdout: output.stdout.clone(),
-        stderr: output
-            .stderr
-            .strip_prefix(git.stderr.as_slice())
-            .unwrap_or_else(|| panic!("Git's answer first: {git:?}; {output:?}"))
-            .to_vec(),
-        end: output.end,
-    }
 }
 
 #[test]

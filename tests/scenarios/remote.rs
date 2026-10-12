@@ -5,17 +5,9 @@ use std::fs;
 use std::io::Write;
 
 use crate::harness::{
-    End, Output, PROJECT_URL, Tree, lines_in_order, names, region, run_traced, under_each_release,
+    End, PROJECT_URL, Tree, lines_in_order, refusal, region, run_traced, under_each_release,
     warnings_in_any_order, write,
 };
-
-fn refused(output: &Output, place: &[u8]) {
-    assert_eq!(output.end, End::Code(128), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    let line = output.only_line("fatal");
-    names(line, b"git dupe git");
-    names(line, place);
-}
 
 /// Adding and listing a private remote preserves the public remote's configuration.
 #[test]
@@ -112,7 +104,10 @@ fn a_refusal_settles_the_stale_region() {
             .git(["dupe", "remote", "add", "leak", root.to_str().unwrap()])
             .from(root)
             .run();
-        refused(&output, root.to_str().unwrap().as_bytes());
+        refusal(
+            &output,
+            &[b"git dupe git", root.to_str().unwrap().as_bytes()],
+        );
         assert!(region(root).unwrap().rules.contains(&b"/extra".to_vec()));
         assert_eq!(
             before.changed_in(&Tree::of(root)),
@@ -165,7 +160,10 @@ fn a_private_alias_cannot_add_a_public_destination() {
         ] {
             let before = transfer.everything();
             let output = s.git(words).from(root).run();
-            refused(&output, root.to_str().unwrap().as_bytes());
+            refusal(
+                &output,
+                &[b"git dupe git", root.to_str().unwrap().as_bytes()],
+            );
             before.unchanged();
         }
     });
@@ -186,7 +184,10 @@ fn alias_options_reach_the_guard_runs() {
                 .from(root),
             &s.dir().join("trace"),
         );
-        refused(&output, root.to_str().unwrap().as_bytes());
+        refusal(
+            &output,
+            &[b"git dupe git", root.to_str().unwrap().as_bytes()],
+        );
         before.unchanged();
         let own = runs.own();
         for tail in [
@@ -296,7 +297,7 @@ fn git_config_cannot_hide_public_remotes() {
             .from(&transfer.root)
             .variable("GIT_CONFIG", &config)
             .run();
-        refused(&output, b"origin");
+        refusal(&output, &[b"git dupe git", b"origin"]);
         before.unchanged();
     });
 }

@@ -3,10 +3,11 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::harness::{
-    End, ForwardEffect, Output, Point, Scenario, Tree, Worktree, holds, under_each_release, write,
+    End, ForwardEffect, Output, Point, Scenario, Tree, Worktree, holds, mode, under_each_release,
+    write,
 };
 
 const PUBLIC_LISTING: &[&str] = &["ls-files", "-z", "--full-name", "--"];
@@ -120,10 +121,6 @@ fn region_bytes(worktree: &Worktree, paths: &[&str]) -> Vec<u8> {
     }
     bytes.extend_from_slice(format!("# END git-dupe{suffix}\n").as_bytes());
     bytes
-}
-
-fn mode(path: &Path) -> u32 {
-    fs::metadata(path).unwrap().permissions().mode() & 0o7777
 }
 
 fn failure_warning(output: &Output, before: &[u8], after: &[u8]) {

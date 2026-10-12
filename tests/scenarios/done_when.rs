@@ -8,9 +8,9 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    EVERY_OBJECT, End, Output, Scenario, Tree, changed_since, held_publicly, holds,
-    leaving_public_git, names, names_number, privately_tracked, public_git, publicly_tracked,
-    records, region_rules, under_each_release, warnings_in_any_order, write,
+    EVERY_OBJECT, End, Scenario, Tree, changed_since, held_publicly, holds, names, names_number,
+    privately_tracked, public_git, public_status, publicly_tracked, records, region_rules,
+    under_each_release, warnings_in_any_order, watched_dupe, watched_dupe_succeeds, write,
 };
 
 /// The developer's own text in `.git/info/exclude`, before `init` and after the region.
@@ -33,25 +33,9 @@ fn exclude_with_the_five_rules() -> Vec<u8> {
 /// public listing shows nothing about git-dupe.
 const ONLY_THE_REGION_HIDES: [&[u8]; 3] = [b"notes", b"docs/notes.md", b".gitdupe"];
 
-/// `git dupe <words>` from `from` in the workspace at `dir`, the public `.git` watched.
-fn dupe(s: &Scenario, dir: &Path, from: &Path, words: &[&str]) -> Output {
-    leaving_public_git(dir, s.git(["dupe"].iter().chain(words)).from(from))
-}
-
-/// `dupe`, from the root, which must exit 0.
-fn dupe_succeeds(s: &Scenario, dir: &Path, words: &[&str]) -> Output {
-    let output = dupe(s, dir, dir, words);
-    assert_eq!(output.end, End::Code(0), "git dupe {words:?}: {output:?}");
-    output
-}
-
 /// The paths of public `git status --porcelain`, every untracked file listed by itself.
-fn public_status(s: &Scenario, dir: &Path) -> Vec<Vec<u8>> {
-    let status = s
-        .git(["status", "--porcelain", "--untracked-files=all"])
-        .from(dir)
-        .succeeds();
-    paths_of(&status.stdout)
+fn public_paths(s: &Scenario, dir: &Path) -> Vec<Vec<u8>> {
+    paths_of(&public_status(s, dir))
 }
 
 /// The entries of porcelain status, each its two-letter code, a space, and its path.
@@ -132,7 +116,7 @@ fn a_project_made_private_then_used_daily_never_shows_public_git_a_private_file(
         let unattached = public_git(&dir);
 
         // Bullet 1: attach, make three kinds of path private, commit.
-        let init = dupe_succeeds(s, &dir, &["init"]);
+        let init = watched_dupe_succeeds(s, &dir, &["init"]);
         names(&init.stdout, dir.join(".git/dupe").as_os_str().as_bytes());
         let head = s.private(&dir).git(["symbolic-ref", "HEAD"]).succeeds();
         assert_eq!(head.stdout, b"refs/heads/main\n");
@@ -145,13 +129,13 @@ fn a_project_made_private_then_used_daily_never_shows_public_git_a_private_file(
         // in the public store can only have come from the private one.
         write(&dir, "notes/plan.md", b"plan: private\n");
         write(&dir, "notes/ideas.md", b"ideas: private\n");
-        dupe_succeeds(s, &dir, &["add", "notes/"]);
+        watched_dupe_succeeds(s, &dir, &["add", "notes/"]);
         write(&dir, ".env.local", b"SECRET=1\n");
         write(&dir, ".vscode/settings.json", b"{\"private\": true}\n");
-        dupe_succeeds(s, &dir, &["add", "-f", ".env.local", ".vscode/"]);
+        watched_dupe_succeeds(s, &dir, &["add", "-f", ".env.local", ".vscode/"]);
         write(&dir, "docs/notes.md", b"docs notes: private\n");
-        dupe_succeeds(s, &dir, &["add", "docs/notes.md"]);
-        dupe_succeeds(s, &dir, &["commit", "-m", "Local settings"]);
+        watched_dupe_succeeds(s, &dir, &["add", "docs/notes.md"]);
+        watched_dupe_succeeds(s, &dir, &["commit", "-m", "Local settings"]);
 
         assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), b"notes\n.vscode\n");
         let exclude = fs::read(dir.join(".git/info/exclude")).unwrap();
@@ -160,7 +144,7 @@ fn a_project_made_private_then_used_daily_never_shows_public_git_a_private_file(
             exclude_with_the_five_rules().escape_ascii().to_string()
         );
         let commit = s.private(&dir).git(["rev-parse", "HEAD"]).succeeds().stdout;
-        let private_log = dupe_succeeds(s, &dir, &["log", "--format=%H"]);
+        let private_log = watched_dupe_succeeds(s, &dir, &["log", "--format=%H"]);
         assert!(
             records(&private_log.stdout, b'\n').contains(&commit.trim_ascii_end()),
             "{private_log:?}"
@@ -177,7 +161,7 @@ fn a_project_made_private_then_used_daily_never_shows_public_git_a_private_file(
         assert!(changed.is_empty(), "changed: {changed:?}");
 
         write(&dir, "CHANGELOG.md", b"a public file\n");
-        let status = public_status(s, &dir);
+        let status = public_paths(s, &dir);
         let dry_run = s.git(["add", "-A", "--dry-run"]).from(&dir).succeeds();
         assert!(status.contains(&b"CHANGELOG.md".to_vec()), "{status:?}");
         assert!(holds(&dry_run.stdout, b"CHANGELOG.md"), "{dry_run:?}");
@@ -216,7 +200,7 @@ fn a_project_made_private_then_used_daily_never_shows_public_git_a_private_file(
         write(&dir, ".vscode/launch.json", b"{\"launch\": 1}\n");
         write(&dir, "docs/api.md", b"api\n");
         write(&dir, "src/scratch.py", b"print('scratch')\n");
-        let private_status = dupe_succeeds(s, &dir, &["status", "--porcelain"]);
+        let private_status = watched_dupe_succeeds(s, &dir, &["status", "--porcelain"]);
         let listed = entries(&private_status.stdout);
         assert!(
             listed.contains(&b"?? notes/today.md".to_vec()),
@@ -232,7 +216,7 @@ fn a_project_made_private_then_used_daily_never_shows_public_git_a_private_file(
                 "{private_status:?}"
             );
         }
-        let status = public_status(s, &dir);
+        let status = public_paths(s, &dir);
         for public in [&b"docs/api.md"[..], b"src/scratch.py"] {
             assert!(status.contains(&public.to_vec()), "{status:?}");
         }
@@ -246,26 +230,26 @@ fn a_project_made_private_then_used_daily_never_shows_public_git_a_private_file(
         );
 
         write(&dir, ".env.local", b"SECRET=2\n");
-        let added = dupe(s, &dir, &dir.join("notes"), &["add", "."]);
+        let added = watched_dupe(s, &dir, &dir.join("notes"), &["add", "."]);
         assert_eq!(added.end, End::Code(0), "{added:?}");
         assert_eq!(privately_staged(s, &dir), [b"notes/today.md"]);
-        dupe_succeeds(s, &dir, &["add", "."]);
+        watched_dupe_succeeds(s, &dir, &["add", "."]);
         assert_eq!(
             privately_staged(s, &dir),
             [&b".env.local"[..], b"notes/today.md"]
         );
 
-        dupe_succeeds(s, &dir, &["add", "src/scratch.py"]);
+        watched_dupe_succeeds(s, &dir, &["add", "src/scratch.py"]);
         assert!(privately_tracked(s, &dir).contains(&b"src/scratch.py".to_vec()));
-        assert!(!public_status(s, &dir).contains(&b"src/scratch.py".to_vec()));
-        let released = dupe_succeeds(s, &dir, &["rm", "--cached", "src/scratch.py"]);
+        assert!(!public_paths(s, &dir).contains(&b"src/scratch.py".to_vec()));
+        let released = watched_dupe_succeeds(s, &dir, &["rm", "--cached", "src/scratch.py"]);
         warnings_in_any_order(&released, &[&[b"src/scratch.py"]]);
         assert!(!privately_tracked(s, &dir).contains(&b"src/scratch.py".to_vec()));
-        assert!(public_status(s, &dir).contains(&b"src/scratch.py".to_vec()));
+        assert!(public_paths(s, &dir).contains(&b"src/scratch.py".to_vec()));
 
         for operand in ["README.md", "docs/"] {
             let before = private_state(s, &dir);
-            let refused = dupe(s, &dir, &dir, &["add", operand]);
+            let refused = watched_dupe(s, &dir, &dir, &["add", operand]);
             assert_eq!(refused.end, End::Code(128), "{operand}: {refused:?}");
             assert_eq!(refused.lines("fatal").len(), 1, "{operand}: {refused:?}");
             assert_eq!(private_state(s, &dir), before, "{operand}");
@@ -288,27 +272,27 @@ fn a_project_made_private_then_used_daily_never_shows_public_git_a_private_file(
         assert_ne!(pulled, refs);
         refs = pulled;
         write(&dir, "notes/plan.md", b"plan: changed\n");
-        let added = dupe_succeeds(s, &dir, &["add", "notes/"]);
+        let added = watched_dupe_succeeds(s, &dir, &["add", "notes/"]);
         let warnings = added.lines("warning");
         assert_eq!(warnings.len(), 1, "{added:?}");
         names_number(warnings[0], 1);
         assert!(privately_staged(s, &dir).contains(&b"notes/plan.md".to_vec()));
         assert!(!privately_tracked(s, &dir).contains(&b"notes/shared.md".to_vec()));
-        let private_status = dupe_succeeds(s, &dir, &["status", "--porcelain"]);
+        let private_status = watched_dupe_succeeds(s, &dir, &["status", "--porcelain"]);
         assert!(
             !paths_of(&private_status.stdout).contains(&b"notes/shared.md".to_vec()),
             "{private_status:?}"
         );
 
         // A `!` rule re-including `.env.local`, on the fourth line of `.gitignore`.
-        let quiet = dupe_succeeds(s, &dir, &["status"]);
+        let quiet = watched_dupe_succeeds(s, &dir, &["status"]);
         assert!(quiet.lines("warning").is_empty(), "{quiet:?}");
         write(
             &dir,
             ".gitignore",
             b".env.local\n.vscode/\nbuild/\n!.env.local\n",
         );
-        let warned = dupe(s, &dir, &dir, &["status"]);
+        let warned = watched_dupe(s, &dir, &dir, &["status"]);
         assert_eq!(warned.end, quiet.end, "{warned:?}");
         warnings_in_any_order(&warned, &[&[b".env.local", b".gitignore"]]);
         names_number(warned.lines("warning")[0], 4);
@@ -357,13 +341,13 @@ fn clean_spares_the_private_files_and_restore_brings_back_what_plain_clean_delet
         // `build/local.cfg` inside the ignored `build/` beside `build/out.js`; and the
         // untracked `scratch.txt`.
         write(&dir, "notes/today.md", b"today: private\n");
-        dupe_succeeds(s, &dir, &["add", "notes/"]);
+        watched_dupe_succeeds(s, &dir, &["add", "notes/"]);
         write(&dir, ".env.local", b"SECRET=committed\n");
         write(&dir, "build/local.cfg", b"local: private\n");
-        dupe_succeeds(s, &dir, &["add", "-f", ".env.local", "build/local.cfg"]);
-        dupe_succeeds(s, &dir, &["commit", "-m", "Private files"]);
+        watched_dupe_succeeds(s, &dir, &["add", "-f", ".env.local", "build/local.cfg"]);
+        watched_dupe_succeeds(s, &dir, &["commit", "-m", "Private files"]);
         write(&dir, ".env.local", b"SECRET=staged\n");
-        dupe_succeeds(s, &dir, &["add", ".env.local"]);
+        watched_dupe_succeeds(s, &dir, &["add", ".env.local"]);
         let saved = fs::read(dir.join(".env.local")).unwrap();
         let staged = s.private(&dir).git(["cat-file", "blob", ":.env.local"]);
         assert_eq!(staged.succeeds().stdout, saved);
@@ -374,7 +358,7 @@ fn clean_spares_the_private_files_and_restore_brings_back_what_plain_clean_delet
         write(&dir, "scratch.txt", b"scratch\n");
 
         let before = Tree::working(&dir);
-        dupe_succeeds(s, &dir, &["clean", "-fdx"]);
+        watched_dupe_succeeds(s, &dir, &["clean", "-fdx"]);
         assert_eq!(
             changed_since(&before, &dir),
             ["build/out.js", "scratch.txt"]
@@ -384,7 +368,7 @@ fn clean_spares_the_private_files_and_restore_brings_back_what_plain_clean_delet
         write(&dir, "build/out.js", b"built\n");
         write(&dir, "scratch.txt", b"scratch\n");
         let before = Tree::working(&dir);
-        dupe_succeeds(s, &dir, &["clean", "-fdX"]);
+        watched_dupe_succeeds(s, &dir, &["clean", "-fdX"]);
         assert_eq!(changed_since(&before, &dir), ["build/out.js"]);
 
         // Plain `git clean -fdx`, typed from habit, is not guarded.
@@ -395,7 +379,7 @@ fn clean_spares_the_private_files_and_restore_brings_back_what_plain_clean_delet
                 "{gone} survived plain git clean -fdx"
             );
         }
-        let status = dupe_succeeds(s, &dir, &["status", "--porcelain"]);
+        let status = watched_dupe_succeeds(s, &dir, &["status", "--porcelain"]);
         let listed = entries(&status.stdout);
         for path in [&b".env.local"[..], b"notes/today.md", b"build/local.cfg"] {
             assert!(
@@ -407,7 +391,7 @@ fn clean_spares_the_private_files_and_restore_brings_back_what_plain_clean_delet
             );
         }
 
-        dupe_succeeds(s, &dir, &["restore", "."]);
+        watched_dupe_succeeds(s, &dir, &["restore", "."]);
         assert_eq!(fs::read(dir.join(".env.local")).unwrap(), saved);
         assert_eq!(
             fs::read(dir.join("notes/today.md")).unwrap(),

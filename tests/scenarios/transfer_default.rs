@@ -3,7 +3,8 @@
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, Transfer, names, private_commit, run_traced, under_each_release, write,
+    End, Output, Scenario, Transfer, names, private_commit, refusal, run_traced,
+    under_each_release, write,
 };
 
 fn defaults(s: &Scenario, root: &Path, keys: &[(&str, &str)]) {
@@ -20,14 +21,6 @@ fn defaults(s: &Scenario, root: &Path, keys: &[(&str, &str)]) {
     }
 }
 
-fn refusal(output: &Output, place: &[u8], route: &[u8]) {
-    assert_eq!(output.end, End::Code(128), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    let line = output.only_line("fatal");
-    names(line, place);
-    names(line, route);
-}
-
 fn refused_default(s: &Scenario, transfer: &Transfer, words: &[&str], key: &str, from: &Path) {
     let before = transfer.everything();
     let (output, runs) = run_traced(
@@ -37,8 +30,7 @@ fn refused_default(s: &Scenario, transfer: &Transfer, words: &[&str], key: &str,
     );
     refusal(
         &output,
-        transfer.root.to_str().unwrap().as_bytes(),
-        b"git dupe git",
+        &[transfer.root.to_str().unwrap().as_bytes(), b"git dupe git"],
     );
     names(
         output.only_line("fatal"),
@@ -201,7 +193,10 @@ fn transfer_default_help_inside_git_directory_still_guards_destinations() {
             .git(["dupe", "fetch", "-o", "-h", root.to_str().unwrap(), "main"])
             .from(&directory)
             .run();
-        refusal(&output, root.to_str().unwrap().as_bytes(), b"git dupe git");
+        refusal(
+            &output,
+            &[root.to_str().unwrap().as_bytes(), b"git dupe git"],
+        );
         assert!(!directory.join("dupe/FETCH_HEAD").exists());
         before.unchanged();
         defaults(s, root, &[("branch.main.remote", ".")]);
@@ -241,7 +236,7 @@ fn transfer_default_help_inside_git_directory_still_guards_destinations() {
             .git(["dupe"].into_iter().chain(words))
             .from(&directory)
             .run();
-        refusal(&output, b"origin", b"git dupe remote remove");
+        refusal(&output, &[b"origin", b"git dupe remote remove"]);
         names(output.only_line("fatal"), b"leak");
         before.unchanged();
     });

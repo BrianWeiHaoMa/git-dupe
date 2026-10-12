@@ -1,11 +1,11 @@
 //! `add`'s directory, root, and all-flag forms over the hidden paths.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::harness::{
-    End, Output, Scenario, daily_state, holds, names, private_add, private_commit, region_rules,
-    run_traced, under_each_release, write,
+    End, Output, Scenario, daily_state, holds, names, private_add, private_commit,
+    privately_staged, region_rules, run_traced, under_each_release, write,
 };
 
 const NORMAL_CHANGES: &[u8] = b"M\0.env.local\0M\0.vscode/settings.json\0A\0notes/today.md\0";
@@ -26,13 +26,6 @@ fn changes(s: &Scenario, name: &str) -> PathBuf {
     dir
 }
 
-fn staged(s: &Scenario, dir: &Path) -> Vec<u8> {
-    s.private(dir)
-        .git(["diff", "--cached", "--name-status", "-z"])
-        .succeeds()
-        .stdout
-}
-
 fn no_own_hint(output: &Output) {
     assert!(
         output
@@ -50,7 +43,7 @@ fn directory_form_stages_only_hidden_paths_under_the_current_directory() {
         s.git(["dupe", "add", "."])
             .from(&dir.join("notes"))
             .succeeds();
-        assert_eq!(staged(s, &dir), b"A\0notes/today.md\0");
+        assert_eq!(privately_staged(s, &dir), b"A\0notes/today.md\0");
     });
 }
 
@@ -80,8 +73,8 @@ fn dot_slash_is_the_directory_form() {
             assert_eq!(output.end, End::Code(0), "{output:?}");
             assert_eq!(output.end, dot.end, "{output:?}; dot: {dot:?}");
             assert_eq!(output.stderr, dot.stderr, "{output:?}; dot: {dot:?}");
-            assert_eq!(staged(s, &dir), expected, "from {from}");
-            assert_eq!(staged(s, &twin), expected, "from {from}");
+            assert_eq!(privately_staged(s, &dir), expected, "from {from}");
+            assert_eq!(privately_staged(s, &twin), expected, "from {from}");
             assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), b"notes\n.vscode\n");
             assert_eq!(region_rules(&dir), region_rules(&twin));
         }
@@ -100,7 +93,7 @@ fn long_all_without_an_operand_stages_every_hidden_change_from_outside_them() {
         );
         assert_eq!(output.end, End::Code(0), "{output:?}");
         assert_eq!(runs.of("add"), 2, "{runs:?}");
-        assert_eq!(staged(s, &dir), NORMAL_CHANGES);
+        assert_eq!(privately_staged(s, &dir), NORMAL_CHANGES);
         assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), b"notes\n.vscode\n");
     });
 }
@@ -132,7 +125,7 @@ fn root_and_all_forms_split_ignored_tracked_changes_into_a_second_run() {
             );
             assert_eq!(output.end, End::Code(0), "{output:?}");
             assert_eq!(runs.of("add"), 2, "{runs:?}");
-            assert_eq!(staged(s, &dir), NORMAL_CHANGES);
+            assert_eq!(privately_staged(s, &dir), NORMAL_CHANGES);
             assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), b"notes\n.vscode\n");
         }
     });
@@ -154,7 +147,7 @@ fn force_forms_stage_ignored_files_without_splitting() {
             } else {
                 b"A\0.vscode/launch.json\0"
             };
-            assert_eq!(staged(s, &dir), expected);
+            assert_eq!(privately_staged(s, &dir), expected);
         }
     });
 }
@@ -179,7 +172,7 @@ fn first_failed_run_keeps_its_status_and_the_second_run_still_stages() {
         );
         assert_eq!(runs.of("add"), 2, "{runs:?}");
         assert_eq!(
-            staged(s, &dir),
+            privately_staged(s, &dir),
             b"M\0.env.local\0M\0.vscode/settings.json\0"
         );
     });
@@ -235,7 +228,7 @@ fn directory_forms_never_hide_neighbours_and_limit_scope_below_a_hidden_path() {
         daily_state(s, &dir);
         write(&dir, "scratch/x.md", b"new\n");
         s.git(["dupe", "add", "."]).from(&dir).succeeds();
-        assert!(staged(s, &dir).is_empty());
+        assert!(privately_staged(s, &dir).is_empty());
         assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), b"notes\n.vscode\n");
         assert!(
             !region_rules(&dir)
@@ -254,7 +247,7 @@ fn directory_forms_never_hide_neighbours_and_limit_scope_below_a_hidden_path() {
         s.git(["dupe", "add", "."])
             .from(&dir.join("notes/sub"))
             .succeeds();
-        assert_eq!(staged(s, &dir), b"A\0notes/sub/x.md\0");
+        assert_eq!(privately_staged(s, &dir), b"A\0notes/sub/x.md\0");
         assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), b"notes\n.vscode\n");
     });
 }
@@ -269,7 +262,7 @@ fn no_operand_with_all_clear_keeps_the_users_words_and_gits_status() {
             .succeeds();
         no_own_hint(&output);
         assert_eq!(
-            staged(s, &dir),
+            privately_staged(s, &dir),
             b"M\0.env.local\0M\0.vscode/settings.json\0"
         );
         for (index, options) in [vec![], vec!["--no-all"], vec!["-A", "--no-all"]]
@@ -294,7 +287,7 @@ fn no_operand_with_all_clear_keeps_the_users_words_and_gits_status() {
             );
             no_own_hint(&output);
             assert_eq!(fs::read(dir.join(".git/dupe/index")).unwrap(), before);
-            assert!(staged(s, &dir).is_empty());
+            assert!(privately_staged(s, &dir).is_empty());
         }
     });
 }
@@ -331,8 +324,8 @@ fn last_all_flag_sets_scope_but_a_clear_flag_word_prevents_the_ignore_question()
         assert_eq!(runs.of("add"), 1, "{runs:?}");
         // Settle still asks its public ignore question; there is no private one here.
         assert_eq!(runs.of("check-ignore"), 1, "{runs:?}");
-        assert_eq!(staged(s, &dir), staged(s, &twin));
-        assert!(holds(&staged(s, &dir), b"A\0notes/today.md\0"));
+        assert_eq!(privately_staged(s, &dir), privately_staged(s, &twin));
+        assert!(holds(&privately_staged(s, &dir), b"A\0notes/today.md\0"));
     });
 }
 

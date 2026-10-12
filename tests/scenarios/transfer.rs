@@ -5,20 +5,9 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, PROJECT_URL, Scenario, Transfer, Tree, holds, names, region, under_each_release,
+    End, PROJECT_URL, Scenario, Transfer, Tree, holds, names, refusal, region, text,
+    under_each_release,
 };
-
-fn text(path: &Path) -> &str {
-    path.to_str().expect("a UTF-8 scenario path")
-}
-
-fn refusal(output: &Output, route: &str, place: &str) {
-    assert_eq!(output.end, End::Code(128), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    let line = output.only_line("fatal");
-    names(line, route.as_bytes());
-    names(line, place.as_bytes());
-}
 
 fn word_refused(s: &Scenario, t: &Transfer, from: &Path, words: &[&str], place: &str) {
     let before = t.everything();
@@ -26,7 +15,7 @@ fn word_refused(s: &Scenario, t: &Transfer, from: &Path, words: &[&str], place: 
         .git(["dupe"].into_iter().chain(words.iter().copied()))
         .from(from)
         .run();
-    refusal(&output, "git dupe git", place);
+    refusal(&output, &[b"git dupe git", place.as_bytes()]);
     before.unchanged();
 }
 
@@ -36,7 +25,7 @@ fn configured_refused(s: &Scenario, t: &Transfer, words: &[&str], remote: &str, 
         .git(["dupe"].into_iter().chain(words.iter().copied()))
         .from(&t.root)
         .run();
-    refusal(&output, "git dupe remote remove", place);
+    refusal(&output, &[b"git dupe remote remove", place.as_bytes()]);
     names(
         output.only_line("fatal"),
         format!("private remote '{remote}'").as_bytes(),
@@ -121,7 +110,7 @@ fn refused_push_settles_a_stale_region() {
             .git(["dupe", "push", text(&t.root), "main:leak"])
             .from(&t.root)
             .run();
-        refusal(&output, "git dupe git", text(&t.root));
+        refusal(&output, &[b"git dupe git", text(&t.root).as_bytes()]);
         assert_eq!(fs::read(&exclude).unwrap(), settled);
         assert_eq!(before.changed_in(&Tree::of(&t.root)), [exclude]);
         for (before, place) in others
@@ -160,7 +149,7 @@ fn configured_url_precedes_words_and_removal_restores_push() {
         }
         let before = t.everything();
         let output = s.git(["dupe", "fetch", text(&t.root)]).from(&t.root).run();
-        refusal(&output, "git dupe remote remove", "leak");
+        refusal(&output, &[b"git dupe remote remove", b"leak"]);
         assert!(!holds(output.only_line("fatal"), text(&t.root).as_bytes()));
         before.unchanged();
         s.git(["dupe", "remote", "remove", "leak"])
@@ -239,7 +228,10 @@ fn command_line_remote_url_is_guarded() {
             .git(["-c", &setting, "dupe", "fetch", "origin"])
             .from(&t.root)
             .run();
-        refusal(&output, "git dupe remote remove", text(&t.root));
+        refusal(
+            &output,
+            &[b"git dupe remote remove", text(&t.root).as_bytes()],
+        );
         names(output.only_line("fatal"), b"private remote 'extra'");
         before.unchanged();
     });

@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, Runs, Scenario, Tree, daily_state, holds, names, private_add, private_commit,
-    region_rules, run_traced, unchanged, under_each_release, warnings_in_any_order, write,
-    write_executable,
+    private_head, region_rules, run_traced, unchanged, under_each_release, warnings_in_any_order,
+    write, write_executable,
 };
 
 fn fixture(s: &Scenario, name: &str) -> PathBuf {
@@ -23,10 +23,6 @@ fn fixture(s: &Scenario, name: &str) -> PathBuf {
     daily_state(s, &dir);
     s.git(["dupe", "log", "-1"]).from(&dir).succeeds();
     dir
-}
-
-fn private_head(s: &Scenario, dir: &Path) -> Vec<u8> {
-    s.private(dir).git(["rev-parse", "HEAD"]).succeeds().stdout
 }
 
 fn stage_change(s: &Scenario, dir: &Path) {

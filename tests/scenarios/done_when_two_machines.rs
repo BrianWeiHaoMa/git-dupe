@@ -12,10 +12,10 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    EVERY_OBJECT, End, Output, PROJECT_URL, Runs, Scenario, SecondMachine, Tree, changed_since,
-    detached, held_publicly, holds, leaving_public_git, names, now_visible, privately_tracked,
-    public_git, publicly_tracked, records, region_rules, run_traced, stale_timestamp,
-    stash_untracked_line, under_each_release, usage_line, warnings, write,
+    EVERY_OBJECT, End, PROJECT_URL, Runs, Scenario, SecondMachine, Tree, changed_since, detached,
+    held_publicly, holds, names, now_visible, private_head, privately_tracked, public_git,
+    publicly_tracked, records, region_rules, run_traced, stale_timestamp, stash_untracked_line,
+    under_each_release, usage_line, warnings, watched_dupe_succeeds, write,
 };
 
 /// The privately tracked files of the first machine's history other than `.env.local`:
@@ -26,24 +26,6 @@ const ARRIVING: [&str; 4] = [
     ".vscode/settings.json",
     "docs/notes.md",
 ];
-
-/// `git dupe <words>` from `from` in the workspace at `root`, which must leave the public
-/// `.git` there as it was but for `.git/dupe` and the exclude file.
-fn dupe(s: &Scenario, root: &Path, from: &Path, words: &[&str]) -> Output {
-    leaving_public_git(root, s.git(["dupe"].iter().chain(words)).from(from))
-}
-
-/// `dupe` from the root, which must exit 0.
-fn dupe_succeeds(s: &Scenario, root: &Path, words: &[&str]) -> Output {
-    let output = dupe(s, root, root, words);
-    assert_eq!(output.end, End::Code(0), "git dupe {words:?}: {output:?}");
-    output
-}
-
-/// The commit the private `HEAD` of the workspace at `root` names.
-fn private_head(s: &Scenario, root: &Path) -> Vec<u8> {
-    s.private(root).git(["rev-parse", "HEAD"]).succeeds().stdout
-}
 
 /// Runs `git dupe <words>` from `from` on the second machine, traced, and returns its one
 /// `fatal:` line and the Git runs it made, once it has exited 128 with nothing on standard
@@ -112,7 +94,7 @@ fn two_machines_share_private_work_refusals_change_nothing_and_detach_keeps_ever
         // `git status`;"
         write(second, ".env.local", b"mine\n");
         let url = m.first.private_remote.to_str().unwrap();
-        let cloned = dupe_succeeds(s, second, &["clone", url]);
+        let cloned = watched_dupe_succeeds(s, second, &["clone", url]);
         for level in ["fatal", "error", "hint"] {
             assert!(cloned.lines(level).is_empty(), "{level}: {cloned:?}");
         }
@@ -139,7 +121,7 @@ fn two_machines_share_private_work_refusals_change_nothing_and_detach_keeps_ever
             .from(second)
             .succeeds();
         assert!(public.stdout.is_empty(), "{public:?}");
-        let status = dupe_succeeds(s, second, &["status", "--porcelain"]);
+        let status = watched_dupe_succeeds(s, second, &["status", "--porcelain"]);
         assert_eq!(
             status.stdout, b" M .env.local\n?? notes/x.md\n",
             "{status:?}"
@@ -148,13 +130,13 @@ fn two_machines_share_private_work_refusals_change_nothing_and_detach_keeps_ever
         // "`git dupe pull` and `git dupe push` move commits both ways." The second machine
         // keeps its `.env.local` with `git dupe commit -am` (`In use` 5) and sends it to
         // the first; the first sends a new note back.
-        dupe_succeeds(
+        watched_dupe_succeeds(
             s,
             second,
             &["commit", "-qam", "the second machine's settings"],
         );
-        dupe_succeeds(s, second, &["push"]);
-        dupe_succeeds(s, first, &["pull"]);
+        watched_dupe_succeeds(s, second, &["push"]);
+        watched_dupe_succeeds(s, first, &["pull"]);
         assert_eq!(private_head(s, first), private_head(s, second));
         assert_eq!(fs::read(first.join(".env.local")).unwrap(), b"mine\n");
         write(first, "notes/b.md", b"from the first machine\n");
@@ -163,9 +145,9 @@ fn two_machines_share_private_work_refusals_change_nothing_and_detach_keeps_ever
             &["commit", "-qm", "a note"],
             &["push"],
         ] {
-            dupe_succeeds(s, first, words);
+            watched_dupe_succeeds(s, first, words);
         }
-        dupe_succeeds(s, second, &["pull"]);
+        watched_dupe_succeeds(s, second, &["pull"]);
         assert_eq!(private_head(s, second), private_head(s, first));
         assert_eq!(
             fs::read(second.join("notes/b.md")).unwrap(),
@@ -176,7 +158,7 @@ fn two_machines_share_private_work_refusals_change_nothing_and_detach_keeps_ever
         // `git dupe remote remove origin`: no remote holds its commits for `detach`, and a
         // `remote add origin` that no guard stopped would succeed. Nothing is uncommitted;
         // `notes/x.md` stays untracked, for `stash -u` to take.
-        dupe_succeeds(s, second, &["remote", "remove", "origin"]);
+        watched_dupe_succeeds(s, second, &["remote", "remove", "origin"]);
 
         // "`git dupe remote add origin <the project's remote URL>`, … are each refused,
         // exit 128, naming the alternative, and change neither index, the working tree,
@@ -293,7 +275,7 @@ fn two_machines_share_private_work_refusals_change_nothing_and_detach_keeps_ever
         // "`git dupe detach --force` leaves the files on disk, removes `.git/dupe` and the
         // region, and makes `git status` list `notes/` and `.gitdupe`."
         let working = Tree::working(second);
-        let left = dupe_succeeds(s, second, &["detach", "--force"]);
+        let left = watched_dupe_succeeds(s, second, &["detach", "--force"]);
         assert!(left.stdout.is_empty(), "{left:?}");
         let exposed = [
             ".gitdupe",

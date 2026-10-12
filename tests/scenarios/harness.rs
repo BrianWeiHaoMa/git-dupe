@@ -2,6 +2,7 @@
 //! the fixtures and assertions scenarios share. A scenario file starts from what is here
 //! and copies none of it; what several scenarios need is added here.
 
+mod aliases;
 mod attached;
 mod clean;
 mod concurrent;
@@ -31,18 +32,21 @@ mod tree;
 mod watched_runs;
 mod worktrees;
 
+pub use aliases::{global_alias, private_alias};
 pub use attached::{
-    Region, daily_edited, daily_state, gitdupe_written_and_staged, private_add, private_commit,
-    region, region_in, region_rules, staged_gitdupe,
+    Region, daily_edited, daily_state, dupe_succeeds, gitdupe_written_and_staged, private_add,
+    private_commit, private_config_value, private_head, privately_staged, region, region_in,
+    region_rules, staged_gitdupe,
 };
 pub use clean::{EVERY_KIND_SPARED, Twin, hidden_path_of_every_kind};
 pub use concurrent::started_together;
 pub use detach::{
-    daily_warnings, detached, now_visible, stale_file_timestamp, stale_timestamp, warnings,
+    after_git, daily_warnings, detached, now_visible, stale_file_timestamp, stale_timestamp,
+    warnings,
 };
 pub use exclude_lock::lock_is_free;
 pub use executable::write_executable;
-pub use files::{copy, name_accepted, write};
+pub use files::{copy, entry_names, inode, mode, name_accepted, text, write};
 pub use fresh::FreshDirectory;
 pub use front::{general_text, usage_line};
 pub use kill::{ForwardEffect, Point};
@@ -53,22 +57,23 @@ pub use man::{
 };
 pub use output::{
     End, Output, holds, lines_in_order, names, names_number, names_the_route_to_private, offered,
-    records, warnings_in_any_order,
+    records, refusal, warnings_in_any_order,
 };
 pub use platform::{architecture, second_filesystem, word};
 pub use public::{
-    EVERY_OBJECT, held_publicly, leaving_public_git, privately_tracked, public_git,
-    publicly_tracked,
+    EVERY_OBJECT, held_publicly, leaving_public_git, privately_tracked, public_git, public_status,
+    publicly_tracked, watched_dupe, watched_dupe_succeeds,
 };
 pub use release_archive::{install_note, note_commands, release_archive};
 pub use releases::oldest_supported;
-pub use remotes::{Everything, MANY_URLS, PROJECT_URL, SecondMachine, Transfer};
+pub use remotes::{Everything, MANY_URLS, PROJECT_URL, SecondMachine, Transfer, dupe_clone};
 pub use repository::locate_words;
 pub use scenario::{Scenario, report, under_each_release};
 pub use stash::{refused_stash_untracked, stash_refusal_first, stash_untracked_line};
 pub use sweep::{GITDUPE, Killed, Sweep, Version, copied, files, lived_in, outside};
-pub use trace::{Runs, run_traced};
+pub use trace::{Runs, run_traced, run_words};
 pub use tree::{Tree, changed_since, unchanged};
 pub use worktrees::{
-    Worktree, worktree_clone, worktree_dupe, worktree_private_head, worktree_public_clean,
+    Worktree, linked_on_branch, worktree_clone, worktree_dupe, worktree_private_head,
+    worktree_public_clean,
 };

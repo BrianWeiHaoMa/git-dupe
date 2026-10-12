@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, GITDUPE, Killed, Output, Point, Scenario, Sweep, Tree, Version, copied, daily_warnings,
+    End, GITDUPE, Killed, Point, Scenario, Sweep, Tree, Version, after_git, copied, daily_warnings,
     detached, files, holds, lived_in, names, now_visible, outside, private_add, private_commit,
     region, region_rules, unchanged, under_each_release, warnings, write,
 };
@@ -160,20 +160,6 @@ fn a_killed_detach_force_is_completed_by_detach_force() {
         }
         assert!(reached.contains(&Version::Old) && reached.contains(&Version::New));
     });
-}
-
-/// git-dupe's own lines of `output`: what follows Git's own message, the standard error of
-/// `git`, which must come first.
-fn after_git(output: &Output, git: &Output) -> Output {
-    let stderr = output
-        .stderr
-        .strip_prefix(git.stderr.as_slice())
-        .unwrap_or_else(|| panic!("Git's message first, {git:?}: {output:?}"));
-    Output {
-        stdout: output.stdout.clone(),
-        stderr: stderr.to_vec(),
-        end: output.end,
-    }
 }
 
 /// Deletes each of `names` from the private Git directory of `dir`, as a removal that was

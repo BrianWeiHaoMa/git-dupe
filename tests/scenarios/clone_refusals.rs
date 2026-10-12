@@ -10,15 +10,9 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, locate_words, names, region, region_rules, run_traced,
-    unchanged, under_each_release, usage_line,
+    End, Output, Scenario, Tree, Worktree, dupe_clone, locate_words, names, region, region_rules,
+    run_traced, unchanged, under_each_release, usage_line,
 };
-
-/// `git dupe clone <words>` from `dir`.
-fn clone(s: &Scenario, dir: &Path, words: &[&OsStr]) -> Output {
-    let dupe = [OsStr::new("dupe"), OsStr::new("clone")];
-    s.git(dupe.iter().chain(words)).from(dir).run()
-}
 
 /// The Git steps of `clone`'s own, none of which runs before a refusal.
 const STEPS: [&str; 8] = [
@@ -138,7 +132,7 @@ fn a_word_naming_a_public_place_is_refused_before_anything_is_created() {
         let before = Tree::of(second);
         for (words, word) in cases {
             for directory in [second, &below] {
-                let refusal = clone(s, directory, words);
+                let refusal = dupe_clone(s, directory, words);
                 assert_eq!(refusal.end, End::Code(128), "{words:?}: {refusal:?}");
                 assert!(refusal.stdout.is_empty(), "{refusal:?}");
                 let line = refusal.only_line("fatal");
@@ -148,7 +142,7 @@ fn a_word_naming_a_public_place_is_refused_before_anything_is_created() {
             }
         }
         // The same words with the private URL where the public one stood attach.
-        let attached = clone(s, second, &[url, OsStr::new("-b"), OsStr::new("main")]);
+        let attached = dupe_clone(s, second, &[url, OsStr::new("-b"), OsStr::new("main")]);
         assert_eq!(attached.end, End::Code(0), "{attached:?}");
         assert!(second.join("notes/a.md").is_file());
     });
@@ -160,7 +154,7 @@ fn as_init_ends(s: &Scenario, from: &Path, dir: &Path, url: &OsStr) -> Output {
     let before = Tree::of(dir);
     let init = s.git(["dupe", "init"]).from(from).run();
     unchanged(&before, dir);
-    let cloned = clone(s, from, &[url]);
+    let cloned = dupe_clone(s, from, &[url]);
     unchanged(&before, dir);
     assert_eq!(cloned, init, "{}", from.display());
     cloned
@@ -197,7 +191,7 @@ fn where_init_is_refused_clone_is_refused_alike_and_creates_nothing() {
         names(refused.only_line("fatal"), admin.as_os_str().as_bytes());
         let linked = s.dir().join("linked");
         s.linked_worktree(&main, &linked);
-        let attached = clone(s, &linked, &[url]);
+        let attached = dupe_clone(s, &linked, &[url]);
         assert_eq!(attached.end, End::Code(0), "{attached:?}");
         assert!(
             Worktree::read(s, &linked)

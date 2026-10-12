@@ -6,7 +6,7 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
-    End, Everything, Output, Scenario, Transfer, Tree, holds, names, private_add, private_commit,
+    End, Everything, Scenario, Transfer, Tree, holds, names, private_add, private_commit, refusal,
     region, run_traced, stale_file_timestamp, stale_timestamp, unchanged, under_each_release,
     write,
 };
@@ -16,18 +16,10 @@ fn before_refusal(transfer: &Transfer) -> Everything {
     transfer.everything()
 }
 
-fn refusal(output: &Output) -> &[u8] {
-    assert_eq!(output.end, End::Code(128), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    let line = output.only_line("fatal");
-    names(line, b"git dupe detach --force");
-    line
-}
-
 fn refused(s: &Scenario, transfer: &Transfer) -> Vec<u8> {
     let before = before_refusal(transfer);
     let output = s.git(["dupe", "detach"]).from(&transfer.root).run();
-    let line = refusal(&output).to_vec();
+    let line = refusal(&output, &[b"git dupe detach --force"]).to_vec();
     before.unchanged();
     assert!(transfer.root.join(".git/dupe").is_dir());
     assert!(region(&transfer.root).is_some());
@@ -237,7 +229,10 @@ fn unborn_branch_is_safe_until_hide_stages_gitdupe() {
         stale_file_timestamp(&staged.join(".gitdupe"));
         let before = Tree::of(&staged);
         let output = s.git(["dupe", "detach"]).from(&staged).run();
-        names(refusal(&output), b"not committed");
+        names(
+            refusal(&output, &[b"git dupe detach --force"]),
+            b"not committed",
+        );
         unchanged(&before, &staged);
         assert!(staged.join(".git/dupe").is_dir());
         assert!(region(&staged).is_some());
@@ -255,7 +250,10 @@ fn stale_region_is_not_settled_on_refusal() {
         write(root, "notes/a.md", b"uncommitted\n");
         let before = before_refusal(&transfer);
         let output = s.git(["dupe", "detach"]).from(root).run();
-        names(refusal(&output), b"not committed");
+        names(
+            refusal(&output, &[b"git dupe detach --force"]),
+            b"not committed",
+        );
         assert!(output.lines("warning").is_empty(), "{output:?}");
         assert_eq!(fs::read(&exclude).unwrap(), region_before);
         before.unchanged();

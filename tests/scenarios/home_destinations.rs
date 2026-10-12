@@ -8,7 +8,7 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Everything, Output, Scenario, Transfer, Tree, names, unchanged, under_each_release,
+    Everything, Scenario, Transfer, Tree, refusal, text, unchanged, under_each_release,
 };
 
 /// The transfer workspace with the scenario's `HOME` holding `project`, a link to the
@@ -19,10 +19,6 @@ fn workspace(s: &Scenario) -> (Transfer, PathBuf) {
     symlink(&t.root, home.join("project")).unwrap();
     symlink(&t.public_remote, home.join("public.git")).unwrap();
     (t, home)
-}
-
-fn text(path: &Path) -> &str {
-    path.to_str().expect("a UTF-8 scenario path")
 }
 
 /// Every tree a refusal must leave as it was: the workspace's and the scenario's `HOME`.
@@ -53,17 +49,9 @@ fn refused(s: &Scenario, t: &Transfer, home: &Path, words: &[&str], parts: &[&st
         .git(["dupe"].into_iter().chain(words.iter().copied()))
         .from(&t.root)
         .run();
-    refusal(&output, parts);
+    let parts: Vec<&[u8]> = parts.iter().map(|part| part.as_bytes()).collect();
+    refusal(&output, &parts);
     before.unchanged(home);
-}
-
-fn refusal(output: &Output, parts: &[&str]) {
-    assert_eq!(output.end, End::Code(128), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    let line = output.only_line("fatal");
-    for part in parts {
-        names(line, part.as_bytes());
-    }
 }
 
 /// A word beginning with `~/` names the root and the public remote through `HOME`, `~`
@@ -93,7 +81,7 @@ fn tilde_words_are_read_from_home() {
             .from(&t.root)
             .variable("HOME", &t.root)
             .run();
-        refusal(&output, &[root, "git dupe git"]);
+        refusal(&output, &[root.as_bytes(), b"git dupe git"]);
         before.unchanged(&home);
     });
 }
@@ -191,7 +179,7 @@ fn clone_urls_from_home_refuse_public_places_and_attach_private_history() {
         for (word, absolute) in [("~/second", &m.root), ("~/origin", &m.first.root)] {
             for url in [text(absolute), word] {
                 let output = s.git(["dupe", "clone", url]).from(&m.root).run();
-                refusal(&output, &[url, "git dupe git"]);
+                refusal(&output, &[url.as_bytes(), b"git dupe git"]);
                 unchanged(&before, &m.root);
                 first.unchanged();
                 unchanged(&home_before, &home);

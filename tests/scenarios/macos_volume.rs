@@ -12,8 +12,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, holds, leaving_public_git, names, privately_tracked, records,
-    region_rules, report, under_each_release, word, write,
+    End, holds, names, privately_tracked, records, region_rules, report, under_each_release,
+    watched_dupe_succeeds, word, write,
 };
 
 /// Whether `dir` equates spellings that differ in case: an `a` made there is found as `A`.
@@ -27,14 +27,6 @@ fn equates_spellings(dir: &Path) -> bool {
     };
     fs::remove_file(&made).unwrap_or_else(|cause| panic!("{}: {cause}", made.display()));
     found
-}
-
-/// `git dupe <words>` from the root, which must exit 0 and leave the public `.git` as it
-/// was but for the private repository and the exclude file.
-fn dupe(s: &Scenario, root: &Path, words: &[&str]) -> Output {
-    let output = leaving_public_git(root, s.git(["dupe"].iter().chain(words)).from(root));
-    assert_eq!(output.end, End::Code(0), "git dupe {words:?}: {output:?}");
-    output
 }
 
 /// Whether `text` names `notes` in any spelling of its case.
@@ -62,7 +54,7 @@ fn notes_hidden_before_it_stands_hides_the_directory_made_as_capital_notes() {
         let ignore_case = s.git(["config", "core.ignoreCase"]).from(&root).succeeds();
         assert_eq!(ignore_case.stdout, b"true\n", "{ignore_case:?}");
 
-        dupe(s, &root, &["hide", "notes/"]);
+        watched_dupe_succeeds(s, &root, &["hide", "notes/"]);
         write(&root, "Notes/draft.md", b"draft\n");
         // The rule for `notes` and none for `Notes`.
         assert_eq!(region_rules(&root), [&b"/.gitdupe"[..], b"/notes"]);
@@ -75,13 +67,13 @@ fn notes_hidden_before_it_stands_hides_the_directory_made_as_capital_notes() {
         assert!(!names_notes(&status.stdout), "{status:?}");
         let add = s.git(["add", "-A", "--dry-run"]).from(&root).succeeds();
         assert!(!names_notes(&add.stdout), "{add:?}");
-        let private = dupe(s, &root, &["status", "--porcelain"]);
+        let private = watched_dupe_succeeds(s, &root, &["status", "--porcelain"]);
         assert!(!names_notes(&private.stdout), "{private:?}");
 
         // `clean -fdx` from the root deletes an untracked file and leaves `Notes/` with its
         // file, spelled as it was made.
         write(&root, "scratch.txt", b"scratch\n");
-        dupe(s, &root, &["clean", "-fdx"]);
+        watched_dupe_succeeds(s, &root, &["clean", "-fdx"]);
         assert!(!root.join("scratch.txt").exists());
         assert_eq!(fs::read(root.join("Notes/draft.md")).unwrap(), b"draft\n");
         let entries: Vec<_> = fs::read_dir(&root)
@@ -93,20 +85,20 @@ fn notes_hidden_before_it_stands_hides_the_directory_made_as_capital_notes() {
 
         // `add Notes/draft.md` makes the file privately tracked, and the next status shows
         // it staged.
-        dupe(s, &root, &["add", "Notes/draft.md"]);
+        watched_dupe_succeeds(s, &root, &["add", "Notes/draft.md"]);
         assert!(
             privately_tracked(s, &root).contains(&b"Notes/draft.md".to_vec()),
             "{:?}",
             privately_tracked(s, &root)
         );
-        let staged = dupe(s, &root, &["status", "--porcelain"]);
+        let staged = watched_dupe_succeeds(s, &root, &["status", "--porcelain"]);
         assert!(
             records(&staged.stdout, b'\n').contains(&&b"A  Notes/draft.md"[..]),
             "{staged:?}"
         );
 
         // `hide Notes/` lists `Notes` beside `notes`: another path to git-dupe.
-        let hide = dupe(s, &root, &["hide", "Notes/"]);
+        let hide = watched_dupe_succeeds(s, &root, &["hide", "Notes/"]);
         let hint = hide.only_line("hint");
         names(hint, b"Notes");
         names(hint, b"git dupe unhide");

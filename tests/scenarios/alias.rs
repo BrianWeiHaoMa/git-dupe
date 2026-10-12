@@ -114,7 +114,7 @@ fn edited(s: &Scenario, name: &str) -> PathBuf {
     dir
 }
 
-fn staged(s: &Scenario, dir: &Path) -> Vec<u8> {
+fn staged_names(s: &Scenario, dir: &Path) -> Vec<u8> {
     s.private(dir)
         .git(["diff", "--cached", "--name-only", "-z"])
         .succeeds()
@@ -130,9 +130,9 @@ fn same_staging(s: &Scenario, actual: &Path, expected: &Path, words: &[&str]) {
     let literal = s.git(["dupe", "add", "-A"]).from(expected).run();
     assert_eq!(output, literal);
     assert_eq!(output.end, End::Code(0), "{output:?}");
-    assert_eq!(staged(s, actual), staged(s, expected));
+    assert_eq!(staged_names(s, actual), staged_names(s, expected));
     assert_eq!(
-        staged(s, actual),
+        staged_names(s, actual),
         b".env.local\0docs/notes.md\0notes/a.md\0notes/new.md\0"
     );
     assert_eq!(
@@ -445,8 +445,8 @@ fn stage_is_add_in_dispatch_and_help_but_git_stage_is_unguarded() {
                 s.git(["dupe", "add", "notes/new.md"]).from(&expected).run()
             );
             assert_eq!(output.end, End::Code(0));
-            assert_eq!(staged(s, &actual), b"notes/new.md\0");
-            assert_eq!(staged(s, &actual), staged(s, &expected));
+            assert_eq!(staged_names(s, &actual), b"notes/new.md\0");
+            assert_eq!(staged_names(s, &actual), staged_names(s, &expected));
             same_staging(s, &actual, &expected, &["stage", "-A"]);
             let literal = s
                 .private(&expected)
@@ -468,7 +468,7 @@ fn stage_is_add_in_dispatch_and_help_but_git_stage_is_unguarded() {
                     .git(["ls-files", "--stage", "-z"])
                     .succeeds()
             );
-            assert!(holds(&staged(s, &actual), b"README.md\0"));
+            assert!(holds(&staged_names(s, &actual), b"README.md\0"));
             assert_eq!(fs::read(actual.join(".git/index")).unwrap(), public);
         }
     });

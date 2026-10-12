@@ -6,8 +6,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Scenario, Tree, names, private_add, private_commit, region_rules, run_traced,
-    under_each_release, write,
+    End, Scenario, Tree, names, private_add, private_commit, private_head, region_rules,
+    run_traced, under_each_release, write,
 };
 
 /// The private index's entries, including modes, object names, and stages.
@@ -16,11 +16,6 @@ fn private_index(s: &Scenario, root: &Path) -> Vec<u8> {
         .git(["ls-files", "-s", "-z"])
         .succeeds()
         .stdout
-}
-
-/// The private commit at the attached machine's `HEAD`.
-fn private_head(s: &Scenario, root: &Path) -> Vec<u8> {
-    s.private(root).git(["rev-parse", "HEAD"]).succeeds().stdout
 }
 
 #[test]

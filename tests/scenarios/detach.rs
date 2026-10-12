@@ -9,8 +9,8 @@ use std::process::Command;
 
 use crate::harness::{
     End, Output, Scenario, Transfer, Tree, changed_since, daily_warnings, detached, holds,
-    locate_words, names, now_visible, private_add, private_commit, region, region_rules,
-    run_traced, unchanged, under_each_release, warnings, write, write_executable,
+    locate_words, names, now_visible, private_add, private_commit, public_git, region,
+    region_rules, run_traced, unchanged, under_each_release, warnings, write, write_executable,
 };
 
 const USER_BEFORE: &[u8] = b"# developer before\r\n*.o\n# caf\xe9\n";
@@ -44,7 +44,7 @@ impl Preserved {
     fn of(t: &Transfer) -> Self {
         Self {
             working: Tree::working(&t.root),
-            public: public_tree(&t.root),
+            public: public_git(&t.root),
             linked: Tree::of(&t.linked),
             public_remote: Tree::of(&t.public_remote),
             private_remote: Tree::of(&t.private_remote),
@@ -53,17 +53,12 @@ impl Preserved {
 
     fn after_detach(&self, t: &Transfer) {
         assert!(changed_since(&self.working, &t.root).is_empty());
-        assert!(self.public.changed_in(&public_tree(&t.root)).is_empty());
+        assert!(self.public.changed_in(&public_git(&t.root)).is_empty());
         unchanged(&self.linked, &t.linked);
         unchanged(&self.public_remote, &t.public_remote);
         unchanged(&self.private_remote, &t.private_remote);
         detached(&t.root);
     }
-}
-
-fn public_tree(root: &Path) -> Tree {
-    Tree::of(&root.join(".git"))
-        .without(&[&root.join(".git/dupe"), &root.join(".git/info/exclude")])
 }
 
 fn succeeded(output: &Output) {

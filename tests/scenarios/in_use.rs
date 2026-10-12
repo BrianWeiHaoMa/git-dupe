@@ -6,8 +6,9 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, changed_since, holds, leaving_public_git, names, region_rules,
-    staged_gitdupe, unchanged, under_each_release, warnings_in_any_order, write,
+    End, Output, Scenario, Tree, changed_since, holds, leaving_public_git, names, privately_staged,
+    public_status, region_rules, staged_gitdupe, unchanged, under_each_release,
+    warnings_in_any_order, write,
 };
 
 const DATE: &str = "2000-01-01T00:00:00Z";
@@ -37,20 +38,6 @@ fn direct(s: &Scenario, dir: &Path, words: &[&str]) -> Output {
         .variable("GIT_AUTHOR_DATE", DATE)
         .variable("GIT_COMMITTER_DATE", DATE)
         .run()
-}
-
-fn staged(s: &Scenario, dir: &Path) -> Vec<u8> {
-    s.private(dir)
-        .git(["diff", "--cached", "--name-status", "-z"])
-        .succeeds()
-        .stdout
-}
-
-fn public_status(s: &Scenario, dir: &Path) -> Vec<u8> {
-    s.git(["status", "--porcelain", "--untracked-files=all"])
-        .from(dir)
-        .succeeds()
-        .stdout
 }
 
 fn head(s: &Scenario, dir: &Path) -> String {
@@ -231,21 +218,27 @@ fn cloned_project_through_first_commit_and_daily_private_work() {
         assert_eq!(public_status(s, &dir), b"M  docs/design.md\n");
         let all = leaving_public_git(&dir, s.git(["dupe", "add", "-A"]).from(&dir.join("docs")));
         succeeds(all);
-        assert_eq!(staged(s, &dir), b"M\0.env.local\0A\0notes/today.md\0");
+        assert_eq!(
+            privately_staged(s, &dir),
+            b"M\0.env.local\0A\0notes/today.md\0"
+        );
         // The root spelling has the same scope; inside notes it cannot stage the env edit.
         s.private(&dir).git(["reset", "-q", "HEAD"]).succeeds();
         succeeds(dupe(s, &dir, &["add", "."]));
-        assert_eq!(staged(s, &dir), b"M\0.env.local\0A\0notes/today.md\0");
+        assert_eq!(
+            privately_staged(s, &dir),
+            b"M\0.env.local\0A\0notes/today.md\0"
+        );
         s.private(&dir).git(["reset", "-q", "HEAD"]).succeeds();
         succeeds(leaving_public_git(
             &dir,
             s.git(["dupe", "add", "."]).from(&dir.join("notes")),
         ));
-        assert_eq!(staged(s, &dir), b"A\0notes/today.md\0");
+        assert_eq!(privately_staged(s, &dir), b"A\0notes/today.md\0");
         succeeds(dupe(s, &dir, &["add", "-A"]));
         succeeds(dupe(s, &dir, &["add", "-f", ".vscode/launch.json"]));
         assert_eq!(
-            staged(s, &dir),
+            privately_staged(s, &dir),
             b"M\0.env.local\0A\0.vscode/launch.json\0A\0notes/today.md\0"
         );
         let first = original.replace("private line 2\n", "private first change\n");

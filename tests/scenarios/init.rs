@@ -9,7 +9,8 @@ use std::process::Command;
 
 use crate::harness::{
     End, Output, Scenario, Tree, Worktree, holds, locate_words, name_accepted, names, names_number,
-    refused_stash_untracked, region, region_rules, unchanged, under_each_release, usage_line,
+    private_config_value, refused_stash_untracked, region, region_rules, unchanged,
+    under_each_release, usage_line,
 };
 
 /// An unattached repository and the directory to run from: its root, or `sub` below it.
@@ -39,22 +40,12 @@ fn identity(s: &Scenario, dir: &Path) {
         .succeeds();
 }
 
-fn key(s: &Scenario, dir: &Path, name: &str, expected: &str) {
-    let output = s
-        .private(dir)
-        .git(["config", "--local", "--get", name])
-        .run();
-    assert_eq!(output.end, End::Code(0), "{name}: {output:?}");
-    assert_eq!(output.stdout, format!("{expected}\n").as_bytes(), "{name}");
-    assert!(output.stderr.is_empty(), "{output:?}");
-}
-
 fn keys(s: &Scenario, dir: &Path) {
-    key(s, dir, "status.showUntrackedFiles", "no");
-    key(s, dir, "advice.statusHints", "false");
-    key(s, dir, "core.worktree", "../..");
-    key(s, dir, "user.name", "Local Name");
-    key(s, dir, "user.email", "local@example.invalid");
+    private_config_value(s, dir, "status.showUntrackedFiles", "no");
+    private_config_value(s, dir, "advice.statusHints", "false");
+    private_config_value(s, dir, "core.worktree", "../..");
+    private_config_value(s, dir, "user.name", "Local Name");
+    private_config_value(s, dir, "user.email", "local@example.invalid");
 }
 
 /// Exit 0, `hints` hints, and no `fatal:` or `error:` line; Git's own output may be on
@@ -143,16 +134,6 @@ fn global_identity_is_not_copied_into_private_local_config() {
     });
 }
 
-/// The only value of `name` in the private local configuration.
-fn only_value(s: &Scenario, dir: &Path, name: &str, expected: &str) {
-    let output = s
-        .private(dir)
-        .git(["config", "--local", "--get-all", name])
-        .run();
-    assert_eq!(output.end, End::Code(0), "{name}: {output:?}");
-    assert_eq!(output.stdout, format!("{expected}\n").as_bytes(), "{name}");
-}
-
 #[test]
 fn a_templates_repeated_keys_are_replaced_and_an_included_local_identity_is_copied() {
     under_each_release(|s| {
@@ -186,8 +167,8 @@ fn a_templates_repeated_keys_are_replaced_and_an_included_local_identity_is_copi
                 .run();
             succeeded_with_hints(&output, 0);
             gits_init_line(&output, &dir);
-            only_value(s, &dir, "user.name", "Local Name");
-            only_value(s, &dir, "status.showUntrackedFiles", "no");
+            private_config_value(s, &dir, "user.name", "Local Name");
+            private_config_value(s, &dir, "status.showUntrackedFiles", "no");
             keys(s, &dir);
         }
     });
@@ -304,7 +285,7 @@ fn repeated_init_preserves_edits_and_restores_unfinished_or_deleted_config() {
                 names(output.lines("hint")[0], b"already attached");
                 assert!(output.stdout.is_empty(), "{output:?}");
                 unchanged(&before, &dir.join(".git"));
-                key(
+                private_config_value(
                     s,
                     &dir,
                     "user.name",
@@ -330,7 +311,7 @@ fn repeated_init_preserves_edits_and_restores_unfinished_or_deleted_config() {
             let output = s.git(["dupe", "init"]).from(&from).run();
             succeeded_with_hints(&output, 1);
             keys(s, &dir);
-            key(s, &dir, "core.logallrefupdates", "false");
+            private_config_value(s, &dir, "core.logallrefupdates", "false");
             fs::remove_file(dir.join(".git/dupe/config")).unwrap();
             let output = s.git(["dupe", "init"]).from(&from).run();
             succeeded_with_hints(&output, 1);
@@ -472,7 +453,7 @@ fn config_lock_relays_gits_failure_and_removing_it_allows_completion() {
                 .run();
             assert_eq!(made.end, End::Code(0), "{made:?}");
             // Git's absolute core.worktree makes this an unfinished attachment.
-            key(s, &dir, "core.worktree", dir.to_str().unwrap());
+            private_config_value(s, &dir, "core.worktree", dir.to_str().unwrap());
             let missing = s
                 .private(&dir)
                 .git(["config", "--local", "--get", "status.showUntrackedFiles"])

@@ -2,7 +2,8 @@
 //! Git decides exposure; a shared exclude file is only maintained where G6 allows it.
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, name_accepted, offered, under_each_release, write,
+    End, Output, Scenario, Tree, Worktree, name_accepted, offered, public_status,
+    under_each_release, write,
 };
 use std::ffi::OsStr;
 use std::fs;
@@ -64,12 +65,9 @@ fn warnings(output: &Output, expected: &[Vec<u8>]) {
     }
 }
 
-fn public_status(s: &Scenario, wt: &Worktree, expected: &[u8]) {
-    let status = s
-        .git(["status", "--porcelain", "--untracked-files=all"])
-        .from(&wt.root)
-        .succeeds();
-    assert_eq!(status.stdout, expected, "{status:?}");
+fn public_status_is(s: &Scenario, wt: &Worktree, expected: &[u8]) {
+    let status = public_status(s, &wt.root);
+    assert_eq!(status, expected, "\"{}\"", status.escape_ascii());
 }
 
 /// An unchanged command warns without adopting files, staging, or rewriting any region.
@@ -122,7 +120,7 @@ fn foreign_warning_repeats_without_adoption_until_added_here() {
         let wt = linked(s, &main, OsStr::new("agent"));
         hide(s, &main, "notes");
         write(&wt.root, "notes/x.md", b"local note\n");
-        public_status(s, &wt, b"");
+        public_status_is(s, &wt, b"");
         let expected = [foreign("notes", b"the main worktree", true)];
         let first = steady(s, &wt, &expected);
         let second = steady(s, &wt, &expected);
@@ -142,7 +140,7 @@ fn foreign_warning_repeats_without_adoption_until_added_here() {
             fs::read(wt.root.join("notes/x.md")).unwrap(),
             b"local note\n"
         );
-        public_status(s, &wt, b"");
+        public_status_is(s, &wt, b"");
     });
 }
 
@@ -153,7 +151,7 @@ fn foreign_scratch_story_stages_the_previously_invisible_file() {
         let wt = linked(s, &main, OsStr::new("agent"));
         hide(s, &main, "scratch");
         write(&wt.root, "scratch/a.py", b"print('local')\n");
-        public_status(s, &wt, b"");
+        public_status_is(s, &wt, b"");
         steady(s, &wt, &[foreign("scratch", b"the main worktree", true)]);
         let main_region = main.region_bytes();
         let added = s.git(["dupe", "add", "scratch/"]).from(&wt.root).succeeds();
@@ -214,7 +212,7 @@ fn foreign_owners_use_whole_worktree_names_and_preserve_non_utf8_bytes() {
                 foreign("scratch", b"worktree agent2", true),
             ],
         );
-        public_status(s, &main, b"");
+        public_status_is(s, &main, b"");
         assert_eq!(agent.region().unwrap().rules, [b"/.gitdupe"]);
     });
 }
@@ -237,7 +235,7 @@ fn foreign_path_has_one_warning_naming_both_owners() {
                 true,
             )],
         );
-        public_status(s, &wt, b"");
+        public_status_is(s, &wt, b"");
     });
 }
 
@@ -260,7 +258,7 @@ fn foreign_warning_is_suppressed_only_by_hiding_the_path_or_an_ancestor_here() {
                 vec![]
             };
             steady(s, &wt, &expected);
-            public_status(s, &wt, b"");
+            public_status_is(s, &wt, b"");
         }
         let main = main_worktree(s, "tracked-child");
         let wt = linked(s, &main, OsStr::new("tracked-agent"));
@@ -293,10 +291,10 @@ fn foreign_warning_ends_when_the_owner_releases_or_the_local_path_is_removed() {
                 s.git(["dupe", "unhide", "notes"])
                     .from(&main.root)
                     .succeeds();
-                public_status(s, &wt, b"?? notes/x.md\n");
+                public_status_is(s, &wt, b"?? notes/x.md\n");
             } else {
                 fs::remove_dir_all(wt.root.join("notes")).unwrap();
-                public_status(s, &wt, b"");
+                public_status_is(s, &wt, b"");
             }
             steady(s, &wt, &[]);
         }
@@ -311,7 +309,7 @@ fn foreign_absent_path_is_not_named() {
         hide(s, &main, "notes");
         assert!(!wt.root.join("notes").exists());
         steady(s, &wt, &[]);
-        public_status(s, &wt, b"");
+        public_status_is(s, &wt, b"");
     });
 }
 
@@ -344,7 +342,7 @@ fn foreign_exact_public_tracking_on_the_linked_branch_suppresses_the_warning() {
                 .is_empty()
         );
         steady(s, &wt, &[]);
-        public_status(s, &wt, b"");
+        public_status_is(s, &wt, b"");
     });
 }
 
@@ -361,7 +359,7 @@ fn foreign_directory_with_a_publicly_tracked_child_still_warns_without_a_hide_re
             .succeeds();
         s.commit_public(&wt.root);
         steady(s, &wt, &[foreign("notes", b"the main worktree", false)]);
-        public_status(s, &wt, b"");
+        public_status_is(s, &wt, b"");
         assert_eq!(
             s.git(["ls-files", "--", "notes"])
                 .from(&wt.root)
@@ -381,7 +379,7 @@ fn foreign_reinclusion_gets_neither_foreign_nor_hidden_exposure_warning() {
         write(&wt.root, "notes/x.md", b"here\n");
         write(&wt.root, ".gitignore", b"!/notes\n");
         steady(s, &wt, &[]);
-        public_status(s, &wt, b" M .gitignore\n?? notes/x.md\n");
+        public_status_is(s, &wt, b" M .gitignore\n?? notes/x.md\n");
     });
 }
 
@@ -401,7 +399,7 @@ fn foreign_user_ignore_rule_still_names_the_region_owner() {
             b".gitignore:1:/notes\tnotes\n"
         );
         steady(s, &wt, &[foreign("notes", b"the main worktree", true)]);
-        public_status(s, &wt, b" M .gitignore\n");
+        public_status_is(s, &wt, b" M .gitignore\n");
     });
 }
 
@@ -478,7 +476,7 @@ fn foreign_warning_coexists_with_hidden_dual_tracked_and_released_warnings() {
                 b"/exposed".to_vec()
             ]
         );
-        public_status(
+        public_status_is(
             s,
             &wt,
             b" M .gitignore\n?? exposed\n?? reincluded/x.md\n?? released\n",
@@ -514,7 +512,7 @@ fn foreign_owner_is_named_when_a_path_is_released_here_but_remains_ignored() {
         );
         assert_eq!(fs::read(wt.root.join("notes/x.md")).unwrap(), b"here\n");
         steady(s, &wt, &[foreign("notes", b"the main worktree", true)]);
-        public_status(s, &wt, b"");
+        public_status_is(s, &wt, b"");
     });
 }
 
@@ -545,7 +543,7 @@ fn foreign_overlap_reincluded_here_is_released_with_one_visible_warning() {
             b"untracked privately\n"
         );
         steady(s, &wt, &[]);
-        public_status(s, &wt, b" M .gitignore\n?? notes/x.md\n");
+        public_status_is(s, &wt, b" M .gitignore\n?? notes/x.md\n");
     });
 }
 
@@ -572,7 +570,7 @@ fn foreign_path_beyond_a_link_is_unnamed_while_local_exposure_is_checked() {
             fs::read(main.root.join("target/child")).unwrap(),
             b"beyond the link\n"
         );
-        public_status(s, &wt, b" M .gitignore\n?? exposed\n?? link\n");
+        public_status_is(s, &wt, b" M .gitignore\n?? exposed\n?? link\n");
     });
 }
 
@@ -593,7 +591,7 @@ fn foreign_links_at_the_path_itself_are_named_even_when_dangling() {
                 foreign("link", b"the main worktree", true),
             ],
         );
-        public_status(s, &wt, b"");
+        public_status_is(s, &wt, b"");
     });
 }
 
@@ -673,10 +671,10 @@ fn foreign_paths_are_not_named_when_the_region_cannot_be_maintained() {
             assert_eq!(fs::symlink_metadata(&link).unwrap().ino(), inode);
             if name == "info-link" {
                 assert_eq!(fs::read(&exclude).unwrap(), saved);
-                public_status(s, &wt, b"");
+                public_status_is(s, &wt, b"");
             } else {
                 assert!(!target.exists());
-                public_status(s, &wt, b"?? .gitdupe\n?? notes/x.md\n");
+                public_status_is(s, &wt, b"?? .gitdupe\n?? notes/x.md\n");
             }
         }
     });

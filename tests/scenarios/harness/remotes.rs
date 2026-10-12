@@ -2,14 +2,15 @@
 //! refusal of one changed nothing anywhere: an attached project with private history whose
 //! public repository has remotes and a linked worktree, beside local repositories a remote
 //! can name, the private one pushed to where `detach` needs it. Beside it, the second
-//! machine `clone` attaches, and the same check over both machines.
+//! machine `clone` attaches, the same check over both machines, and `git dupe clone` run
+//! with any words.
 
 use std::ffi::OsStr;
 use std::iter;
 use std::path::{Path, PathBuf};
 
 use super::attached::daily_state;
-use super::output::End;
+use super::output::{End, Output};
 use super::scenario::Scenario;
 use super::tree::Tree;
 
@@ -24,6 +25,12 @@ pub const MANY_URLS: [&str; 3] = [
     "git@example.net:team/second.git",
     "ssh://example.net/team/third.git",
 ];
+
+/// `git dupe clone <words>` from `dir`; it may end as it ends.
+pub fn dupe_clone(s: &Scenario, dir: &Path, words: &[&OsStr]) -> Output {
+    let dupe = [OsStr::new("dupe"), OsStr::new("clone")];
+    s.git(dupe.iter().chain(words)).from(dir).run()
+}
 
 /// A transfer workspace's paths, all canonical.
 pub struct Transfer {

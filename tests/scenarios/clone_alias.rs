@@ -6,15 +6,9 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, locate_words, names, private_add, private_commit, region_rules,
-    run_traced, unchanged, under_each_release, write,
+    End, Output, Scenario, Tree, global_alias, locate_words, names, private_add, private_commit,
+    region_rules, run_traced, unchanged, under_each_release, write,
 };
-
-/// Configures a global alias in the scenario's isolated home.
-fn alias(s: &Scenario, name: &str, expansion: &str) {
-    s.git(["config", "--global", &format!("alias.{name}"), expansion])
-        .succeeds();
-}
 
 /// The Git answer for the private repository at `root`.
 fn private_answer(s: &Scenario, root: &Path, words: &[&str]) -> Vec<u8> {
@@ -34,7 +28,7 @@ fn a_global_clone_alias_attaches_as_typed_and_locates_the_superproject() {
         let m = s.second_machine("project");
         let twin = s.dir().join("project-twin");
         s.public_clone(&m.first.root, &twin);
-        alias(s, "bring-private", "clone");
+        global_alias(s, "bring-private", "clone");
         for root in [&m.root, &twin] {
             // Public configuration must not override the global alias when unattached.
             s.git(["config", "--local", "alias.bring-private", "init"])
@@ -84,7 +78,7 @@ fn a_global_clone_alias_attaches_as_typed_and_locates_the_superproject() {
 fn a_global_clone_alias_answers_h_from_a_second_machine_and_outside() {
     under_each_release(|s| {
         let m = s.second_machine("project");
-        alias(s, "bring-private", "clone");
+        global_alias(s, "bring-private", "clone");
         let help = s.git(["dupe", "help", "clone"]).succeeds();
         assert_eq!(help.end, End::Code(0));
         for root in [&m.root, s.dir()] {
@@ -110,7 +104,7 @@ fn a_global_clone_alias_keeps_b_other_before_the_typed_url() {
         s.private(first)
             .git(["push", "-q", "origin", "other"])
             .succeeds();
-        alias(s, "bring-other", "clone -b other");
+        global_alias(s, "bring-other", "clone -b other");
         let url = m.first.private_remote.to_str().unwrap();
         let output = s.git(["dupe", "bring-other", url]).from(&m.root).run();
         assert_eq!(output.end, End::Code(0), "{output:?}");

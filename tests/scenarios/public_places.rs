@@ -7,16 +7,8 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
-    End, Everything, MANY_URLS, Output, PROJECT_URL, Scenario, Transfer, names, under_each_release,
+    Everything, MANY_URLS, PROJECT_URL, Scenario, Transfer, refusal, text, under_each_release,
 };
-
-fn refusal(output: &Output, place: &str) {
-    assert_eq!(output.end, End::Code(128), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    let line = output.only_line("fatal");
-    names(line, b"git dupe git");
-    names(line, place.as_bytes());
-}
 
 fn refused(s: &Scenario, t: &Transfer, from: &Path, word: &str, place: &str) {
     let before: Everything = t.everything();
@@ -24,7 +16,7 @@ fn refused(s: &Scenario, t: &Transfer, from: &Path, word: &str, place: &str) {
         .git(["dupe", "remote", "add", "leak", word])
         .from(from)
         .run();
-    refusal(&output, place);
+    refusal(&output, &[b"git dupe git", place.as_bytes()]);
     before.unchanged();
 }
 
@@ -39,10 +31,6 @@ fn runs(s: &Scenario, t: &Transfer, from: &Path, name: &str, word: &str) {
         .from(from)
         .succeeds();
     configured(s, t, name, word);
-}
-
-fn text(path: &Path) -> &str {
-    path.to_str().expect("a UTF-8 scenario path")
 }
 
 /// Schemes, host case, user, port, suffix and encoded URL bytes name the same remote.
@@ -275,7 +263,7 @@ fn relative_words_outside_also_use_the_users_directory() {
             .variable("GIT_DIR", t.root.join(".git"))
             .variable("GIT_WORK_TREE", &t.root)
             .run();
-        refusal(&output, text(&t.root));
+        refusal(&output, &[b"git dupe git", text(&t.root).as_bytes()]);
         before.unchanged();
         s.git(["dupe", "remote", "add", "leak", word])
             .from(&t.root)

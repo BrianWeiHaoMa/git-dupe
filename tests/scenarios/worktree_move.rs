@@ -8,8 +8,8 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Point, Scenario, Tree, Worktree, name_accepted, names, unchanged,
-    under_each_release,
+    End, Output, Point, Scenario, Tree, Worktree, linked_on_branch, name_accepted, names,
+    unchanged, under_each_release,
 };
 
 fn git_directory(path: &Path) -> OsString {
@@ -90,20 +90,6 @@ fn init(s: &Scenario, wt: &Worktree) -> Output {
     output
 }
 
-fn linked(s: &Scenario, main: &Path, root: &Path, branch: &str) -> Worktree {
-    s.git([
-        OsStr::new("worktree"),
-        OsStr::new("add"),
-        OsStr::new("-q"),
-        root.as_os_str(),
-        OsStr::new("-b"),
-        OsStr::new(branch),
-    ])
-    .from(main)
-    .succeeds();
-    Worktree::read(s, root)
-}
-
 #[test]
 fn main_private_worktree_follows_a_project_rename() {
     under_each_release(|s| {
@@ -155,7 +141,7 @@ fn linked_init_uses_its_public_branch_and_included_local_identity() {
             ("project-agent", "agent", false),
             ("project-second", "second", true),
         ] {
-            let wt = linked(s, &main, &s.dir().join(directory), branch);
+            let wt = linked_on_branch(s, &main, &s.dir().join(directory), branch);
             let before = wt.public_git();
             let words = if explicit {
                 &["dupe", "init", "-b", "other"][..]
@@ -196,7 +182,7 @@ fn moved_init(s: &Scenario, recreate_old: bool) {
     s.attached_project(&main);
     let old = s.dir().join("agent-old");
     let new = s.dir().join("agent-new");
-    let wt = linked(s, &main, &old, "agent");
+    let wt = linked_on_branch(s, &main, &old, "agent");
     init(s, &wt);
     relative_and_resolved(s, &wt);
     let old_value = key(s, &wt, "core.worktree");
@@ -279,7 +265,7 @@ fn absolute_worktree_spelling_completes_settings_but_finished_init_preserves_edi
     under_each_release(|s| {
         let main = s.dir().join("project");
         s.repository(&main);
-        let wt = linked(s, &main, &s.dir().join("agent"), "agent");
+        let wt = linked_on_branch(s, &main, &s.dir().join("agent"), "agent");
         init(s, &wt);
         wt.private(s)
             .git([
@@ -310,7 +296,7 @@ fn linked_init_records_canonical_git_directory_and_non_utf8_root_bytes() {
     under_each_release(|s| {
         let main = s.dir().join("project");
         s.repository(&main);
-        let wt = linked(s, &main, &s.dir().join("agent"), "agent");
+        let wt = linked_on_branch(s, &main, &s.dir().join("agent"), "agent");
         let via = s.dir().join("via");
         symlink(wt.common_directory.join("worktrees"), &via).unwrap();
         let through_link = via.join(wt.name().unwrap());
@@ -327,7 +313,7 @@ fn linked_init_records_canonical_git_directory_and_non_utf8_root_bytes() {
             b"caf\xe9",
             "worktree_move: a linked root named by bytes that are no UTF-8",
         ) {
-            let bytes = linked(
+            let bytes = linked_on_branch(
                 s,
                 &main,
                 &s.dir().join(OsStr::from_bytes(b"caf\xe9")),
@@ -351,7 +337,8 @@ fn killed_linked_init_completes_without_changing_the_main_attachment() {
         let main_region = main_wt.region_bytes();
         let main_marker = fs::read(main.join(".gitdupe")).unwrap();
         let killing = s.killing("control", &["init"]);
-        let uninterrupted = linked(s, &main, &s.dir().join("uninterrupted"), "uninterrupted");
+        let uninterrupted =
+            linked_on_branch(s, &main, &s.dir().join("uninterrupted"), "uninterrupted");
         let (output, points) = killing.uninterrupted(&uninterrupted.root);
         assert_eq!(output.end, End::Code(0), "{output:?}");
         relative_and_resolved(s, &uninterrupted);
@@ -365,7 +352,7 @@ fn killed_linked_init_completes_without_changing_the_main_attachment() {
         for (index, point) in runs.into_iter().enumerate() {
             // Git must create each fresh linked fixture; copying retains stale backlinks.
             let branch = format!("agent-{index}");
-            let wt = linked(s, &main, &s.dir().join(&branch), &branch);
+            let wt = linked_on_branch(s, &main, &s.dir().join(&branch), &branch);
             let public_before = wt.public_git();
             killing.killed(&wt.root, point);
             assert!(

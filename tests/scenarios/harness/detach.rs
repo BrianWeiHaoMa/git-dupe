@@ -1,9 +1,9 @@
 //! What `detach` says and leaves, for the scenarios of a whole `detach` and of a killed
 //! one: the warning naming a formerly hidden path, those of the daily state, a run's
-//! warnings exactly and the closing hint that counts them, and a workspace left
-//! unattached. Before a refusal of `detach` is compared byte for byte, a privately tracked
-//! file's timestamp is made stale, so that the status run `detach` reads would rewrite the
-//! private index if it could (`Holds/G3`).
+//! warnings exactly and the closing hint that counts them, git-dupe's own lines after the
+//! message Git writes first, and a workspace left unattached. Before a refusal of `detach`
+//! is compared byte for byte, a privately tracked file's timestamp is made stale, so that
+//! the status run `detach` reads would rewrite the private index if it could (`Holds/G3`).
 
 use std::fs;
 use std::path::Path;
@@ -70,6 +70,20 @@ pub fn warnings(output: &Output, expected: Vec<Vec<u8>>) {
         found.len() + hints.len(),
         "{output:?}"
     );
+}
+
+/// git-dupe's own lines of `output`: what follows Git's own message, the standard error of
+/// `git`, Git's own run of what `detach` asks it, which must come first.
+pub fn after_git(output: &Output, git: &Output) -> Output {
+    let stderr = output
+        .stderr
+        .strip_prefix(git.stderr.as_slice())
+        .unwrap_or_else(|| panic!("Git's message first, {git:?}: {output:?}"));
+    Output {
+        stdout: output.stdout.clone(),
+        stderr: stderr.to_vec(),
+        end: output.end,
+    }
 }
 
 /// The workspace at `root` is unattached: no private repository and no region.

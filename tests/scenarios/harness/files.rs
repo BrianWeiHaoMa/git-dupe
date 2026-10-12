@@ -1,10 +1,13 @@
-//! Files a scenario writes into a workspace, the names a filesystem refuses to hold, and a
-//! workspace copied whole.
+//! Files a scenario writes into a workspace, the names a filesystem refuses to hold, a
+//! workspace copied whole, and what a scenario reads of what stands at a path: its
+//! permission bits and its device and inode by `lstat`, a directory's entry names, and a
+//! path as text.
 
-use std::ffi::OsStr;
+use std::collections::BTreeSet;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::symlink;
+use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::Path;
 
 use super::platform::EILSEQ;
@@ -68,4 +71,30 @@ pub fn copy(from: &Path, to: &Path) {
     }
     let permissions = fs::metadata(from).unwrap_or_else(|cause| failed(from, cause));
     fs::set_permissions(to, permissions.permissions()).unwrap_or_else(|cause| failed(to, cause));
+}
+
+/// The permission bits of what stands at `path`, by `lstat`: a symbolic link's own.
+pub fn mode(path: &Path) -> u32 {
+    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o7777
+}
+
+/// The device and inode of what stands at `path`, by `lstat`: the same pair after a
+/// command is the same file, and a rename onto `path` changes it.
+pub fn inode(path: &Path) -> (u64, u64) {
+    let found = fs::symlink_metadata(path).unwrap();
+    (found.dev(), found.ino())
+}
+
+/// The names of the entries of the directory `directory`.
+pub fn entry_names(directory: &Path) -> BTreeSet<OsString> {
+    fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect()
+}
+
+/// `path` as text, for a word a scenario types or a part a line must name: the scenario's
+/// own paths are UTF-8.
+pub fn text(path: &Path) -> &str {
+    path.to_str().expect("a UTF-8 scenario path")
 }

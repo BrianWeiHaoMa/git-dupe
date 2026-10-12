@@ -8,8 +8,9 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, daily_state, names, private_add, private_commit, region_rules,
-    run_traced, unchanged, under_each_release, warnings_in_any_order, write, write_executable,
+    End, Output, Scenario, Tree, daily_state, global_alias, names, private_add, private_alias,
+    private_commit, refused_stash_untracked, region_rules, run_traced, unchanged,
+    under_each_release, warnings_in_any_order, write, write_executable,
 };
 
 fn fixture(s: &Scenario, name: &str) -> PathBuf {
@@ -21,20 +22,13 @@ fn fixture(s: &Scenario, name: &str) -> PathBuf {
     dir
 }
 
+/// Sets the alias where this pass of a scenario reads it: in the global configuration
+/// when `global`, else in the private repository.
 fn alias(s: &Scenario, dir: &Path, global: bool, name: &str, value: &OsStr) {
-    let key = format!("alias.{name}");
     if global {
-        s.git([
-            OsStr::new("config"),
-            OsStr::new("--global"),
-            OsStr::new(&key),
-            value,
-        ])
-        .succeeds();
+        global_alias(s, name, value);
     } else {
-        s.private(dir)
-            .git([OsStr::new("config"), OsStr::new(&key), value])
-            .succeeds();
+        private_alias(s, dir, name, value);
     }
 }
 
@@ -56,11 +50,11 @@ fn as_git(ours: &Output, gits: &Output) {
     );
 }
 
+/// The refusal of an untracked stash, alone on standard error, with the workspace and the
+/// private stash list as they were.
 fn stash_refusal(s: &Scenario, dir: &Path, output: &Output, before: &Tree) {
-    assert_eq!(output.end, End::Code(128), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    names(output.only_line("fatal"), b"git dupe add");
-    names(output.only_line("fatal"), b"git dupe stash");
+    refused_stash_untracked(s, output);
+    output.only_line("fatal");
     unchanged(before, dir);
     assert!(
         s.private(dir)

@@ -7,8 +7,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, names, private_add, private_commit, unchanged,
-    under_each_release, warnings_in_any_order, write,
+    End, Output, Scenario, Tree, Worktree, linked_on_branch, names, private_add, private_commit,
+    unchanged, under_each_release, warnings_in_any_order, write,
 };
 
 fn history(s: &Scenario) -> Worktree {
@@ -25,13 +25,6 @@ fn history(s: &Scenario) -> Worktree {
     private_commit(s, &root);
     s.git(["dupe", "status"]).from(&root).succeeds();
     Worktree::read(s, &root)
-}
-
-fn linked(s: &Scenario, main: &Worktree) -> Worktree {
-    s.git(["worktree", "add", "-q", "../project-agent", "-b", "agent"])
-        .from(&main.root)
-        .succeeds();
-    Worktree::read(s, &s.dir().join("project-agent"))
 }
 
 /// One clone may write only its own private repository and the shared exclude file.
@@ -110,7 +103,7 @@ fn bare_remote(s: &Scenario, main: &Worktree) -> PathBuf {
 fn linked_clone_admits_the_common_private_repository_and_attaches_only_here() {
     under_each_release(|s| {
         let main = history(s);
-        let wt = linked(s, &main);
+        let wt = linked_on_branch(s, &main.root, &s.dir().join("project-agent"), "agent");
         let url = wt.common_directory.join("dupe");
         assert_eq!(url, main.private_directory());
         let source = Tree::of(&url);
@@ -146,7 +139,7 @@ fn linked_clone_admits_the_common_private_repository_and_attaches_only_here() {
 fn linked_clone_keeps_differing_files_and_a_file_obstructing_private_notes() {
     under_each_release(|s| {
         let main = history(s);
-        let wt = linked(s, &main);
+        let wt = linked_on_branch(s, &main.root, &s.dir().join("project-agent"), "agent");
         for (path, bytes) in [
             (".env.local", &b"local settings\n"[..]),
             (".gitdupe", b"scratch\n"),
@@ -196,7 +189,7 @@ fn linked_clone_keeps_differing_files_and_a_file_obstructing_private_notes() {
 fn private_push_and_merge_exchange_worktree_history_without_public_refs_or_commits() {
     under_each_release(|s| {
         let main = history(s);
-        let wt = linked(s, &main);
+        let wt = linked_on_branch(s, &main.root, &s.dir().join("project-agent"), "agent");
         let output = clone(s, &wt, &wt.common_directory.join("dupe"), None);
         assert_eq!(output.end, End::Code(0), "{output:?}");
         write(&wt.root, "notes/a.md", b"agent note\n");
@@ -267,7 +260,7 @@ fn private_push_and_merge_exchange_worktree_history_without_public_refs_or_commi
 fn a_second_linked_worktree_clones_a_separate_private_remote_independently() {
     under_each_release(|s| {
         let main = history(s);
-        let first = linked(s, &main);
+        let first = linked_on_branch(s, &main.root, &s.dir().join("project-agent"), "agent");
         let output = clone(s, &first, &first.common_directory.join("dupe"), None);
         assert_eq!(output.end, End::Code(0), "{output:?}");
         let remote = bare_remote(s, &main);
@@ -301,7 +294,7 @@ fn a_second_linked_worktree_clones_a_separate_private_remote_independently() {
 fn linked_clone_refuses_every_public_place_before_attachment() {
     under_each_release(|s| {
         let main = history(s);
-        let wt = linked(s, &main);
+        let wt = linked_on_branch(s, &main.root, &s.dir().join("project-agent"), "agent");
         let other_root = s.dir().join("other-agent");
         s.linked_worktree(&main.root, &other_root);
         let other = Worktree::read(s, &other_root);
@@ -337,7 +330,7 @@ fn linked_clone_refuses_every_public_place_before_attachment() {
 fn failed_linked_clones_stay_attached_and_start_over_without_changing_other_worktrees() {
     under_each_release(|s| {
         let main = history(s);
-        let first = linked(s, &main);
+        let first = linked_on_branch(s, &main.root, &s.dir().join("project-agent"), "agent");
         let output = clone(s, &first, &main.private_directory(), None);
         assert_eq!(output.end, End::Code(0), "{output:?}");
         let good = main.private_directory();
@@ -380,7 +373,7 @@ fn failed_linked_clones_stay_attached_and_start_over_without_changing_other_work
 fn an_empty_private_remote_attaches_a_linked_worktree_with_one_hint_and_no_commit() {
     under_each_release(|s| {
         let main = history(s);
-        let wt = linked(s, &main);
+        let wt = linked_on_branch(s, &main.root, &s.dir().join("project-agent"), "agent");
         let remote = s.dir().join("empty.git");
         s.bare_repository(&remote);
         let source = Tree::of(&main.private_directory());
@@ -429,7 +422,7 @@ fn a_shallow_main_private_repository_attaches_a_linked_worktree_with_its_branch(
                 .stdout
         };
         assert_eq!(shallow(&main), b"true\n");
-        let wt = linked(s, &main);
+        let wt = linked_on_branch(s, &main.root, &s.dir().join("project-agent"), "agent");
         let url = main.private_directory();
         let source = Tree::of(&url);
         let output = clone(s, &wt, &url, None);

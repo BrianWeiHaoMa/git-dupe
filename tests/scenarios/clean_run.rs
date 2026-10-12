@@ -10,7 +10,7 @@ use std::process::Command;
 
 use crate::harness::{
     End, Runs, Scenario, Tree, Twin, changed_since, daily_state, names, names_number, private_add,
-    private_commit, region_rules, run_traced, under_each_release, write,
+    private_commit, region_rules, run_traced, run_words, under_each_release, write,
 };
 
 /// The `-e` options git-dupe gives `clean` without `-X` in `daily_state`'s workspace:
@@ -47,10 +47,6 @@ fn words_of(runs: &Runs, command: &str) -> Vec<Vec<Vec<u8>>> {
         .collect()
 }
 
-fn bytes(words: &[&str]) -> Vec<Vec<u8>> {
-    words.iter().map(|word| word.as_bytes().to_vec()).collect()
-}
-
 #[test]
 fn an_alias_s_prefix_stands_before_the_clean_run_and_its_command_word() {
     under_each_release(|s| {
@@ -75,7 +71,7 @@ fn an_alias_s_prefix_stands_before_the_clean_run_and_its_command_word() {
         .into_iter()
         .chain(DAILY_PATTERNS)
         .collect();
-        assert_eq!(words_of(&runs, "clean"), [bytes(&expected)], "{runs:?}");
+        assert_eq!(words_of(&runs, "clean"), [run_words(&expected)], "{runs:?}");
     });
 }
 
@@ -367,7 +363,7 @@ fn git_dupe_git_clean_is_gits_clean_in_the_private_repository_unchanged() {
         assert_eq!(output, expected);
         assert_eq!(
             words_of(&runs, "clean"),
-            [bytes(&["-c", "help.autocorrect=0", "clean", "-n"])],
+            [run_words(&["-c", "help.autocorrect=0", "clean", "-n"])],
             "{runs:?}"
         );
     });

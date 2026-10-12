@@ -7,16 +7,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, holds, names, run_traced, unchanged, under_each_release,
+    End, Output, Scenario, Tree, holds, names, refusal, run_traced, unchanged, under_each_release,
 };
-
-fn refused(output: &Output, route: &[u8], place: &[u8]) {
-    assert_eq!(output.end, End::Code(128), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    let line = output.only_line("fatal");
-    names(line, route);
-    names(line, place);
-}
 
 fn git_directory(s: &Scenario, worktree: &Path) -> PathBuf {
     let answer = s
@@ -65,7 +57,7 @@ fn git_directory_refuses_public_destinations_without_settling() {
                     .from(&directory),
                 &s.dir().join("refusal-trace"),
             );
-            refused(&output, b"git dupe git", place);
+            refusal(&output, &[b"git dupe git", place]);
             before.unchanged();
             let own = runs.own();
             assert_eq!(own.of("remote"), 0, "{own:?}");
@@ -120,10 +112,9 @@ fn linked_git_directory_refuses_the_main_working_tree() {
             ])
             .from(&directory)
             .run();
-        refused(
+        refusal(
             &output,
-            b"git dupe git",
-            transfer.root.as_os_str().as_bytes(),
+            &[b"git dupe git", transfer.root.as_os_str().as_bytes()],
         );
         before.unchanged();
     });
@@ -167,10 +158,9 @@ fn linked_worktree_refuses_public_destination_before_init() {
             ])
             .from(&transfer.linked)
             .run();
-        refused(
+        refusal(
             &output,
-            b"git dupe git",
-            transfer.root.as_os_str().as_bytes(),
+            &[b"git dupe git", transfer.root.as_os_str().as_bytes()],
         );
         assert!(!holds(output.only_line("fatal"), b"git dupe init"));
         before.unchanged();
@@ -216,7 +206,7 @@ fn unattached_repository_requires_init_and_keeps_gits_help_answer() {
         s.repository(&root);
         let before = Tree::of(&root);
         let output = s.git(["dupe", "remote", "-v"]).from(&root).run();
-        refused(&output, b"git dupe init", b"git dupe init");
+        refusal(&output, &[b"git dupe init"]);
         unchanged(&before, &root);
         let expected = s
             .private(&root)
@@ -248,7 +238,7 @@ fn unattached_repository_refuses_its_root_without_creating_private_state() {
             ])
             .from(&root)
             .run();
-        refused(&output, b"git dupe git", root.as_os_str().as_bytes());
+        refusal(&output, &[b"git dupe git", root.as_os_str().as_bytes()]);
         unchanged(&before, &root);
         assert!(!root.join(".git/dupe").exists());
     });
@@ -273,7 +263,7 @@ fn bare_repository_refuses_itself_and_keeps_gits_private_help_answer() {
             ])
             .from(&bare)
             .run();
-        refused(&output, b"git dupe git", bare.as_os_str().as_bytes());
+        refusal(&output, &[b"git dupe git", bare.as_os_str().as_bytes()]);
         unchanged(&before, &bare);
         let expected = help_in_git_directory(s, &bare);
         let output = s.git(["dupe", "remote", "-h"]).from(&bare).run();

@@ -1,6 +1,7 @@
 //! What a run left behind — its standard output, its standard error, how it ended — and
-//! the assertions over it: exactly one line of a level, the lines of a level in order or
-//! in any order, a line that names a path or a number; and the records of a listing.
+//! the assertions over it: exactly one line of a level, a refusal, the lines of a level in
+//! order or in any order, a line that names a path or a number; and the records of a
+//! listing.
 
 use std::fmt;
 
@@ -102,6 +103,19 @@ pub fn names(line: &[u8], part: &[u8]) {
         line.escape_ascii(),
         part.escape_ascii()
     );
+}
+
+/// A refusal (F9): exit 128, nothing on standard output, and standard error exactly one
+/// `fatal:` line naming every one of `parts`, in whatever order the line has them; that
+/// line's text.
+pub fn refusal<'o>(output: &'o Output, parts: &[&[u8]]) -> &'o [u8] {
+    assert_eq!(output.end, End::Code(128), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    let line = output.only_line("fatal");
+    for part in parts {
+        names(line, part);
+    }
+    line
 }
 
 /// `line` names the route by which a path the project's Git tracks becomes private (G11,
