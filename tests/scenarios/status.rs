@@ -219,8 +219,9 @@ fn a_staged_deletion_below_a_publicly_tracked_file_is_shown_without_that_file() 
             format!(" M {beside}"),
             format!(" M {spelled_file}"),
             format!("D  {spelled_directory}/gone"),
-            format!("?? {spelled_directory}/gone"),
-            format!("?? {spelled_directory}/new"),
+            // Collapsed as Git collapses an untracked directory: the deletion's own path,
+            // below `notes`, is no pathspec of the run to take Git inside it.
+            format!("?? {spelled_directory}/"),
         ]
         .into_iter()
         .map(String::into_bytes)

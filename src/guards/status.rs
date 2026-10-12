@@ -31,33 +31,36 @@ impl Exclusion {
 
 /// The scope: without user paths, every region path and every staged deletion; with them,
 /// for each user path the hidden paths under it and the staged deletions at or below it,
-/// the root, the empty path, meaning everything. Each path once, in byte order. Empty when
-/// nothing hidden or deleted lies at or below any user path.
+/// the root, the empty path, meaning everything. Each path once, in byte order, and none
+/// below another. Empty when nothing hidden or deleted lies at or below any user path.
 pub fn scope(
     region: &[Vec<u8>],
     deletions: &BTreeSet<Vec<u8>>,
     user_paths: Option<&[Vec<u8>]>,
 ) -> Vec<Vec<u8>> {
-    let Some(user_paths) = user_paths else {
-        return region
-            .iter()
-            .chain(deletions)
-            .cloned()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-    };
     let mut scope = BTreeSet::new();
-    for path in user_paths {
-        scope.extend(scope::hidden_under(region, path));
-        scope.extend(
-            deletions
-                .iter()
-                .filter(|deleted| path.is_empty() || operand::at_or_below(deleted, path))
-                .cloned(),
-        );
+    match user_paths {
+        None => scope.extend(region.iter().chain(deletions).cloned()),
+        Some(user_paths) => {
+            for path in user_paths {
+                scope.extend(scope::hidden_under(region, path));
+                scope.extend(
+                    deletions
+                        .iter()
+                        .filter(|deleted| path.is_empty() || operand::at_or_below(deleted, path))
+                        .cloned(),
+                );
+            }
+        }
     }
-    scope.into_iter().collect()
+    // A path below another adds nothing, because that path's pathspec already reaches it;
+    // kept, the deletions below a hidden directory would grow the run's list with the files
+    // (E8, G23).
+    scope
+        .iter()
+        .filter(|path| !operand::ancestors(path).any(|above| scope.contains(above)))
+        .cloned()
+        .collect()
 }
 
 /// The exclusions: each publicly tracked path at or below a scope path, unless the private
@@ -132,6 +135,7 @@ mod tests {
     #[test]
     fn without_a_user_path_the_scope_is_every_region_path_and_every_staged_deletion() {
         let deletions = set(&[b"notes/old.md", b"src/gone.py", b"notes"]);
+        // `notes/old.md` lies below `notes`, whose pathspec already reaches it.
         assert_eq!(
             scope(&paths(&REGION), &deletions, None),
             paths(&[
@@ -140,23 +144,35 @@ mod tests {
                 b".vscode",
                 b"docs/notes.md",
                 b"notes",
-                b"notes/old.md",
                 b"src/gone.py",
             ])
+        );
+        // Whole components: `notes-old/x` is not below `notes`.
+        let beside = set(&[b"notes-old/x", b"notes/a/b"]);
+        assert_eq!(
+            scope(&paths(&[b"notes"]), &beside, None),
+            paths(&[b"notes", b"notes-old/x"])
         );
     }
 
     #[test]
     fn a_user_path_takes_the_hidden_paths_and_the_deletions_at_or_below_it() {
         let region = paths(&REGION);
-        let deletions = set(&[b"notes/old.md", b"docs/gone.md", b"notes-old/x"]);
+        let deletions = set(&[
+            b"notes/old.md",
+            b"notes/sub/z",
+            b"docs/gone.md",
+            b"notes-old/x",
+        ]);
         let scoped = |user: &[&[u8]]| scope(&region, &deletions, Some(&paths(user)));
-        assert_eq!(scoped(&[b"notes"]), paths(&[b"notes", b"notes/old.md"]));
+        // A deletion below a hidden directory adds nothing to it.
+        assert_eq!(scoped(&[b"notes"]), paths(&[b"notes"]));
         assert_eq!(
             scoped(&[b"docs"]),
             paths(&[b"docs/gone.md", b"docs/notes.md"])
         );
-        // A directory below a hidden one is its own scope.
+        // A directory below a hidden one is its own scope, and a deletion within it adds
+        // nothing.
         assert_eq!(scoped(&[b"notes/sub"]), paths(&[b"notes/sub"]));
         assert_eq!(scoped(&[b"docs/gone.md"]), paths(&[b"docs/gone.md"]));
         // Whole components: `notes-old` is not below `notes`.
@@ -170,8 +186,10 @@ mod tests {
         // Several user paths, each path once.
         assert_eq!(
             scoped(&[b"notes", b".vscode", b"notes"]),
-            paths(&[b".vscode", b"notes", b"notes/old.md"])
+            paths(&[b".vscode", b"notes"])
         );
+        // A user path below another names nothing the other does not.
+        assert_eq!(scoped(&[b"notes/sub", b"notes"]), paths(&[b"notes"]));
     }
 
     #[test]

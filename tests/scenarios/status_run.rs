@@ -360,6 +360,65 @@ fn exclusions_over_arg_max_are_refused_with_the_scope_count_and_still_settle() {
     });
 }
 
+/// Deletions staged below a hidden directory, their paths together over `ARG_MAX`: the
+/// hidden directory's pathspec already reaches each, so the run carries the region paths
+/// alone and shows every deletion.
+#[test]
+fn staged_deletions_below_a_hidden_directory_add_nothing_to_the_run() {
+    under_each_release(|s| {
+        let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
+        assert!(limit.status.success());
+        let limit: usize = std::str::from_utf8(&limit.stdout)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        // A few thousand files (`Scale`), each path long enough that the deletions' paths
+        // alone exceed ARG_MAX, in components no filesystem refuses.
+        let count = 2_000;
+        let length = limit / count + 1;
+        let long_path = |index: usize| {
+            let mut path = String::from("notes/");
+            while length - path.len() > 250 {
+                path.push_str(&"d".repeat(199));
+                path.push('/');
+            }
+            let name = format!("{index:07}");
+            path.push_str(&"f".repeat(length - path.len() - name.len()));
+            path + &name
+        };
+        let dir = s.dir().join("workspace");
+        s.attached_project(&dir);
+        write(&dir, ".gitdupe", b"notes\n");
+        for index in 0..count {
+            write(&dir, &long_path(index), b"private\n");
+        }
+        private_add(s, &dir, "notes");
+        private_add(s, &dir, ".gitdupe");
+        private_commit(s, &dir);
+        s.git(["dupe", "rm", "-r", "-q", "notes"])
+            .from(&dir)
+            .succeeds();
+        let expected = private_status(
+            s,
+            &dir,
+            &["--porcelain"],
+            false,
+            false,
+            &[":(top,literal).gitdupe", ":(top,literal)notes"],
+        );
+        assert_eq!(expected.end, End::Code(0), "{expected:?}");
+        let output = s.git(["dupe", "status", "--porcelain"]).from(&dir).run();
+        same_status(&output, &expected);
+        let deletions = output
+            .stdout
+            .split(|&byte| byte == b'\n')
+            .filter(|line| line.starts_with(b"D  notes/"))
+            .count();
+        assert_eq!(deletions, count, "{output:?}");
+    });
+}
+
 #[test]
 fn status_runs_once_and_the_git_run_count_does_not_grow_with_files() {
     under_each_release(|s| {

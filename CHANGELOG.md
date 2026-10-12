@@ -27,6 +27,13 @@ Every change a user of git-dupe would notice, newest first, in the form of
 - The Linux executable is built on Ubuntu 24.04 and needs the GNU C library 2.39 or
   newer, where it needed 2.34; on an older system, install from source.
 
+### Fixed
+
+- `git dupe status` shows Git's status when thousands of private files below a hidden
+  directory have their deletion staged, where it was refused once their paths together
+  no longer fit on one command line; an untracked directory standing where they were is
+  shown as one entry, as Git shows one.
+
 ## [0.2.0] - 2026-10-09
 
 ### Added
