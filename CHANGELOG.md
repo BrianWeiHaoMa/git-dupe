@@ -59,6 +59,9 @@ Every change a user of git-dupe would notice, newest first, in the form of
   the host from the credentials, before the `%2F`, and let the URL through. A `file://`
   URL so spelled is compared by the path after its host as well as by the path Git
   opens, which the encoded `/` moves.
+- `git dupe push`, `pull`, `fetch`, `remote`, and `clone` now refuse a `file://` URL of
+  the project's repository whose path holds `%00`, which Git keeps as written and
+  opens, where they read it as a zero byte and let the URL through.
 
 ## [0.3.0] - 2026-10-12
 

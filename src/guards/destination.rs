@@ -14,12 +14,12 @@
 //!   path, as Git reads it.
 //! - A URL's authority is what stands between its `://` and the first `/` after it,
 //!   bounded before anything is decoded, as RFC 3986 bounds it and the HTTP transport
-//!   reads it; each `%XX` is then decoded in the authority and in the path alike, so that
-//!   an encoded `/` in a credential stays in the credential. Git's own `file://` and
-//!   `ssh://` reading decodes the whole URL first and splits it after (S13): where an
-//!   encoded `/` in a `file://` URL's authority makes the path Git so opens another path
-//!   than the URL's own, the URL has the local forms of both. A word without `://` is
-//!   never decoded.
+//!   reads it; each `%XX` but `%00`, which Git keeps as written, is then decoded in the
+//!   authority and in the path alike, so that an encoded `/` in a credential stays in the
+//!   credential. Git's own `file://` and `ssh://` reading decodes the whole URL first and
+//!   splits it after (S13): where an encoded `/` in a `file://` URL's authority makes the
+//!   path Git so opens another path than the URL's own, the URL has the local forms of
+//!   both. A word without `://` is never decoded.
 //! - A local path has the canonical path of each path Git opens for it: its trailing
 //!   slashes dropped, the path itself, with `.git` appended, and each of those with
 //!   `/.git` appended. A relative one is read from the root and also from the user's
@@ -195,8 +195,9 @@ fn without_trailing_slashes(path: &[u8]) -> &[u8] {
     &path[..end]
 }
 
-/// `%XX` decoded to its byte wherever `XX` are two hexadecimal digits; every other byte
-/// kept.
+/// `%XX` decoded to its byte wherever `XX` are two hexadecimal digits naming a byte other
+/// than zero; every other byte kept. Git keeps `%00` as written, so the path it opens
+/// for a `file://` URL holds those three bytes (S13).
 fn decoded(text: &[u8]) -> Vec<u8> {
     let digit = |byte: u8| char::from(byte).to_digit(16);
     let mut out = Vec::with_capacity(text.len());
@@ -207,6 +208,7 @@ fn decoded(text: &[u8]) -> Vec<u8> {
                 text.get(at + 1).copied().and_then(digit),
                 text.get(at + 2).copied().and_then(digit),
             )
+            && high * 16 + low != 0
         {
             out.push(u8::try_from(high * 16 + low).expect("two hexadecimal digits"));
             at += 3;

@@ -173,6 +173,40 @@ fn a_file_url_names_its_own_path_and_the_path_git_opens_once_it_decodes_the_url_
     });
 }
 
+/// Git decodes every other `%XX` of a URL and keeps `%00` as its three bytes, so a
+/// `file://` URL whose path holds them opens the repository at that path: the project's
+/// remote there, configured as a path or as such a URL, is the place either names, and a
+/// push names it, sending nothing.
+#[test]
+fn a_file_url_keeps_a_percent_escaped_zero_byte_as_git_opens_it() {
+    under_each_release(|s| {
+        let t = s.transfer_workspace("workspace");
+        let public = s.dir().join("public%00.git");
+        s.bare_repository(&public);
+        let path = text(&public).to_owned();
+        let url = format!("file://{path}");
+        for (configured, word) in [(&path, &url), (&url, &path)] {
+            s.git(["remote", "add", "percent", configured])
+                .from(&t.root)
+                .succeeds();
+            refused(s, &t, &t.root, word, "percent");
+            s.git(["remote", "remove", "percent"])
+                .from(&t.root)
+                .succeeds();
+        }
+        s.git(["remote", "add", "percent", &path])
+            .from(&t.root)
+            .succeeds();
+        let pushed = s
+            .git(["dupe", "push", &url, "HEAD:refs/heads/leak"])
+            .from(&t.root)
+            .run();
+        refusal(&pushed, &[b"git dupe git", b"percent"]);
+        let refs = s.git(["for-each-ref"]).from(&public).succeeds();
+        assert!(refs.stdout.is_empty(), "{refs:?}");
+    });
+}
+
 /// Both URL records and the push URL are places of their public remote.
 #[test]
 fn every_url_of_many_is_public() {

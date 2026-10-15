@@ -76,6 +76,19 @@ fn each_percent_escape_after_a_scheme_is_decoded_in_the_authority_and_the_path()
 }
 
 #[test]
+fn a_percent_escape_of_the_zero_byte_stays_as_written() {
+    // Git decodes every other `%XX` of a URL and keeps `%00` as its three bytes, so the
+    // path it opens for a `file://` URL holds them, as the other forms do.
+    assert_eq!(
+        of("ssh://ex%00ample.com/a%00b.git"),
+        [url_form("ex%00ample.com", "/a%00b")]
+    );
+    let mut expected = vec![url_form("", "/srv/p%00q")];
+    expected.extend(local_forms("/srv/p%00q.git"));
+    assert_eq!(of("file:///srv/p%00q.git"), expected);
+}
+
+#[test]
 fn the_authority_ends_at_the_first_slash_before_anything_is_decoded() {
     let public = url_form("localhost", "/x/public");
     // An encoded `/`, in either case, or `?` or `#` in a credential is credential bytes:
