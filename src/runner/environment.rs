@@ -48,6 +48,21 @@ pub enum Against<'p> {
     PrivateWithoutWorkTree { git_directory: &'p Path },
 }
 
+impl Against<'_> {
+    /// The private Git directory a run names, where a directory stands there: a private
+    /// repository, with state to read. None for a public run, or where nothing, or no
+    /// directory, stands at that path, as in a worktree no `init` has attached.
+    pub fn private_repository(&self) -> Option<&Path> {
+        match self {
+            Against::Private { git_directory, .. }
+            | Against::PrivateWithoutWorkTree { git_directory } => {
+                Some(*git_directory).filter(|directory| directory.is_dir())
+            }
+            Against::Public => None,
+        }
+    }
+}
+
 /// The variables that locate a repository, an index, or an object store, other than
 /// `GIT_DIR` and `GIT_WORK_TREE`, which a private run sets (G10). Git reads
 /// `GIT_REFERENCE_BACKEND`, where references are kept, from 2.54.0 (S15).

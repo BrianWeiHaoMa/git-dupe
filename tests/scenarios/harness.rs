@@ -2,6 +2,7 @@
 //! the fixtures and assertions scenarios share. A scenario file starts from what is here
 //! and copies none of it; what several scenarios need is added here.
 
+mod advice;
 mod aliases;
 mod attached;
 mod clean;
@@ -32,6 +33,7 @@ mod tree;
 mod watched_runs;
 mod worktrees;
 
+pub use advice::{hinted, unhinted};
 pub use aliases::{global_alias, private_alias};
 pub use attached::{
     Region, completed_hint, daily_edited, daily_state, dupe_succeeds, gitdupe_written_and_staged,

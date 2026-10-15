@@ -75,7 +75,9 @@ fn sequence(command: &'static str) -> Vec<&'static str> {
         // (`Holds/G16`).
         "clean" => runs.extend(["ls-files", "clean"]),
         // The alias lookup of a word git-dupe neither adds, changes, nor guards
-        // (`Holds/G19`), then the command itself.
+        // (`Holds/G19`), then the command itself; `switch` between branches is asked
+        // before and after whether it leaves a branch for a detached `HEAD`.
+        "switch" => runs.extend(["config", "symbolic-ref", "switch", "symbolic-ref"]),
         word => runs.extend(["config", word]),
     }
     // Settle: the hidden paths' private listing, the public listing under the region

@@ -84,7 +84,7 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
         _ => None,
     };
     let places = places::take(facts)?;
-    let private = moving.filter(|_| names_a_directory(against));
+    let private = moving.filter(|_| against.private_repository().is_some());
     let configuration = match private {
         Some(_) => places::asked(Run::against(against, ["config", "-z", "--list"]), false)?,
         None => Vec::new(),
@@ -137,16 +137,6 @@ pub fn after(then: Then, ended: &Outcome) {
 /// killed included. A run that did not start is no run.
 fn hinted(then: Then, ended: &Outcome) -> bool {
     then == Then::HintUnlessSucceeded && matches!(ended, Outcome::Git(end) if *end != End::Code(0))
-}
-
-/// Whether the Git directory `against` names is a directory: a private repository that
-/// can hold remotes, a default, and a branch.
-fn names_a_directory(against: Against) -> bool {
-    match against {
-        Against::Private { git_directory, .. }
-        | Against::PrivateWithoutWorkTree { git_directory } => git_directory.is_dir(),
-        Against::Public => false,
-    }
 }
 
 /// The answer of the private `symbolic-ref -q HEAD`: its line on a branch, nothing on a

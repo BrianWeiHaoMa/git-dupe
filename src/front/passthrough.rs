@@ -5,17 +5,21 @@
 //! - The run is its words after `-c help.autocorrect=0` and nothing else of git-dupe's,
 //!   from the user's directory with every stream inherited, so that output, color,
 //!   pager, editor, hooks, prompts, and the exit status are Git's own (G19, F9). No word
-//!   of it is read here. Its paths are the user's, so the pathspec variables of a global
-//!   option before `dupe` reach it. A command an alias chain reached also carries the
-//!   chain's prefix, which the runner puts before every run once the chain is dispatched.
+//!   of it is read here; `advice` reads a passed word's for the hint after its run. Its
+//!   paths are the user's, so the pathspec variables of a global option before `dupe`
+//!   reach it. A command an alias chain reached also carries the chain's prefix, which
+//!   the runner puts before every run once the chain is dispatched.
 //! - `Passed` is every command that runs so: a word F6 does not name that step (4) passes
 //!   through, its words as received and no prefix (`alias`); `stash` once its guard has
 //!   passed (G17); `push`, `pull`, `fetch`, and `remote` once nothing they would reach
 //!   names a public place (G18, `transfer`); and `git dupe git`'s words, guarded by
 //!   nothing (G20). Settle is not their business: each returns into the sequence, which
-//!   settles. Of git-dupe's own lines only the guard's may follow the run, before
-//!   settle's warnings: the hint of a failed `push` whose configuration chooses no
-//!   remote (`transfer`).
+//!   settles. Of git-dupe's own lines only a hint may follow the run, before settle's
+//!   warnings: after a failed `push` whose configuration chooses no remote (`transfer`),
+//!   and after a word passed through whose outcome Git's advice names a plain `git`
+//!   command for (`advice`), which reads the words Git runs for its help request, an
+//!   alias's expansion included, and asks nothing where no private repository stands;
+//!   never after `stash` or `git dupe git` (G20).
 //! - Where no workspace is attached, a help request after a word passed through, after
 //!   `stash`, or after one of the four is the only thing that runs, unread, after the
 //!   same guard (`Holds/G24`). The four's guard compares there too, from the facts of
@@ -27,6 +31,7 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 
+use super::advice;
 use super::outcome::{self, Outcome};
 use super::stash;
 use super::transfer;
@@ -37,8 +42,10 @@ use crate::runner::{Against, Run};
 /// made of.
 #[derive(Clone, Copy)]
 pub enum Passed<'w> {
-    /// A word F6 does not name that passes through, then the words after it, as received.
-    Word(&'w [OsString]),
+    /// A word F6 does not name that passes through, then the words after it, as received;
+    /// then the words the hint after its run reads: the same words, or, where an alias
+    /// chain reached the command Git runs, the words it reached (`alias`).
+    Word(&'w [OsString], &'w [OsString]),
     /// `stash`, then the words after it, as received.
     Stash(&'w [OsString]),
     /// `push`, `pull`, `fetch`, or `remote`, then the words after it, as received.
@@ -66,7 +73,13 @@ impl Passed<'_> {
                     None => run(against, words),
                 }
             }
-            Passed::Word(words) | Passed::Stash(words) | Passed::Git(words) => run(against, words),
+            Passed::Word(words, read) => {
+                let then = advice::before(read, against);
+                let ended = run(against, words);
+                advice::after(then, &ended, against);
+                ended
+            }
+            Passed::Stash(words) | Passed::Git(words) => run(against, words),
         }
     }
 
@@ -79,7 +92,7 @@ impl Passed<'_> {
     pub fn asks_for_help(self) -> bool {
         let help = |word: &OsString| matches!(word.as_bytes(), b"-h" | b"--help");
         match self {
-            Passed::Word(words) | Passed::Stash(words) => words[1..]
+            Passed::Word(words, _) | Passed::Stash(words) => words[1..]
                 .iter()
                 .take_while(|word| word.as_bytes() != b"--")
                 .any(help),
@@ -114,7 +127,7 @@ mod tests {
             &["nosuch", "-h"],
         ] {
             let asking = words(asking);
-            assert!(Passed::Word(&asking).asks_for_help(), "{asking:?}");
+            assert!(Passed::Word(&asking, &asking).asks_for_help(), "{asking:?}");
             assert!(Passed::Stash(&asking).asks_for_help(), "{asking:?}");
             assert!(Passed::Transfer(&asking).asks_for_help(), "{asking:?}");
         }
@@ -126,7 +139,10 @@ mod tests {
             &["log", "--help=x"],
         ] {
             let not_asking = words(not_asking);
-            assert!(!Passed::Word(&not_asking).asks_for_help(), "{not_asking:?}");
+            assert!(
+                !Passed::Word(&not_asking, &not_asking).asks_for_help(),
+                "{not_asking:?}"
+            );
             assert!(
                 !Passed::Stash(&not_asking).asks_for_help(),
                 "{not_asking:?}"
@@ -139,7 +155,7 @@ mod tests {
         // After a `--`, a transfer command still asks: Git may take the `--` as a value.
         for after_the_end in [&["log", "--", "-h"][..], &["push", "-o", "--", "--help"]] {
             let after_the_end = words(after_the_end);
-            assert!(!Passed::Word(&after_the_end).asks_for_help());
+            assert!(!Passed::Word(&after_the_end, &after_the_end).asks_for_help());
             assert!(!Passed::Stash(&after_the_end).asks_for_help());
             assert!(Passed::Transfer(&after_the_end).asks_for_help());
         }

@@ -8,60 +8,23 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Runs, Scenario, Transfer, holds, names, run_traced, text, under_each_release,
+    End, Runs, Scenario, Transfer, hinted, holds, run_traced, text, under_each_release, unhinted,
 };
 
 /// The words of the hint that no line of Git's holds.
 const HINT: &[u8] = b"'git dupe remote add <name> <url>'";
 
-/// `git dupe <words>` from the root `from`, and Git's own run of the words against the
-/// private repository there, after `-c help.autocorrect=0` as git-dupe runs them, in the
-/// same state; `git dupe git <words>`, guarded by nothing, ends as Git's own run (G20).
-/// The words leave the state as it was.
-fn ours_and_gits(s: &Scenario, from: &Path, words: &[&str]) -> (Output, Output) {
-    let gits = s
-        .private(from)
-        .git(
-            ["-c", "help.autocorrect=0"]
-                .into_iter()
-                .chain(words.iter().copied()),
-        )
-        .run();
-    let unguarded = s
-        .git(["dupe", "git"].into_iter().chain(words.iter().copied()))
-        .from(from)
-        .run();
-    assert_eq!(unguarded, gits, "git dupe git {words:?}");
-    let ours = s
-        .git(["dupe"].into_iter().chain(words.iter().copied()))
-        .from(from)
-        .run();
-    (ours, gits)
-}
-
-/// `git dupe <words>` ends as Git's own run of them, with every byte of its output, and
-/// then the one hint, before anything settle adds.
-fn hinted(s: &Scenario, from: &Path, words: &[&str]) {
-    let (ours, gits) = ours_and_gits(s, from, words);
-    assert_ne!(gits.end, End::Code(0), "{words:?}: {gits:?}");
-    assert_eq!(ours.end, gits.end, "{words:?}: {ours:?}");
-    assert_eq!(ours.stdout, gits.stdout, "{words:?}: {ours:?}");
-    let hint = ours
-        .stderr
-        .strip_prefix(gits.stderr.as_slice())
-        .and_then(|after| after.strip_prefix(b"hint: "))
-        .and_then(|after| after.strip_suffix(b"\n"))
-        .filter(|line| !line.contains(&b'\n'))
-        .unwrap_or_else(|| panic!("{words:?}: not Git's output and one hint: {ours:?}"));
-    names(hint, HINT);
-    names(hint, b"'git dupe push -u <name> <branch>'");
-}
-
-/// `git dupe <words>` ends as Git's own run of them, with every byte of its output and
-/// nothing of git-dupe's.
-fn unhinted(s: &Scenario, from: &Path, words: &[&str]) {
-    let (ours, gits) = ours_and_gits(s, from, words);
-    assert_eq!(ours, gits, "{words:?}");
+/// `git dupe <words>` from the root `root` ends as Git's own run of them, which did not
+/// exit 0, with every byte of its output, and then the one hint, before anything settle
+/// adds.
+fn push_hinted(s: &Scenario, root: &Path, words: &[&str]) {
+    let ours = hinted(
+        s,
+        root,
+        words,
+        &[HINT, b"'git dupe push -u <name> <branch>'"],
+    );
+    assert_ne!(ours.end, End::Code(0), "{words:?}: {ours:?}");
 }
 
 /// The command word of each run git-dupe started itself, in order.
@@ -89,10 +52,10 @@ fn a_failed_push_with_no_remote_chosen_ends_with_one_hint() {
         let t = s.transfer_workspace("workspace");
         let root = &t.root;
         let before = t.everything();
-        hinted(s, root, &["push"]);
+        push_hinted(s, root, &["push"]);
         before.unchanged();
         config(s, &t, &["alias.p", "push"]);
-        hinted(s, root, &["p"]);
+        push_hinted(s, root, &["p"]);
         // A repository given, a help request, or a `-h` or `--help` Git takes as a value
         // of `-o` before it pushes: Git's own output alone.
         for words in [
@@ -128,11 +91,11 @@ fn a_failed_push_with_no_remote_chosen_ends_with_one_hint() {
         s.git(["dupe", "checkout", "-q", "--detach"])
             .from(root)
             .succeeds();
-        hinted(s, root, &["push"]);
+        push_hinted(s, root, &["push"]);
         s.git(["dupe", "checkout", "-q", "--orphan", "unborn"])
             .from(root)
             .succeeds();
-        hinted(s, root, &["push"]);
+        push_hinted(s, root, &["push"]);
     });
 }
 
@@ -146,7 +109,7 @@ fn the_hint_follows_whichever_remote_git_takes_and_no_chosen_one() {
             .from(root)
             .succeeds();
         // Git takes `backup`, the only remote, and fails for want of an upstream.
-        hinted(s, root, &["push"]);
+        push_hinted(s, root, &["push"]);
         config(s, &t, &["push.default", "nothing"]);
         let trace = s.dir().join("trace");
         let words = ["dupe", "push"];
@@ -200,7 +163,7 @@ fn the_hint_follows_whichever_remote_git_takes_and_no_chosen_one() {
         s.git(["dupe", "remote", "add", "other", text(&other)])
             .from(root)
             .succeeds();
-        hinted(s, root, &["push"]);
+        push_hinted(s, root, &["push"]);
     });
 }
 

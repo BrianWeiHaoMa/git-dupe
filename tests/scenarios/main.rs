@@ -82,6 +82,7 @@ mod offered_commands;
 mod own_lines;
 mod own_runs;
 mod passthrough;
+mod passthrough_advice;
 mod passthrough_settings;
 mod plain_git;
 mod private_repository;

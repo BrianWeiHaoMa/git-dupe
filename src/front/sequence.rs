@@ -285,7 +285,8 @@ fn answered_unlocated(
 /// with the lookups made `against` where its run would be made (`alias`), or passed through
 /// unresolved where something other than a directory stands at the private Git directory
 /// (`obstructed`). A chain's prefix is carried before the command it reaches is read from
-/// the expansion, which `expanded` keeps, as step (2) reads that command typed.
+/// the expansion, which `expanded` keeps, as step (2) reads that command typed; it keeps
+/// too the words a chain that passes through reaches, for the hint after the run.
 fn through_aliases<'w>(
     words: &'w [OsString],
     against: Against,
@@ -299,7 +300,13 @@ fn through_aliases<'w>(
     };
     match resolved {
         Err(ended) => Reached::Failed(ended),
-        Ok(Resolved::PassThrough) => Reached::Read(None, Ok(Read::Passed(Passed::Word(words)))),
+        Ok(Resolved::PassThrough) => {
+            Reached::Read(None, Ok(Read::Passed(Passed::Word(words, words))))
+        }
+        Ok(Resolved::PassThroughReaching(reached)) => {
+            let read = expanded.insert(reached);
+            Reached::Read(None, Ok(Read::Passed(Passed::Word(words, read))))
+        }
         Ok(Resolved::Dispatch {
             command,
             words: dispatched,

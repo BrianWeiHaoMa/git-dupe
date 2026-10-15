@@ -12,7 +12,8 @@
 //!   version line, written by `outcome::print`.
 //! - `commands` holds F6's words, each of which has a handler here. A word F6 does not
 //!   name is resolved through the aliases by `alias`, and either runs as Git itself
-//!   through `passthrough` or goes on as the command of F6 its chain reaches, through that
+//!   through `passthrough`, the hint of `advice` after its run where Git's advice names a
+//!   plain `git` command, or goes on as the command of F6 its chain reaches, through that
 //!   command's reading, table, guard, or refusal; `stash`, `push`, `pull`, `fetch`, and
 //!   `remote` run through `passthrough` after their guards, the last four's comparing
 //!   what they would reach with the public places (`transfer`, `places`), as `clone`
@@ -21,6 +22,7 @@
 //!   `eprintln!`, which panic when the write fails.
 
 mod add;
+mod advice;
 mod alias;
 mod clean;
 mod clone;

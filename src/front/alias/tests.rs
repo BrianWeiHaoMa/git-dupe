@@ -218,11 +218,10 @@ fn a_chain_git_cannot_follow_passes_the_typed_words_through() {
         ("blanks", "   "),
         ("lead", " status"),
         ("opts", "-c x.y=1"),
-        ("down", "log --oneline"),
     ]);
     config.records.push(("novalue", None));
     for typed in [
-        "l1", "self", "bad", "env", "q", "v", "empty", "blanks", "lead", "opts", "down", "novalue",
+        "l1", "self", "bad", "env", "q", "v", "empty", "blanks", "lead", "opts", "novalue",
     ] {
         assert_eq!(
             resolved(&mut config, &[typed]),
@@ -230,6 +229,57 @@ fn a_chain_git_cannot_follow_passes_the_typed_words_through() {
             "{typed}"
         );
     }
+}
+
+#[test]
+fn a_chain_followed_to_another_command_carries_the_words_git_runs() {
+    let mut config = configured(&[
+        ("co", "checkout"),
+        ("cod", "checkout --detach"),
+        ("a", "b one"),
+        ("b", "-c x.y=1 rebase two"),
+        ("lg", "log"),
+        ("log", "!echo"),
+        ("sw", "show -1"),
+        ("show", "commit"),
+        ("x", "sh"),
+        ("sh", "!git checkout HEAD~1"),
+    ]);
+    let cases: [(&[&str], &[&str]); 6] = [
+        (&["co", "HEAD~1"], &["checkout", "HEAD~1"]),
+        (&["cod", "HEAD~1"], &["checkout", "--detach", "HEAD~1"]),
+        // The innermost expansion first, its options in no word.
+        (&["a", "three"], &["rebase", "two", "one", "three"]),
+        // A builtin runs before its own alias, a `!` one or one only some releases read.
+        (&["lg", "-1"], &["log", "-1"]),
+        (&["sw"], &["show", "-1"]),
+        // A `!` alias reached through a link: what Git runs is no command word.
+        (&["x"], &["sh"]),
+    ];
+    for (typed, words) in cases {
+        assert_eq!(
+            resolved(&mut config, typed),
+            Resolved::PassThroughReaching(owned(words)),
+            "{typed:?}"
+        );
+    }
+    // No link followed: the typed words alone.
+    for typed in [&["sh"][..], &["checkout", "HEAD~1"], &["log", "-1"]] {
+        assert_eq!(
+            resolved(&mut config, typed),
+            Resolved::PassThrough,
+            "{typed:?}"
+        );
+    }
+    // A chain followed to a command Git runs, with options of its own, as a chain that
+    // ends anywhere else: one lookup per link, the list asked once.
+    let mut config = configured(&[("down", "-c x.y=1 log --oneline")]);
+    assert_eq!(
+        resolved(&mut config, &["down", "-2"]),
+        Resolved::PassThroughReaching(owned(&["log", "--oneline", "-2"]))
+    );
+    assert_eq!(config.lookups, [owned(&[]), owned(&["-c", "x.y=1"])]);
+    assert_eq!(config.lists, 1);
 }
 
 #[test]

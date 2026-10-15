@@ -15,7 +15,7 @@ impl Link {
     /// from it: a `!` alias; an expansion Git refuses; one whose leading options are not
     /// all of those Git accepts inside an alias — `-c` and `--config-env` with their
     /// values, `-p` or `--paginate`, `--exec-path=<path>`, and `-C ""` (S11) — or leave no
-    /// command word.
+    /// command word, an empty first word, which Git refuses as a command, among them.
     pub fn of(value: &[u8]) -> Option<Link> {
         if value.starts_with(b"!") {
             return None;
@@ -43,6 +43,7 @@ impl Link {
                     options.push(word);
                 }
                 option if option.starts_with(b"-") => return None,
+                b"" => return None,
                 _ => {
                     return Some(Link {
                         options,
@@ -170,6 +171,11 @@ mod tests {
             "-c x.y=1",
             "-C",
             "status 'x",
+            "",
+            "   ",
+            " status",
+            "'' status",
+            "-c x.y=1 '' status",
         ] {
             assert_eq!(Link::of(value.as_bytes()), None, "{value:?}");
         }

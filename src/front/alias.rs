@@ -16,7 +16,11 @@
 //! - It ends in one of three ways. The words as received pass through, unread: a word
 //!   without a record, a `!` alias, and every chain that cannot be followed — an expansion
 //!   Git refuses, one that begins with a global option Git does not run a command after, a
-//!   loop — so that Git runs it or reports it. A chain that reaches a command of F6 is
+//!   loop — so that Git runs it or reports it. A chain followed to a word that leads to
+//!   no command of F6 passes them through too, and carries the words Git's expansion
+//!   runs, assembled as for a dispatch, for the hint after the run to read (`advice`):
+//!   every command such a hint follows is a builtin, which Git runs before an alias of its
+//!   name, so the chain's last word is what ran. A chain that reaches a command of F6 is
 //!   dispatched as that command. A word the listed releases do not all read as the same
 //!   alias never dispatches: when a chain from any of its records reaches a command of F6,
 //!   it is the usage error G19 names, and otherwise its words pass through. A question Git
@@ -46,6 +50,11 @@ mod expansion;
 pub enum Resolved {
     /// The words as received run as Git itself, without a prefix.
     PassThrough,
+    /// The words as received run as Git itself, without a prefix, and Git's expansion of
+    /// the chain they begin with runs these: the chain's last command word, then what each
+    /// expansion left after its command word, the innermost first, then the words typed
+    /// after the alias.
+    PassThroughReaching(Vec<OsString>),
     /// The command of F6 a chain reached: its words, the command's own word first, and the
     /// global options the chain's expansions began with, in order.
     Dispatch {
@@ -160,13 +169,13 @@ fn resolve_with<Q: Questions>(
     let mut left: Vec<Vec<Vec<u8>>> = Vec::new();
     loop {
         let value = match resolver.reading(&word, &prefix)? {
-            Reading::Command | Reading::Shell => return Ok(Resolved::PassThrough),
+            Reading::Command | Reading::Shell => return Ok(passed_through(word, left, after)),
             Reading::Differs(values) => {
                 seen.push(word.clone());
                 return Ok(if resolver.any_reaches(&values, &prefix, &seen)? {
                     Resolved::Ambiguous(word)
                 } else {
-                    Resolved::PassThrough
+                    passed_through(word, left, after)
                 });
             }
             Reading::Plain(value) => value,
@@ -184,17 +193,10 @@ fn resolve_with<Q: Questions>(
             if !carried {
                 resolver.questions.aliases(&prefix)?;
             }
-            // Git puts each expansion in front of what remains, the outermost first.
-            let words = [command.word().to_vec()]
-                .into_iter()
-                .chain(link.rest)
-                .chain(left.into_iter().rev().flatten())
-                .map(OsString::from_vec)
-                .chain(after.iter().cloned())
-                .collect();
+            left.push(link.rest);
             return Ok(Resolved::Dispatch {
                 command,
-                words,
+                words: expanded(command.word().to_vec(), left, after),
                 prefix,
             });
         }
@@ -203,6 +205,29 @@ fn resolve_with<Q: Questions>(
         }
         left.push(link.rest);
         word = link.command;
+    }
+}
+
+/// The words of a chain that reached `word`, which Git runs as a command: `word`, then
+/// `left`, what each expansion left after its command word, the outermost first, then
+/// `after`, the words typed after the alias. Git puts each expansion in front of what
+/// remains, so the innermost expansion's words come first.
+fn expanded(word: Vec<u8>, left: Vec<Vec<Vec<u8>>>, after: &[OsString]) -> Vec<OsString> {
+    [word]
+        .into_iter()
+        .chain(left.into_iter().rev().flatten())
+        .map(OsString::from_vec)
+        .chain(after.iter().cloned())
+        .collect()
+}
+
+/// The words as received passing through at `word`: as typed where no link was followed,
+/// and otherwise with the words the chain reached.
+fn passed_through(word: Vec<u8>, left: Vec<Vec<Vec<u8>>>, after: &[OsString]) -> Resolved {
+    if left.is_empty() {
+        Resolved::PassThrough
+    } else {
+        Resolved::PassThroughReaching(expanded(word, left, after))
     }
 }
 
