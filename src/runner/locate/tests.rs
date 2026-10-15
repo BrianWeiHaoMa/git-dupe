@@ -177,6 +177,35 @@ fn a_directory_by_lstat_is_never_a_link_to_one() {
 }
 
 #[test]
+fn a_nested_repository_is_a_directory_holding_a_git_entry_of_any_kind() {
+    let root = standing("nested-repository-at");
+    for (path, entry) in [
+        ("clone", "dir"),
+        ("checkout", "file"),
+        ("broken", "dangling"),
+    ] {
+        let git = root.join(path).join(".git");
+        fs::create_dir_all(root.join(path)).unwrap();
+        match entry {
+            "dir" => fs::create_dir(&git).unwrap(),
+            "file" => fs::write(&git, b"").unwrap(),
+            _ => std::os::unix::fs::symlink("nowhere", &git).unwrap(),
+        }
+        assert!(nested_repository_at(&root, path.as_bytes()), "{path}");
+    }
+    // A link to a nested repository is none, nor is a directory without the entry.
+    std::os::unix::fs::symlink("clone", root.join("to-clone")).unwrap();
+    for path in [&b"to-clone"[..], b"directory", b"file", b"nothing"] {
+        assert!(
+            !nested_repository_at(&root, path),
+            "{:?}",
+            OsStr::from_bytes(path)
+        );
+    }
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn paths_are_bytes() {
     let workspace = read(b"/w/caf\xe9/.git/worktrees/x\n/w/caf\xe9/.git\n/w/x\xff\n\n");
     assert_eq!(

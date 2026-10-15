@@ -8,7 +8,8 @@
 //!   user's, so it carries `-c help.autocorrect=0` as every such run does (`runner`).
 //! - Every pathspec of the run is git-dupe's (`Composition/Guards`), so the run is marked
 //!   as having its own paths and no pathspec setting before `dupe` reaches it (G10, G19).
-//!   What confines it is decided in `guards::status` over the listings taken here.
+//!   What confines it is decided in `guards::status` over the listings taken here and,
+//!   for each exclusion, whether `lstat` finds a nested repository at it.
 
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
@@ -19,7 +20,7 @@ use super::table::{Entry, Fault, Read, Value};
 use crate::guards::operand::{self, Cleaned};
 use crate::guards::{pathspec, status as confinement};
 use crate::keeper::{self, GITDUPE};
-use crate::runner::locate::Workspace;
+use crate::runner::locate::{Workspace, nested_repository_at};
 use crate::runner::{Failure, Run};
 
 const UNTRACKED_FILES: Entry = Entry::both(b'u', "untracked-files", Value::Attached);
@@ -122,7 +123,12 @@ pub fn status(workspace: &Workspace, read: &Read, paths: Option<&[Vec<u8>]>) -> 
     }
     words.push("--".into());
     words.extend(confined);
-    words.extend(exclusions.iter().map(|path| confinement::excluded(path)));
+    let root = workspace.root();
+    words.extend(
+        exclusions
+            .iter()
+            .map(|path| confinement::excluded(path, nested_repository_at(root, path))),
+    );
 
     let private = workspace.private_directory();
     match Run::private(&private, workspace.root(), words)

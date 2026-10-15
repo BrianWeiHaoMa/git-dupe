@@ -1,7 +1,8 @@
 //! What confines `status` (G12, `Holds/G12`): the scope, the paths its run is given, and
 //! the exclusions, the publicly tracked paths under the scope that its run leaves out.
-//! Both are decided over listings the handler took, by the ancestor test alone (R9): no
-//! pattern is matched and nothing is asked of Git here.
+//! Both are decided over listings the handler took, by the ancestor test alone (R9), and
+//! an exclusion's form over what the handler found standing at it: no pattern is matched
+//! and nothing is asked of Git here.
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -14,9 +15,16 @@ use super::scope;
 /// below it (`Composition/Guards`). A literal exclusion would also leave out a staged
 /// deletion below the path, and the untracked and ignored files under a directory standing
 /// where the public index holds a file, which G12 shows; where a file or nothing stands at
-/// the path the two leave out the same.
-pub fn excluded(path: &[u8]) -> OsString {
-    pathspec::top_glob_exclude_exact(path)
+/// the path the two leave out the same. Where a nested repository stands at the path, a
+/// submodule's checkout among them, the path and everything below it: Git's walk reports
+/// such a directory as one untracked entry at the path, which the path alone does not
+/// leave out, and G12 lists none of what stands there (S8).
+pub fn excluded(path: &[u8], nested_repository: bool) -> OsString {
+    if nested_repository {
+        pathspec::top_literal_exclude(path)
+    } else {
+        pathspec::top_glob_exclude_exact(path)
+    }
 }
 
 /// The scope: without user paths, every region path and every staged deletion; with them,
@@ -213,9 +221,13 @@ mod tests {
     }
 
     #[test]
-    fn every_exclusion_leaves_out_the_path_alone() {
+    fn an_exclusion_leaves_out_the_path_alone_unless_a_nested_repository_stands_there() {
         for path in [&b"notes/sub"[..], b"notes/shared.md", b"h"] {
-            assert_eq!(excluded(path), pathspec::top_glob_exclude_exact(path));
+            assert_eq!(
+                excluded(path, false),
+                pathspec::top_glob_exclude_exact(path)
+            );
+            assert_eq!(excluded(path, true), pathspec::top_literal_exclude(path));
         }
     }
 

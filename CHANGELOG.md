@@ -16,7 +16,7 @@ Every change a user of git-dupe would notice, newest first, in the form of
   a `pull` on a branch with no upstream, a `pull` that finds divergent branches with no
   way to reconcile them configured, and an `add` of a path the private repository
   ignores, `git dupe` now ends with a `hint:` naming the `git dupe` commands to go on
-  with, such as `git dupe rebase --continue`, `git dupe push -u origin main`, or
+  with, such as `git dupe rebase --continue`, `git dupe push -u origin HEAD`, or
   `git dupe add -f <path>`, because Git's own advice there names plain `git` commands,
   which act on the project's repository. Git's output and exit status are unchanged,
   and the hint also follows such a command reached through an alias. The manual page
@@ -51,7 +51,9 @@ Every change a user of git-dupe would notice, newest first, in the form of
 - `git dupe status` now shows the untracked and ignored files under a directory that
   stands, below a hidden path, where the project's Git tracks a file, as when a draft
   directory replaces a teammate's file, where it left out the directory and everything
-  in it; the project's file itself is still not listed.
+  in it; the project's file itself is still not listed, and a directory holding a
+  `.git` entry that stands at such a path, as a submodule's checkout does, is not
+  listed as untracked.
 - `git dupe push`, `pull`, `fetch`, `remote`, and `clone` now refuse a URL of the
   project's remote whose credentials hold an encoded `/`, as
   `https://reader:p%2Fss@example.com/team/project.git` does, and every other spelling

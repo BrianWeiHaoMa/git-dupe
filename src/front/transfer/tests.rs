@@ -4,10 +4,13 @@ fn git(code: u8) -> Outcome {
     Outcome::Git(End::Code(code))
 }
 
-fn upstream(remote: &str, branch: &str) -> Upstream {
+fn upstream(remote: &str) -> Upstream {
+    upstream_of(remote.as_bytes())
+}
+
+fn upstream_of(remote: &[u8]) -> Upstream {
     Upstream {
-        remote: remote.as_bytes().to_vec(),
-        branch: branch.as_bytes().to_vec(),
+        remote: remote.to_vec(),
     }
 }
 
@@ -27,7 +30,7 @@ fn the_no_remote_hint_follows_a_run_that_did_not_exit_0() {
 
 #[test]
 fn a_push_hints_at_the_upstream_after_128_and_at_a_rejection_after_1() {
-    let without = Then::Push(Some(upstream("origin", "main")));
+    let without = Then::Push(Some(upstream("origin")));
     let upstream_hint = hint(&without, &git(128)).unwrap();
     assert!(
         upstream_hint.starts_with(b"the current private branch has no upstream"),
@@ -83,45 +86,51 @@ fn a_pull_hints_at_its_upstream_first_and_at_reconciling_after_128_alone() {
 }
 
 #[test]
-fn the_upstream_hint_names_the_remote_and_branch_a_shell_takes_as_written() {
-    let named = |remote: &str, branch: &str| {
-        String::from_utf8(no_upstream(&upstream(remote, branch))).unwrap()
-    };
-    for (remote, branch, command) in [
-        ("origin", "main", "'git dupe push -u origin main'"),
+fn the_upstream_hint_names_the_remote_as_a_shell_reads_it_back_and_head() {
+    let named = |remote: &[u8]| no_upstream(&upstream_of(remote));
+    for (remote, command) in [
+        (&b"origin"[..], &b"'git dupe push -u origin HEAD'"[..]),
         (
-            "/srv/private.git",
-            "topic/x",
-            "'git dupe push -u /srv/private.git topic/x'",
+            b"/srv/private.git",
+            b"'git dupe push -u /srv/private.git HEAD'",
         ),
         (
-            "git@host:me/p.git",
-            "v1.2",
-            "'git dupe push -u git@host:me/p.git v1.2'",
+            b"git@host:me/p.git",
+            b"'git dupe push -u git@host:me/p.git HEAD'",
         ),
-        // Empty, read as an option, or holding a byte a shell reads otherwise.
-        ("", "main", "'git dupe push -u <remote> main'"),
-        ("-x", "main", "'git dupe push -u <remote> main'"),
-        ("my remote", "main", "'git dupe push -u <remote> main'"),
-        ("it's", "main", "'git dupe push -u <remote> main'"),
-        ("~/private", "main", "'git dupe push -u <remote> main'"),
-        ("origin", "a;b", "'git dupe push -u origin <branch>'"),
-        // A branch `+topic`, which Git would read as forcing a push of `topic`.
-        ("origin", "+topic", "'git dupe push -u origin <branch>'"),
-        ("origin", "$HOME", "'git dupe push -u origin <branch>'"),
+        // `push` reads a first word that is no option as the repository, `+` and all.
+        (b"+backup", b"'git dupe push -u +backup HEAD'"),
+        // A byte above ASCII is no shell's concern.
+        (
+            "caf\u{e9}".as_bytes(),
+            "'git dupe push -u caf\u{e9} HEAD'".as_bytes(),
+        ),
+        // Quoted where a shell would read a byte otherwise.
+        (b"my remote", b"'git dupe push -u \"my remote\" HEAD'"),
+        (b"it's", b"'git dupe push -u \"it's\" HEAD'"),
+        (b"$HOME", b"'git dupe push -u \"\\$HOME\" HEAD'"),
+        // Empty, read as an option, or breaking the line: the placeholder.
+        (b"", b"'git dupe push -u <remote> HEAD'"),
+        (b"-x", b"'git dupe push -u <remote> HEAD'"),
+        (b"a\nb", b"'git dupe push -u <remote> HEAD'"),
     ] {
-        let line = named(remote, branch);
-        assert!(line.contains(command), "{line}: {command}");
+        let line = named(remote);
+        assert!(
+            line.windows(command.len()).any(|window| window == command),
+            "{}: {}",
+            line.escape_ascii(),
+            command.escape_ascii()
+        );
     }
 }
 
 #[test]
 fn each_hint_is_one_line_naming_the_git_dupe_commands_and_the_plain_ones() {
-    let upstream = no_upstream(&upstream("origin", "main"));
+    let upstream = no_upstream(&upstream("origin"));
     for (hint, parts) in [
         (
             &upstream[..],
-            &["'git dupe push -u origin main'", "plain 'git push'"][..],
+            &["'git dupe push -u origin HEAD'", "plain 'git push'"][..],
         ),
         (
             REJECTED,

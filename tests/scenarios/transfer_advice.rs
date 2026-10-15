@@ -14,7 +14,7 @@ use crate::harness::{
     under_each_release, unhinted, without_maintenance, write, write_executable,
 };
 
-const UPSTREAM: &[u8] = b"'git dupe push -u origin main'";
+const UPSTREAM: &[u8] = b"'git dupe push -u origin HEAD'";
 const REJECTED: [&[u8]; 2] = [b"'git dupe pull'", b"'git dupe fetch'"];
 const NOT_TRACKING: [&[u8]; 2] = [
     b"'git dupe pull <remote> <branch>'",
@@ -130,7 +130,7 @@ fn a_push_on_a_branch_with_no_upstream_names_push_u_with_the_remote_git_takes() 
         dupe(s, root, &["switch", "-q", "main"]);
         // The form the hint names succeeds and sets the upstream; then no hint is owed.
         let output = s
-            .git(["dupe", "push", "-u", "origin", "main"])
+            .git(["dupe", "push", "-u", "origin", "HEAD"])
             .from(root)
             .run();
         succeeded_without_a_hint(&output);
@@ -143,6 +143,37 @@ fn a_push_on_a_branch_with_no_upstream_names_push_u_with_the_remote_git_takes() 
         // On a detached `HEAD` no branch lacks an upstream.
         dupe(s, root, &["checkout", "-q", "--detach"]);
         assert_eq!(unhinted(s, root, &["push"]).end, End::Code(128));
+    });
+}
+
+/// Where a tag shares the branch's name, `push` refuses the name as ambiguous; the command
+/// the hint names, run as shown, pushes the branch all the same and sets its upstream.
+#[test]
+fn the_upstream_hint_names_a_push_that_succeeds_where_a_tag_shares_the_branch_name() {
+    under_each_release(|s| {
+        without_maintenance(s);
+        let t = s.transfer_workspace("workspace");
+        let root = &t.root;
+        dupe(
+            s,
+            root,
+            &["remote", "add", "origin", text(&t.private_remote)],
+        );
+        dupe(s, root, &["tag", "v1"]);
+        dupe(s, root, &["switch", "-q", "-c", "v1"]);
+        commit_here(s, root, "on-v1");
+        let ours = hinted(s, root, &["push"], &[UPSTREAM]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        let output = s
+            .git(["dupe", "push", "-u", "origin", "HEAD"])
+            .from(root)
+            .run();
+        succeeded_without_a_hint(&output);
+        let merge = s
+            .private(root)
+            .git(["config", "branch.v1.merge"])
+            .succeeds();
+        assert_eq!(merge.stdout, b"refs/heads/v1\n");
     });
 }
 
@@ -168,12 +199,22 @@ fn a_push_branch_key_names_the_remote_in_the_hint() {
             "branch.main.remote",
         ] {
             dupe(s, root, &["config", key, "backup"]);
-            let named = b"'git dupe push -u backup main'";
+            let named = b"'git dupe push -u backup HEAD'";
             assert_eq!(hinted(s, root, &["push"], &[named]).end, End::Code(128));
             dupe(s, root, &["config", "--unset", key]);
         }
         // With no key, `origin`, which has a URL.
         assert_eq!(hinted(s, root, &["push"], &[UPSTREAM]).end, End::Code(128));
+        // A name a shell takes as written, and one it takes only quoted.
+        for (remote, named) in [
+            ("caf\u{e9}", "'git dupe push -u caf\u{e9} HEAD'"),
+            ("it's", "'git dupe push -u \"it's\" HEAD'"),
+        ] {
+            dupe(s, root, &["remote", "add", remote, text(&t.private_remote)]);
+            dupe(s, root, &["config", "remote.pushDefault", remote]);
+            let ours = hinted(s, root, &["push"], &[named.as_bytes()]);
+            assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        }
     });
 }
 

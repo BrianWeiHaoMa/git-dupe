@@ -27,8 +27,9 @@
 //!
 //! `locate` is, for every part, the one spelling of a private Git directory's path
 //! (`private_directory`, F2) and the one reading of what stands at a root-relative path
-//! by `lstat`: `present` and `directory_at`. A site that asks `lstat` another question —
-//! the kind of what stands, a link, a file, `NotFound` alone — reads it itself.
+//! by `lstat`: `present`, `directory_at`, and `nested_repository_at`, a directory holding
+//! a `.git` entry. A site that asks `lstat` another question — the kind of what stands, a
+//! link, a file, `NotFound` alone — reads it itself.
 
 pub mod environment;
 pub mod locate;

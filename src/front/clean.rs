@@ -41,7 +41,7 @@ use super::table::{Entry, Read, Value};
 use crate::guards::clean::{self as patterns, Arrangement};
 use crate::guards::operand;
 use crate::keeper;
-use crate::runner::locate::{Workspace, directory_at};
+use crate::runner::locate::{Workspace, directory_at, nested_repository_at};
 use crate::runner::{Failure, Run};
 
 const DIRECTORIES: Entry = Entry::short(b'd', Value::None);
@@ -195,11 +195,11 @@ enum Found {
 
 fn found_at(root: &Path, ancestor: &[u8]) -> Found {
     if !directory_at(root, ancestor) {
-        return Found::NotADirectory;
-    }
-    match fs::symlink_metadata(root.join(OsStr::from_bytes(ancestor)).join(".git")) {
-        Ok(_) => Found::Repository,
-        Err(_) => Found::Directory,
+        Found::NotADirectory
+    } else if nested_repository_at(root, ancestor) {
+        Found::Repository
+    } else {
+        Found::Directory
     }
 }
 

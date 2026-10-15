@@ -33,7 +33,9 @@
 //!   no remote (`guards::transfer`), which runs as Git itself all the same, and that did
 //!   not exit 0, naming `git dupe remote add`; after a `push` given no repository, on a
 //!   branch with no upstream, that exited 128, naming `git dupe push -u` with the remote
-//!   Git takes and the branch; after any other `push` that exited 1, a rejected update
+//!   Git takes and `HEAD`, which pushes the branch to the one of its name there whatever
+//!   tag or other ref shares the name, where the branch's own name would be refused as
+//!   ambiguous (S13); after any other `push` that exited 1, a rejected update
 //!   or a hook's refusal alike, naming `git dupe pull` and `git dupe fetch`; after a
 //!   `pull` given no repository, on a branch with no upstream, that did not exit 0,
 //!   naming `git dupe pull <remote> <branch>` and `git dupe branch --set-upstream-to`;
@@ -57,6 +59,7 @@ use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
 use super::places;
 use crate::guards::places::Place;
+use crate::guards::quoted::shell_word;
 use crate::guards::transfer::{self, Current, DefaultRemote, Record, Transfer};
 use crate::runner::locate::Facts;
 use crate::runner::records;
@@ -118,12 +121,11 @@ pub enum Then {
     Pull { untracked: bool, unreconciled: bool },
 }
 
-/// A branch with no upstream that `push` given no repository was asked to push, and the
-/// remote Git takes for it.
+/// The remote Git takes for a branch with no upstream that `push` given no repository
+/// was asked to push.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Upstream {
     remote: Vec<u8>,
-    branch: Vec<u8>,
 }
 
 /// Whether `words`, the command word first, may run against the repository `against`
@@ -206,7 +208,6 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
 fn without_upstream(records: &[Record<'_>], branch: &[u8]) -> Option<Upstream> {
     (!transfer::has_upstream(records, branch)).then(|| Upstream {
         remote: transfer::push_remote(records, Some(branch)).to_vec(),
-        branch: branch.to_vec(),
     })
 }
 
@@ -245,31 +246,29 @@ fn hint(then: &Then, ended: &Outcome) -> Option<Vec<u8>> {
 }
 
 /// The hint after a `push` that exited 128 on a branch with no upstream, naming the
-/// remote Git takes and the branch where each is one word a shell takes as written, and a
-/// placeholder otherwise.
+/// remote Git takes and `HEAD` for the branch, whose own name a tag or another ref may
+/// share.
 fn no_upstream(upstream: &Upstream) -> Vec<u8> {
     [
         &b"the current private branch has no upstream: 'git dupe push -u "[..],
-        shell_word(&upstream.remote, b"<remote>"),
-        b" ",
-        shell_word(&upstream.branch, b"<branch>"),
-        b"' pushes it and sets one; plain 'git push' acts on the project's repository",
+        &offered_remote(&upstream.remote),
+        b" HEAD' pushes it and sets one; plain 'git push' acts on the project's repository",
     ]
     .concat()
 }
 
-/// `name` where a shell takes it as one word as written and `push` reads it as the name
-/// it is, `placeholder` otherwise: a remote's name or URL from the configuration, or a
-/// branch's name, may hold any byte a shell reads otherwise, and may begin with `-`, an
-/// option to `push`, or `+`, which as a refspec forces the push of the name after it.
-fn shell_word<'a>(name: &'a [u8], placeholder: &'a [u8]) -> &'a [u8] {
-    let plain = name
-        .first()
-        .is_some_and(|&first| first != b'-' && first != b'+')
-        && name
-            .iter()
-            .all(|&byte| byte.is_ascii_alphanumeric() || b"-_./:@+=,%".contains(&byte));
-    if plain { name } else { placeholder }
+/// The remote's name or URL `name` as a shell reads it back as one word, or the
+/// placeholder `<remote>` where none is to be named: a value from the configuration may
+/// be empty, begin with `-`, which `push` reads as an option, or hold a control byte,
+/// which would break the line (F8).
+fn offered_remote(name: &[u8]) -> Vec<u8> {
+    let named =
+        name.first().is_some_and(|&first| first != b'-') && !name.iter().any(u8::is_ascii_control);
+    if named {
+        shell_word(name)
+    } else {
+        b"<remote>".to_vec()
+    }
 }
 
 /// The answer of the private `symbolic-ref -q HEAD`: its line on a branch, nothing on a

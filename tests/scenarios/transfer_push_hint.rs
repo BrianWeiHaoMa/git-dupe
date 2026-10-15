@@ -31,10 +31,10 @@ fn push_hinted(s: &Scenario, root: &Path, words: &[&str]) {
 }
 
 /// `git dupe push` from the root `root` ends as Git's own run, which exited 128, then with
-/// the hint naming `git dupe push -u <remote> main` for the remote a key or `origin`'s URL
+/// the hint naming `git dupe push -u <remote> HEAD` for the remote a key or `origin`'s URL
 /// chooses, and not this file's hint.
 fn upstream_hinted(s: &Scenario, root: &Path, remote: &str) {
-    let named = format!("'git dupe push -u {remote} main'");
+    let named = format!("'git dupe push -u {remote} HEAD'");
     let ours = hinted(s, root, &["push"], &[named.as_bytes()]);
     assert_eq!(ours.end, End::Code(128), "{ours:?}");
     assert!(!holds(&ours.stderr, HINT), "{ours:?}");

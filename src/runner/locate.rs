@@ -294,6 +294,14 @@ pub fn directory_at(root: &Path, path: &[u8]) -> bool {
     fs::symlink_metadata(root.join(OsStr::from_bytes(path))).is_ok_and(|found| found.is_dir())
 }
 
+/// Whether `lstat` finds at the root-relative `path` a directory holding a `.git` entry of
+/// any kind, a dangling link included: a nested repository as G16 counts one, whether or
+/// not Git would open it, a submodule's checkout among them (`Holds/G12`, `Holds/G16`).
+pub fn nested_repository_at(root: &Path, path: &[u8]) -> bool {
+    directory_at(root, path)
+        && fs::symlink_metadata(root.join(OsStr::from_bytes(path)).join(".git")).is_ok()
+}
+
 /// Where a destination is compared from (`Holds/G18`), all absolute: the root a relative
 /// destination is read from, the common Git directory that holds `worktrees/`, and the
 /// user's directory where a relative destination is also read from when it lies outside

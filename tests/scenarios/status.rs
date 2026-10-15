@@ -1,6 +1,7 @@
 //! `git dupe status`: Git's output confined to hidden paths and staged deletions.
 
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
@@ -195,6 +196,76 @@ fn what_stands_under_a_directory_at_a_publicly_tracked_file_is_shown() {
             &status(&[]),
             &["A  notes/a.md", "?? notes/topic/", "!! notes/topic/out.log"],
         );
+    });
+}
+
+/// A teammate's submodule checked out below a hidden directory, and a directory holding a
+/// `.git` entry that names no repository where a teammate's file was, are the project's:
+/// nothing at or below either is listed, in any untracked mode or under a pathspec, while a
+/// draft under a directory standing where the public index holds a file still shows (G12).
+#[test]
+fn what_stands_where_a_nested_repository_is_publicly_tracked_is_not_listed() {
+    under_each_release(|s| {
+        let dir = s.dir().join("project");
+        s.attached_project(&dir);
+        let library = s.dir().join("library");
+        s.repository(&library);
+        write(&dir, "notes/a.md", b"private\n");
+        dupe_succeeds(s, &dir, &["add", "notes/"]);
+        private_commit(s, &dir);
+        for path in ["notes/topic", "notes/vendored"] {
+            write(&dir, path, b"public\n");
+        }
+        s.git(["add", "-f", "--", "notes/topic", "notes/vendored"])
+            .from(&dir)
+            .succeeds();
+        // Under a hidden directory, which public Git ignores, as a teammate's commit and a
+        // checkout of it would leave it.
+        s.git([
+            OsStr::new("-c"),
+            OsStr::new("protocol.file.allow=always"),
+            OsStr::new("submodule"),
+            OsStr::new("add"),
+            OsStr::new("-q"),
+            OsStr::new("-f"),
+            library.as_os_str(),
+            OsStr::new("notes/sub"),
+        ])
+        .from(&dir)
+        .succeeds();
+        s.commit_public(&dir);
+        write(&dir, "notes/sub/new.txt", b"in the submodule\n");
+        for path in ["notes/topic", "notes/vendored"] {
+            fs::remove_file(dir.join(path)).unwrap();
+        }
+        write(&dir, "notes/topic/draft.md", b"draft\n");
+        write(&dir, "notes/vendored/.git", b"");
+        write(&dir, "notes/vendored/kept.c", b"vendored\n");
+        let status = |words: &[&str]| {
+            let words = ["dupe", "status", "--porcelain"].iter().chain(words);
+            s.git(words).from(&dir).run()
+        };
+        quiet_records(&status(&[]), &["?? notes/topic/"]);
+        for words in [
+            &["-uall"][..],
+            &["-uall", "notes"],
+            &["-uall", "notes/topic"],
+        ] {
+            quiet_records(&status(words), &["?? notes/topic/draft.md"]);
+        }
+        for words in [
+            &["notes/sub"][..],
+            &["-uall", "notes/sub"],
+            &["--ignored=matching", "notes/sub/new.txt"],
+            &["-uall", "notes/vendored"],
+        ] {
+            quiet_records(&status(words), &[]);
+        }
+        // `add` skips the three publicly tracked paths, and what stands below them, as the
+        // project's (G14); the two nested repositories stay unlisted after it.
+        let added = s.git(["dupe", "add", "."]).from(&dir).run();
+        assert_eq!(added.end, End::Code(0), "{added:?}");
+        quiet_records(&status(&[]), &["?? notes/topic/"]);
     });
 }
 

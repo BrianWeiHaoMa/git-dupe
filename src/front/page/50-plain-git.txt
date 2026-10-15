@@ -29,5 +29,5 @@ that detaches HEAD, a branch -d that refuses, a push or pull on a branch with
 no upstream, a rejected push, a pull that cannot reconcile divergent
 branches, and an add of a path the private repository ignores, git-dupe
 follows Git's output with a hint that names the git dupe form, such as git
-dupe rebase --continue, git dupe push -u origin main, or git dupe config
+dupe rebase --continue, git dupe push -u origin HEAD, or git dupe config
 pull.rebase false. Git's output and exit status are unchanged.
