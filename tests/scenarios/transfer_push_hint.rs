@@ -11,6 +11,7 @@ use std::path::Path;
 
 use crate::harness::{
     End, Runs, Scenario, Transfer, hinted, holds, run_traced, text, under_each_release, unhinted,
+    without_maintenance,
 };
 
 /// The words of the hint that no line of Git's holds.
@@ -61,6 +62,7 @@ fn config(s: &Scenario, t: &Transfer, words: &[&str]) {
 #[test]
 fn a_failed_push_with_no_remote_chosen_ends_with_one_hint() {
     under_each_release(|s| {
+        without_maintenance(s);
         let t = s.transfer_workspace("workspace");
         let root = &t.root;
         let before = t.everything();
@@ -115,6 +117,7 @@ fn a_failed_push_with_no_remote_chosen_ends_with_one_hint() {
 #[test]
 fn the_hint_follows_whichever_remote_git_takes_and_no_chosen_one() {
     under_each_release(|s| {
+        without_maintenance(s);
         let t = s.transfer_workspace("workspace");
         let root = &t.root;
         let backup = text(&t.private_remote);

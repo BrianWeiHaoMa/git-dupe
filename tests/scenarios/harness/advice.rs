@@ -59,13 +59,36 @@ fn as_git_dupe_ends(end: End) -> End {
     }
 }
 
+/// Turns Git's automatic maintenance off for the scenario, before its workspace is made:
+/// a release that runs it detached, as 2.56.0 does after `fetch` or `commit`, leaves it
+/// writing below `.git` after the run has returned, while `hinted` and `unhinted` read
+/// the workspace and put it back.
+pub fn without_maintenance(s: &Scenario) {
+    s.git(["config", "--global", "maintenance.auto", "false"])
+        .succeeds();
+}
+
 /// `git dupe <words>` from the root of the workspace at `root`, and Git's own run of the
 /// words against its private repository after `-c help.autocorrect=0`, as git-dupe runs
 /// them, from the same state: the workspace is put back between the runs, and
 /// `git dupe git <words>`, guarded by nothing, ends as Git's own run (G20). The words may
 /// change only what lies below the root; the scenario goes on from the state `git dupe`
-/// left.
+/// left. Automatic maintenance must be off in both repositories (`without_maintenance`).
 fn ours_and_gits(s: &Scenario, root: &Path, words: &[&str]) -> (Output, Output) {
+    // Required rather than set here, so that a scenario missing it fails every time
+    // instead of only when Git's background maintenance races the reading, in either
+    // repository, both of which lie below the root that `Saved` copies.
+    let asked = ["config", "--type=bool", "--get", "maintenance.auto"];
+    for (repository, maintenance) in [
+        ("public", s.git(asked).from(root).run()),
+        ("private", s.private(root).git(asked).run()),
+    ] {
+        assert_eq!(
+            maintenance.stdout, b"false\n",
+            "a scenario comparing runs turns automatic maintenance off first, in the \
+             {repository} repository too: {maintenance:?}"
+        );
+    }
     let saved = Saved::of(root);
     let mut gits = s
         .private(root)

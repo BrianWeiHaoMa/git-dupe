@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::harness::{
     End, Output, Scenario, Transfer, hinted, holds, private_add, private_commit, text,
-    under_each_release, unhinted, write, write_executable,
+    under_each_release, unhinted, without_maintenance, write, write_executable,
 };
 
 const UPSTREAM: &[u8] = b"'git dupe push -u origin main'";
@@ -97,6 +97,7 @@ fn diverged(s: &Scenario, t: &Transfer, name: &str) {
 #[test]
 fn a_push_on_a_branch_with_no_upstream_names_push_u_with_the_remote_git_takes() {
     under_each_release(|s| {
+        without_maintenance(s);
         let t = s.transfer_workspace("workspace");
         let root = &t.root;
         dupe(
@@ -148,6 +149,7 @@ fn a_push_on_a_branch_with_no_upstream_names_push_u_with_the_remote_git_takes() 
 #[test]
 fn a_push_branch_key_names_the_remote_in_the_hint() {
     under_each_release(|s| {
+        without_maintenance(s);
         let t = s.transfer_workspace("workspace");
         let root = &t.root;
         let origin = s.dir().join("origin.git");
@@ -178,6 +180,7 @@ fn a_push_branch_key_names_the_remote_in_the_hint() {
 #[test]
 fn a_rejected_push_names_pull_and_fetch() {
     under_each_release(|s| {
+        without_maintenance(s);
         let t = s.pushed_workspace("workspace");
         let root = &t.root;
         committing(s, root);
@@ -207,6 +210,7 @@ fn a_rejected_push_names_pull_and_fetch() {
 #[test]
 fn a_pull_on_a_branch_with_no_upstream_names_pull_and_set_upstream_to() {
     under_each_release(|s| {
+        without_maintenance(s);
         let t = s.transfer_workspace("workspace");
         let root = &t.root;
         // An empty remote: Git finds nothing to merge.
@@ -237,6 +241,7 @@ fn a_pull_on_a_branch_with_no_upstream_names_pull_and_set_upstream_to() {
 #[test]
 fn a_divergent_pull_with_no_way_to_reconcile_names_pull_rebase_and_pull_ff() {
     under_each_release(|s| {
+        without_maintenance(s);
         let t = s.pushed_workspace("workspace");
         let root = &t.root;
         committing(s, root);

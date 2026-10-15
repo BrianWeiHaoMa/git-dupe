@@ -59,8 +59,8 @@ between machines. A file the project's `.gitignore` ignores is added with `-f`, 
 Your history lives in `.git/dupe`, or, in a linked worktree, in that worktree's own Git
 directory under `.git/worktrees/`. Delete the clone, or remove the worktree, and
 unpushed history goes with it, so push first. `git dupe detach` is the way out: it
-leaves every file on disk, and refuses, without `--force`, while work is uncommitted or
-on no remote.
+leaves every file on disk, and refuses, without `--force`, while a change is uncommitted
+or a commit of a branch, a tag, a stash entry, or `HEAD` is on no remote.
 
 ## If you know Git, you know git-dupe
 
@@ -295,8 +295,9 @@ files, or `cargo uninstall git-dupe` after an install from source.
   of `.git/info/exclude`, leaving the rest of that file but the region of a worktree
   whose dupe is gone, leaves every file on disk, `.gitdupe` included, and warns which
   paths the project can now see and which another worktree still hides. Without
-  `--force` it refuses while anything is uncommitted or on no remote; history removed by
-  `detach --force` is gone, since git-dupe keeps no copy. Then delete
+  `--force` it refuses while a change is uncommitted or a commit of a branch, a tag, a
+  stash entry, or `HEAD` is on no remote; history removed by `detach --force` is gone,
+  since git-dupe keeps no copy. Then delete
   `~/.local/bin/git-dupe` and `~/.local/share/man/man1/git-dupe.1`, or
   `cargo uninstall git-dupe`.
 
