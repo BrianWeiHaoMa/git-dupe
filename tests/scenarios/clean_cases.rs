@@ -66,12 +66,15 @@ fn a_line_added_to_gitdupe_since_the_last_command_is_spared_before_the_region_ho
     });
 }
 
-/// Public Git never looks beyond a symbolic link, and its `clean` deletes the link, and
-/// what it leads to inside the workspace, as any untracked entry: while a hidden path has
-/// a link among its ancestors, every form is refused, deleting nothing, naming the path
-/// and the outermost such link (G16). The link leads inside the workspace or outside it,
-/// to a directory or to a repository, is ignored or not, stands where a privately
-/// tracked file's directory stood, or leads to a directory holding another link.
+/// Public Git never looks beyond a symbolic link: its `clean` can delete the link itself
+/// as one untracked entry and never follows it, what the link leads to inside the
+/// workspace being an entry of its own. The link is the hidden path's only way to what stands at
+/// it, so while a hidden path has a link among its ancestors, every form is refused,
+/// deleting nothing, naming the path and the outermost such link, and saying that Git
+/// does not follow the link and can delete it (G16). The link leads inside the
+/// workspace or outside it, to a directory or to a repository, is ignored or not, stands
+/// where a privately tracked file's directory stood, or leads to a directory holding
+/// another link.
 #[test]
 fn a_hidden_path_beyond_a_symbolic_link_refuses_every_form_deleting_nothing() {
     under_each_release(|s| {
@@ -153,6 +156,8 @@ fn a_hidden_path_beyond_a_symbolic_link_refuses_every_form_deleting_nothing() {
                 let rest = without(refusal[0], beyond);
                 names(&rest, link);
                 assert!(!holds(&rest, &[link, b"/"].concat()), "{context}");
+                names(&rest, b"does not follow the link and can delete it,");
+                assert!(!holds(&rest, b"leads to"), "{context}");
                 assert!(changed_since(&before, &built).is_empty(), "{context}");
             }
         }

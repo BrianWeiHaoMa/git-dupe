@@ -82,6 +82,33 @@ fn only_the_listing_is_hidden_hints_to_add_and_prints_gits_status() {
     });
 }
 
+/// Once every path is released, private history and a staged deletion stand beside a
+/// hidden `.gitdupe` alone: the hint says what is hidden now and names `git dupe add`,
+/// and calls nothing new or not yet private (G12, G25).
+#[test]
+fn the_hint_after_every_path_is_released_says_what_is_hidden_now() {
+    under_each_release(|s| {
+        let dir = s.dir().join("project");
+        s.attached_project(&dir);
+        write(&dir, ".env.local", b"private\n");
+        let dupe = |words: &[&str]| {
+            let words = ["dupe"].iter().chain(words);
+            s.git(words).from(&dir).succeeds()
+        };
+        dupe(&["hide", ".env.local"]);
+        dupe(&["add", "-f", ".env.local"]);
+        private_commit(s, &dir);
+        dupe(&["unhide", ".env.local"]);
+        dupe(&["rm", "-q", "--cached", ".env.local"]);
+        let output = s.git(["dupe", "status", "--porcelain"]).from(&dir).run();
+        records(&output, &["M  .gitdupe", "D  .env.local", "!! .env.local"]);
+        let hint = output.only_line("hint");
+        names(hint, b"nothing but .gitdupe is hidden");
+        names(hint, b"'git dupe add <path>' makes a path private");
+        assert!(!holds(hint, b"yet"), "{output:?}");
+    });
+}
+
 #[test]
 fn a_file_tracked_below_a_directory_at_gitdupe_is_hidden_and_no_hint_follows() {
     under_each_release(|s| {

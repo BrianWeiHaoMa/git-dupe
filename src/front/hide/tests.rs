@@ -128,12 +128,15 @@ fn an_unhide_hint_says_what_became_of_the_line_and_never_that_a_path_is_visible(
 #[test]
 fn only_hide_sends_the_developer_to_add_and_never_for_a_tracked_path() {
     let holds = |line: &[u8], part: &[u8]| line.windows(part.len()).any(|at| at == part);
-    let hint = |hiding, tracked, absent| newly_hidden(b"p", tracked, hiding, || absent);
-    let present = hint(Hiding::Hide, false, false);
-    let absent = hint(Hiding::Hide, false, true);
-    let by_add = hint(Hiding::Add, false, false);
-    let tracked = hint(Hiding::Hide, true, false);
-    for line in [&present, &absent, &by_add, &tracked] {
+    let hint = |hiding, tracked, standing: Standing| {
+        newly_hidden(b"p", tracked, hiding, || standing.clone())
+    };
+    let present = hint(Hiding::Hide, false, Standing::Something);
+    let absent = hint(Hiding::Hide, false, Standing::Nothing);
+    let linked = hint(Hiding::Hide, false, Standing::BeyondALink(b"l".to_vec()));
+    let by_add = hint(Hiding::Add, false, Standing::Something);
+    let tracked = hint(Hiding::Hide, true, Standing::Something);
+    for line in [&present, &absent, &linked, &by_add, &tracked] {
         assert!(line.starts_with(b"p "), "{}", line.escape_ascii());
         assert!(
             holds(line, b"'git dupe unhide -- p'"),
@@ -151,6 +154,20 @@ fn only_hide_sends_the_developer_to_add_and_never_for_a_tracked_path() {
         &absent,
         b"run from the root, 'git dupe add -- p' versions it"
     ));
+    // Git's `add` refuses an ignored path without `-f` (G15): both offers say so.
+    for line in [&present, &absent] {
+        assert!(
+            holds(
+                line,
+                b"or 'git dupe add -f -- p' where Git refuses that as ignored"
+            ),
+            "{}",
+            line.escape_ascii()
+        );
+    }
+    // Git's `add` refuses a path beyond a symbolic link whatever its options (S4).
+    assert!(holds(&linked, b"beyond the symbolic link l,"));
+    assert!(!holds(&linked, b"git dupe add"));
     assert!(!holds(&by_add, b"git dupe add"));
     assert!(!holds(&tracked, b"git dupe add"));
     assert!(!holds(&tracked, b"now hidden"));

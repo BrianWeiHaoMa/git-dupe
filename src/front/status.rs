@@ -134,7 +134,7 @@ pub fn status(workspace: &Workspace, read: &Read, paths: Option<&[Vec<u8>]>) -> 
             if hidden.paths.only_gitdupe() {
                 lines::write(
                     Level::Hint,
-                    b"nothing is private yet; 'git dupe add <path>' makes a path private",
+                    b"nothing but .gitdupe is hidden; 'git dupe add <path>' makes a path private",
                 );
             }
             Outcome::Git(finished.end)

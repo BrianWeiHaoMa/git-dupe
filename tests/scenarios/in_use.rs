@@ -85,7 +85,7 @@ fn cloned_project_through_first_commit_and_daily_private_work() {
         assert_eq!(status.stdout, expected.stdout);
         assert!(expected.stderr.is_empty(), "{expected:?}");
         names(status.only_line("hint"), b"git dupe add <path>");
-        names(status.only_line("hint"), b"nothing is private yet");
+        names(status.only_line("hint"), b"nothing but .gitdupe is hidden");
         assert_eq!(
             s.private(&dir)
                 .git(["symbolic-ref", "HEAD"])

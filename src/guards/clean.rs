@@ -31,8 +31,9 @@ pub fn refused(only_ignored: bool, users_patterns: bool) -> bool {
 /// The refusal of every form while a hidden path has a symbolic link among its
 /// ancestors (G16): the first of `hidden`, in their order, for which `link_above`, the
 /// caller's `lstat`, finds one, with the outermost such link. Git never looks beyond the
-/// link, and its `clean` deletes the link, and what it leads to, as one entry (S5), which
-/// no pattern of a hidden path can spare.
+/// link, and its `clean` can delete the link itself as one entry, without following it
+/// (S5), which no pattern of a hidden path can spare: the hidden path's only way to what
+/// stands at it.
 pub fn refused_beyond_a_link<'p>(
     hidden: impl IntoIterator<Item = &'p [u8]>,
     mut link_above: impl FnMut(&'p [u8]) -> Option<&'p [u8]>,

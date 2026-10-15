@@ -8,6 +8,20 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Fixed
+
+- `git dupe hide` of a path an ignore rule ignores, such as `.env.local` under the
+  project's `.gitignore`, now also offers `git dupe add -f` for it, where its hint
+  offered only the plain `git dupe add`, which Git refuses for an ignored path; for a
+  path beyond a symbolic link, which Git's add does not follow, the hint names the link
+  and offers no `git dupe add`.
+- `git dupe status`, while nothing but `.gitdupe` is hidden, says so in its hint, where
+  it said that nothing was private yet even after private files had been committed and
+  then released.
+- `git dupe clean`, refusing while a hidden path lies beyond a symbolic link, says that
+  Git's clean does not follow the link and can delete it, the hidden path's only way to
+  what stands at it, where it said that Git would delete the link and what it leads to.
+
 ## [0.3.0] - 2026-10-12
 
 ### Added

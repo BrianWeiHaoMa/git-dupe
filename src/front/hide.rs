@@ -7,7 +7,7 @@
 //! to the root or outside it, which only the prefix reveals. A line names a path as its
 //! cleaned root-relative bytes, never a word as typed.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
@@ -200,18 +200,22 @@ pub fn hide_paths(
     edited(keeper::hide(workspace, hidden, paths), |changed| {
         changed
             .iter()
-            .map(|path| newly_hidden(path, tracked.contains(path), hiding, || absent(root, path)))
+            .map(|path| newly_hidden(path, tracked.contains(path), hiding, || stands(root, path)))
             .collect()
     })
 }
 
 /// The `hint:` naming a newly hidden path and `git dupe unhide`. Under `hide` it also
-/// names `git dupe add`, which versions the path, and says when nothing stands there yet,
-/// which only `absent` asks; a path the private repository tracks is listed, not newly
+/// names `git dupe add`, which versions the path, and its `-f` form, which Git's `add`
+/// needs where an ignore rule of the private repository's ignores the path (G15):
+/// nothing asks Git about those rules before the hint, so it offers both and says when
+/// the second is the one. It says when nothing stands there yet, and names instead of
+/// any `add` a symbolic link above the path, where Git's `add` refuses it (S4), which
+/// only `stands` asks; a path the private repository tracks is listed, not newly
 /// hidden. Each command names the path, root-relative here, as an operand that resolves
 /// to it, written as a shell reads it back as one word, and so is to be run from the
 /// root, as `clone`'s lines say of theirs.
-fn newly_hidden(path: &[u8], tracked: bool, hiding: Hiding, absent: impl Fn() -> bool) -> Vec<u8> {
+fn newly_hidden(path: &[u8], tracked: bool, hiding: Hiding, at: impl Fn() -> Standing) -> Vec<u8> {
     let operand = shell_word(&operand::offered(path));
     let unhide = [b"'git dupe unhide -- ", &operand[..], b"'"].concat();
     if tracked {
@@ -225,28 +229,61 @@ fn newly_hidden(path: &[u8], tracked: bool, hiding: Hiding, absent: impl Fn() ->
         .concat();
     }
     let add = [b"'git dupe add -- ", &operand[..], b"'"].concat();
-    let and: Vec<u8> = match hiding {
-        Hiding::Hide if absent() => [
+    let forced = [
+        b", or 'git dupe add -f -- ",
+        &operand[..],
+        b"' where Git refuses that as ignored, and ",
+    ]
+    .concat();
+    let and: Vec<u8> = match (hiding, at()) {
+        (Hiding::Hide, Standing::BeyondALink(link)) => [
+            b", though it lies beyond the symbolic link ",
+            &link[..],
+            b", which Git's add does not follow; run from the root, ",
+            &unhide,
+            b" stops hiding it",
+        ]
+        .concat(),
+        (Hiding::Hide, Standing::Nothing) => [
             b", though nothing stands there yet; run from the root, ",
             &add[..],
-            b" versions it once something does, and ",
+            b" versions it once something does",
+            &forced,
             &unhide,
             b" stops hiding it",
         ]
         .concat(),
-        Hiding::Hide => [
+        (Hiding::Hide, Standing::Something) => [
             b"; run from the root, ",
             &add[..],
-            b" versions it, and ",
+            b" versions it",
+            &forced,
             &unhide,
             b" stops hiding it",
         ]
         .concat(),
-        Hiding::Add | Hiding::DryRun => {
+        (Hiding::Add | Hiding::DryRun, _) => {
             [b"; run from the root, ", &unhide[..], b" stops hiding it"].concat()
         }
     };
     [path, b" is now hidden from the project's Git", &and].concat()
+}
+
+/// What stands at a newly hidden path, by `lstat`, as `hide`'s hint says it.
+#[derive(Clone)]
+enum Standing {
+    Something,
+    Nothing,
+    /// The outermost symbolic link among the path's ancestors.
+    BeyondALink(Vec<u8>),
+}
+
+fn stands(root: &Path, path: &[u8]) -> Standing {
+    match keeper::link_above(root, path, &mut HashMap::new()) {
+        Some(link) => Standing::BeyondALink(link.to_vec()),
+        None if absent(root, path) => Standing::Nothing,
+        None => Standing::Something,
+    }
 }
 
 /// Whether nothing stands at `path`, by `lstat`: not found, or a file where a directory

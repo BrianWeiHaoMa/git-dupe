@@ -14,9 +14,10 @@
 //!   that they are the later and deciding patterns (`guards::clean`).
 //! - The order is the guard: the hidden paths, and the refusal while one has a symbolic
 //!   link among its ancestors, in every form, `-X` beside `-e` included, because Git
-//!   never looks beyond the link and deletes it, and what it leads to, as one entry
-//!   (G16, S5); the refusal from the words alone; the words alone when the last one is
-//!   an `-e` lacking its value, which Git refuses before deleting anything; then
+//!   never looks beyond the link, and can delete the link itself as one entry, the
+//!   hidden path's only way to what stands at it, without following it (G16, S5); the
+//!   refusal from the words alone; the words alone when the last one is an `-e` lacking
+//!   its value, which Git refuses before deleting anything; then
 //!   `lstat` of the region paths' ancestors and, under `-X` without `-d` or a pathspec,
 //!   of the region paths, the one public listing under the ancestors holding a `.git`
 //!   entry and those region paths at which a directory stands, when there is one of
@@ -141,7 +142,8 @@ fn beyond_a_link(path: &[u8], link: &[u8]) -> Vec<u8> {
         path,
         b", which lies beyond the symbolic link ",
         link,
-        b": Git's clean would delete the link and what it leads to",
+        b": Git's clean does not follow the link and can delete it, the hidden path's only \
+          way to what stands at it",
     ]
     .concat()
 }

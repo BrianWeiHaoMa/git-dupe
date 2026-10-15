@@ -13,8 +13,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, offered, private_commit, privately_tracked, publicly_tracked,
-    under_each_release, write,
+    End, Output, Scenario, holds, names, offered, private_commit, privately_tracked,
+    publicly_tracked, under_each_release, write,
 };
 
 /// A path a shell reads as two words, the second expanded, unless it is quoted.
@@ -180,10 +180,87 @@ fn hides_offers_to_add_and_unhide_take_the_path_alone() {
             let add = offered(hint, b"run from the root, '", b"' versions it");
             adds_alone(s, &root, add, &file, None);
 
-            let unhide = offered(hint, b"versions it, and '", b"' stops hiding it");
+            let unhide = offered(hint, b"as ignored, and '", b"' stops hiding it");
             runs_as_offered(s, &root, unhide);
             assert_eq!(fs::read(root.join(".gitdupe")).unwrap(), b"decoy\n");
         }
+    });
+}
+
+/// For a path an ignore rule ignores, the project's `.gitignore` or the private
+/// repository's own `info/exclude`, Git's `add` refuses the plain offer, exit 1, staging
+/// nothing (G15), and the `-f` offer that `hide`'s hint gives for that case stages the
+/// path alone, beside an ignored file that is not hidden.
+#[test]
+fn hides_forced_add_offer_versions_a_path_the_project_ignores() {
+    under_each_release(|s| {
+        let root = s.dir().join("project");
+        s.attached_project(&root);
+        hidden_decoy(s, &root);
+        // The project ignores `.env.local`, `.vscode/`, and `build/`; `:colon` is added,
+        // and the private repository's own rules ignore `mine`.
+        write(
+            &root,
+            ".gitignore",
+            b".env.local\n.vscode/\nbuild/\n:colon\n",
+        );
+        write(&root, ".git/dupe/info/exclude", b"/mine\n");
+        write(&root, "build/near.md", b"ignored, not hidden\n");
+        let spaced = format!("build/{SPACED}");
+        let spaced_file = format!("{spaced}/a.md");
+        let banged = format!("build/{BANGED}");
+        for (path, file) in [
+            (".env.local", ".env.local"),
+            (".vscode", ".vscode/settings.json"),
+            (spaced.as_str(), spaced_file.as_str()),
+            (banged.as_str(), banged.as_str()),
+            (":colon", ":colon/a.md"),
+            ("mine", "mine"),
+        ] {
+            write(&root, file, b"local\n");
+            let word = format!("./{path}");
+            let hidden = s.git(["dupe", "hide", "--", &word]).from(&root).succeeds();
+            let hint = hidden.only_line("hint");
+
+            let before = privately_tracked(s, &root);
+            let plain = offered(hint, b"run from the root, '", b"' versions it");
+            let refused = run_as_offered(s, &root, plain);
+            assert_eq!(refused.end, End::Code(1), "{path}: {refused:?}");
+            assert_eq!(privately_tracked(s, &root), before, "{path}");
+
+            let forced = offered(hint, b", or '", b"' where Git refuses that as ignored");
+            adds_alone(s, &root, forced, file, None);
+
+            let unhide = offered(hint, b"as ignored, and '", b"' stops hiding it");
+            runs_as_offered(s, &root, unhide);
+            assert_eq!(fs::read(root.join(".gitdupe")).unwrap(), b"decoy\n");
+        }
+    });
+}
+
+/// Git's `add` refuses a path beyond a symbolic link (S4), so `hide`'s hint offers no
+/// `add` for one, names the link, and offers `unhide`, which runs as offered.
+#[test]
+fn hides_hint_offers_no_add_beyond_a_symbolic_link() {
+    under_each_release(|s| {
+        let root = s.dir().join("project");
+        s.attached_project(&root);
+        hidden_decoy(s, &root);
+        write(&root, "target/secret", b"private\n");
+        std::os::unix::fs::symlink("target", root.join("link")).unwrap();
+        let hidden = s
+            .git(["dupe", "hide", "link/secret"])
+            .from(&root)
+            .succeeds();
+        // Settle's warning about the path beyond the link follows the one hint (G6).
+        let hints = hidden.lines("hint");
+        assert_eq!(hints.len(), 1, "{hidden:?}");
+        let hint = hints[0];
+        names(hint, b"beyond the symbolic link link,");
+        assert!(!holds(hint, b"git dupe add"), "{hidden:?}");
+        let unhide = offered(hint, b"run from the root, '", b"' stops hiding it");
+        runs_as_offered(s, &root, unhide);
+        assert_eq!(fs::read(root.join(".gitdupe")).unwrap(), b"decoy\n");
     });
 }
 
