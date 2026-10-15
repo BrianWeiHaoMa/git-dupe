@@ -21,6 +21,10 @@ Every change a user of git-dupe would notice, newest first, in the form of
 - `git dupe clean`, refusing while a hidden path lies beyond a symbolic link, says that
   Git's clean does not follow the link and can delete it, the hidden path's only way to
   what stands at it, where it said that Git would delete the link and what it leads to.
+- `git dupe detach` without `--force` now refuses while the commit `HEAD` names, such as
+  one made on a detached `HEAD`, is on no remote-tracking branch, as it already refused
+  for a commit on a branch, tag, or stash entry, where it removed the private repository
+  and that commit with it.
 
 ## [0.3.0] - 2026-10-12
 

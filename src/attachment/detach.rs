@@ -5,12 +5,13 @@
 //!    `--force`, before any run, because no write can delete it there.
 //! 2. Without `--force`, the private runs decide, each from the root, its standard error
 //!    Git's and its output captured: `--no-optional-locks status`, so that the private
-//!    index is left as it was (S8); `stash list`; `config`, whose exit status alone says
-//!    whether a remote is configured; and `rev-list`, fed the stash hashes byte for byte,
-//!    with `--not --remotes` only where one is. Whether an answer is empty is all that is
-//!    read of it. A run that fails, or does not start, is a private repository that
-//!    cannot be read, and refuses; one killed by a signal ends the command with 128 plus
-//!    its number. Nothing has changed.
+//!    index is left as it was (S8); `stash list`; `rev-parse -q --verify HEAD`, whose exit
+//!    1 is an unborn `HEAD`; `config`, whose exit status alone says whether a remote is
+//!    configured; and `rev-list`, fed the stash hashes and `HEAD`'s byte for byte, with
+//!    `--not --remotes` only where a remote is configured. Whether an answer is empty is
+//!    all that is read of it. A run that fails, or does not start, is a private repository
+//!    that cannot be read, and refuses; one killed by a signal ends the command with 128
+//!    plus its number. Nothing has changed.
 //! 3. The hidden paths: `.gitdupe` and the private listing. Under `--force` a listing that
 //!    fails other than by a signal leaves them to the keeper's `remove`, from `.gitdupe` on
 //!    disk and the region; without it, it refuses as step 2 does.
@@ -39,8 +40,8 @@ pub enum NotDetached {
     RegionBeyondALink(PathBuf),
     /// Git's status of the private repository reports a change not committed.
     Uncommitted,
-    /// A commit on a private branch, tag, or stash entry is on no remote-tracking branch;
-    /// with no remote configured, a commit at all.
+    /// A commit on a private branch, tag, or stash entry, or the commit `HEAD` names, is on
+    /// no remote-tracking branch; with no remote configured, a commit at all.
     Unpushed { remote_configured: bool },
     /// A run that decides, or the private listing, failed: the private repository cannot
     /// be read. Git's message, where it gave one, is already on standard error.
@@ -126,7 +127,16 @@ fn decide(workspace: &Workspace) -> Result<(), NotDetached> {
     if !step(status, &[0]).map_err(unreadable)?.stdout.is_empty() {
         return Err(NotDetached::Uncommitted);
     }
-    let stashed = step(run(&["stash", "list", "--format=%H"]), &[0]).map_err(unreadable)?;
+    let mut commits = step(run(&["stash", "list", "--format=%H"]), &[0])
+        .map_err(unreadable)?
+        .stdout;
+    // `HEAD`'s commit is fed because, detached, it is on no branch or tag that `--branches`
+    // and `--tags` reach; exit 1, with nothing printed, is an unborn `HEAD`, which names
+    // no commit and adds nothing (S12).
+    let head = step(run(&["rev-parse", "-q", "--verify", "HEAD"]), &[0, 1]).map_err(unreadable)?;
+    if head.end == End::Code(0) {
+        commits.extend(head.stdout);
+    }
     let remotes = run(&["config", "-z", "--get-regexp", r"^remote\..*\.url$"]);
     let remote_configured = step(remotes, &[0, 1]).map_err(unreadable)?.end == End::Code(0);
     let mut words = vec!["rev-list", "-n", "1", "--branches", "--tags", "--stdin"];
@@ -135,7 +145,7 @@ fn decide(workspace: &Workspace) -> Result<(), NotDetached> {
     if remote_configured {
         words.extend(["--not", "--remotes"]);
     }
-    let found = step(run(&words).feed(stashed.stdout), &[0]).map_err(unreadable)?;
+    let found = step(run(&words).feed(commits), &[0]).map_err(unreadable)?;
     if !found.stdout.is_empty() {
         return Err(NotDetached::Unpushed { remote_configured });
     }

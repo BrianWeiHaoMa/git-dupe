@@ -559,6 +559,7 @@ fn git_run_sequences_do_not_follow_private_file_counts() {
                         "rev-parse",
                         "status",
                         "stash",
+                        "rev-parse",
                         "config",
                         "rev-list",
                         "ls-files",

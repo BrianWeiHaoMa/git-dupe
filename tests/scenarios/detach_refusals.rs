@@ -6,9 +6,9 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
-    End, Everything, Scenario, Transfer, Tree, holds, names, private_add, private_commit, refusal,
-    region, run_traced, stale_file_timestamp, stale_timestamp, unchanged, under_each_release,
-    write,
+    End, Everything, Scenario, Transfer, Tree, detached, dupe_succeeds, holds, names, private_add,
+    private_commit, refusal, region, run_traced, stale_file_timestamp, stale_timestamp, unchanged,
+    under_each_release, write,
 };
 
 fn before_refusal(transfer: &Transfer) -> Everything {
@@ -166,6 +166,53 @@ fn no_remote_counts_commits_even_with_stale_remote_tracking_refs() {
         s.git(["dupe", "detach"]).from(&pushed.root).succeeds();
         assert!(!pushed.root.join(".git/dupe").exists());
     });
+}
+
+/// The commit a detached `HEAD` names is on no private branch, tag, or stash entry, and
+/// counts all the same (G3): refused while no remote-tracking branch holds it, with no
+/// remote configured even when no branch is left, and detached once one does, or under
+/// `--force`.
+#[test]
+fn the_commit_a_detached_head_names_counts() {
+    under_each_release(|s| {
+        let at_tip = s.pushed_workspace("detached-at-tip");
+        dupe_succeeds(s, &at_tip.root, &["switch", "--detach", "main"]);
+        detaches_keeping_every_file(s, &at_tip.root, &["detach"]);
+
+        for cause in ["detached-commit", "detached-forced"] {
+            let transfer = s.pushed_workspace(cause);
+            let root = &transfer.root;
+            dupe_succeeds(s, root, &["switch", "--detach"]);
+            write(root, "notes/a.md", b"committed\n");
+            private_add(s, root, "notes/a.md");
+            private_commit(s, root);
+            clean(s, root);
+            if cause == "detached-forced" {
+                detaches_keeping_every_file(s, root, &["detach", "--force"]);
+            } else {
+                names(&refused(s, &transfer), b"no remote-tracking branch");
+                dupe_succeeds(s, root, &["push", "-q", "origin", "HEAD:refs/heads/kept"]);
+                dupe_succeeds(s, root, &["fetch", "-q", "origin"]);
+                detaches_keeping_every_file(s, root, &["detach"]);
+            }
+        }
+
+        let never = s.transfer_workspace("detached-without-remote");
+        dupe_succeeds(s, &never.root, &["switch", "--detach", "main"]);
+        dupe_succeeds(s, &never.root, &["branch", "-D", "main"]);
+        clean(s, &never.root);
+        names(&refused(s, &never), b"no remote is configured");
+    });
+}
+
+/// `git dupe <words>` from `root` succeeds and leaves it unattached, every file of the
+/// working tree as it was.
+fn detaches_keeping_every_file(s: &Scenario, root: &Path, words: &[&str]) {
+    let before = Tree::working(root);
+    dupe_succeeds(s, root, words);
+    detached(root);
+    let changed = before.changed_in(&Tree::working(root));
+    assert!(changed.is_empty(), "changed: {changed:?}");
 }
 
 #[test]

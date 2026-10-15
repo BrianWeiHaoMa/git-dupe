@@ -7,12 +7,12 @@ repository is gone. Every file stays on disk, .gitdupe included. A warning
 names each formerly hidden path the project's Git can now see, which a last
 hint counts, and each that another worktree still hides, naming it.
 
-Without --force it refuses, changing nothing, while the private repository
-has a change not committed (to a file it tracks, or a staged addition or
-deletion), while a commit on a private branch, tag, or stash entry is on no
-remote-tracking branch (with no remote configured, every commit counts), and
-while the private repository cannot be read: commit, push, or run
-"git dupe init" to complete an interrupted init first.
+Without --force it refuses, changing nothing, while the private repository has
+a change not committed (to a file it tracks, or a staged addition or
+deletion), while a commit on a private branch, tag, or stash entry, or the
+commit HEAD names, is on no remote-tracking branch (with no remote configured,
+every commit counts), and while the private repository cannot be read: commit,
+push, or run "git dupe init" to complete an interrupted init first.
 
 --force detaches all the same. History removed by "git dupe detach --force"
 is gone; git-dupe keeps no copy. It also completes an interrupted detach.
