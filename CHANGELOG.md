@@ -38,6 +38,13 @@ Every change a user of git-dupe would notice, newest first, in the form of
   stands, below a hidden path, where the project's Git tracks a file, as when a draft
   directory replaces a teammate's file, where it left out the directory and everything
   in it; the project's file itself is still not listed.
+- `git dupe push`, `pull`, `fetch`, `remote`, and `clone` now refuse a URL of the
+  project's remote whose credentials hold an encoded `/`, as
+  `https://reader:p%2Fss@example.com/team/project.git` does, and every other spelling
+  of the project's remote when its own configured URL is spelled so, where they read
+  the host from the credentials, before the `%2F`, and let the URL through. A `file://`
+  URL so spelled is compared by the path after its host as well as by the path Git
+  opens, which the encoded `/` moves.
 
 ## [0.3.0] - 2026-10-12
 

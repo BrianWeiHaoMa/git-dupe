@@ -12,8 +12,14 @@
 //!   `[user@]host:path` word has the form of its host and path; anything else is a local
 //!   path. A word holding `://` whose part before it is no scheme Git reads is a local
 //!   path, as Git reads it.
-//! - Each `%XX` after a `://` is decoded first, as Git decodes a `file://` or `ssh://` URL;
-//!   a word without `://` is never decoded.
+//! - A URL's authority is what stands between its `://` and the first `/` after it,
+//!   bounded before anything is decoded, as RFC 3986 bounds it and the HTTP transport
+//!   reads it; each `%XX` is then decoded in the authority and in the path alike, so that
+//!   an encoded `/` in a credential stays in the credential. Git's own `file://` and
+//!   `ssh://` reading decodes the whole URL first and splits it after (S13): where an
+//!   encoded `/` in a `file://` URL's authority makes the path Git so opens another path
+//!   than the URL's own, the URL has the local forms of both. A word without `://` is
+//!   never decoded.
 //! - A local path has the canonical path of each path Git opens for it: its trailing
 //!   slashes dropped, the path itself, with `.git` appended, and each of those with
 //!   `/.git` appended. A relative one is read from the root and also from the user's
@@ -62,14 +68,22 @@ pub enum Form {
 /// says.
 pub fn forms(destination: &[u8], from: ReadFrom) -> Vec<Form> {
     if let Some((scheme, after)) = with_scheme(destination) {
-        let after = decoded(after);
-        let (authority, path) = match after.iter().position(|&byte| byte == b'/') {
-            Some(slash) => after.split_at(slash),
-            None => (&after[..], &b""[..]),
-        };
-        let mut forms = vec![url(host(authority), path)];
-        if scheme == b"file" && !path.is_empty() {
-            forms.extend(local(path, from));
+        let (authority, path) = at_first_slash(after);
+        let path = decoded(path);
+        let mut forms = vec![url(host(&decoded(authority)), &path)];
+        if scheme == b"file" {
+            // Git opens the path from the first `/` of the URL decoded whole (S13), which
+            // an encoded `/` in the authority moves off the URL's own path: both are local
+            // forms then, the over-inclusive reading.
+            let whole = decoded(after);
+            let (_, opened) = at_first_slash(&whole);
+            let mut paths = vec![&path[..]];
+            if opened != path {
+                paths.push(opened);
+            }
+            for path in paths.into_iter().filter(|path| !path.is_empty()) {
+                forms.extend(local(path, from));
+            }
         }
         return forms;
     }
@@ -133,6 +147,15 @@ fn scp(word: &[u8]) -> Option<(&[u8], &[u8])> {
         })
         .unwrap_or(colon);
     Some((host(&word[..separator]), &word[separator + 1..]))
+}
+
+/// `text` split before its first `/`: a URL's authority, and its path from that `/` on,
+/// empty when there is none.
+fn at_first_slash(text: &[u8]) -> (&[u8], &[u8]) {
+    match text.iter().position(|&byte| byte == b'/') {
+        Some(slash) => text.split_at(slash),
+        None => (text, b""),
+    }
 }
 
 /// The host of `[user@]host[:port]`: after the last `@`, inside its brackets when it

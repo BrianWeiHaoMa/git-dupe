@@ -64,7 +64,7 @@ fn a_url_with_a_scheme_is_its_lowered_host_and_its_path_without_git_and_slashes(
 }
 
 #[test]
-fn each_percent_escape_after_a_scheme_is_decoded_first() {
+fn each_percent_escape_after_a_scheme_is_decoded_in_the_authority_and_the_path() {
     assert_eq!(
         of("https://example.com/team/pro%6Aect.git"),
         [url_form("example.com", "/team/project")]
@@ -73,6 +73,53 @@ fn each_percent_escape_after_a_scheme_is_decoded_first() {
         of("ssh://ex%41mple.com/a%2fb%zz%4"),
         [url_form("example.com", "/a/b%zz%4")]
     );
+}
+
+#[test]
+fn the_authority_ends_at_the_first_slash_before_anything_is_decoded() {
+    let public = url_form("localhost", "/x/public");
+    // An encoded `/`, in either case, or `?` or `#` in a credential is credential bytes:
+    // the host is still the one after the last `@`, the path the one after the host.
+    for word in [
+        "https://reader:pass@localhost/x/public.git",
+        "https://reader:p%2Fss@localhost/x/public.git",
+        "https://reader:p%2fss@localhost/x/public.git",
+        "ssh://reader:p%2Fss@localhost/x/public.git",
+        "https://reader%2F:pass@localhost/x/public.git",
+        "https://reader:p%3Fs%23s@localhost/x/public.git",
+        "https://reader:p%2Fs%2Fs@LocalHost:8443/x/public.git/",
+    ] {
+        assert_eq!(of(word), std::slice::from_ref(&public), "{word}");
+    }
+    // An encoded `@` in a credential is decoded before the last `@` is found.
+    assert_eq!(
+        of("https://reader:p%40ss@localhost/x"),
+        [url_form("localhost", "/x")]
+    );
+    // With no `/` after the authority, the path is empty.
+    assert_eq!(
+        of("https://reader:p%2Fss@localhost"),
+        [url_form("localhost", "")]
+    );
+}
+
+#[test]
+fn a_file_url_also_has_the_local_forms_of_the_path_git_opens_once_it_decodes_the_url_whole() {
+    // Git decodes a `file://` URL before it looks for the path and opens the path from
+    // the first `/` it then finds, whatever the host: `/ss@localhost/srv/p`, where the
+    // URL's own host and path are `localhost` and `/srv/p`.
+    let mut expected = vec![url_form("localhost", "/srv/p")];
+    expected.extend(local_forms("/srv/p"));
+    expected.extend(local_forms("/ss@localhost/srv/p"));
+    assert_eq!(of("file://reader:p%2Fss@localhost/srv/p"), expected);
+    let mut expected = vec![url_form("x/srv", "/p")];
+    expected.extend(local_forms("/p"));
+    expected.extend(local_forms("/srv/p"));
+    assert_eq!(of("file://x%2fsrv/p"), expected);
+    // With no path of its own, the URL has the local forms of the one Git opens alone.
+    let mut expected = vec![url_form("x/srv", "")];
+    expected.extend(local_forms("/srv"));
+    assert_eq!(of("file://x%2Fsrv"), expected);
 }
 
 #[test]

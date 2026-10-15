@@ -7,7 +7,8 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
-    Everything, MANY_URLS, PROJECT_URL, Scenario, Transfer, refusal, text, under_each_release,
+    Everything, MANY_URLS, PROJECT_URL, Scenario, Transfer, Tree, refusal, text, unchanged,
+    under_each_release,
 };
 
 fn refused(s: &Scenario, t: &Transfer, from: &Path, word: &str, place: &str) {
@@ -97,6 +98,78 @@ fn percent_escapes_in_scp_words_stay_literal() {
             "origin",
         );
         runs(s, &t, &t.root, "near", "git@example.com:team/pro%6Aect.git");
+    });
+}
+
+/// A URL's authority ends at its first `/` before anything is decoded, so an encoded `/`
+/// in a credential stays in the credential: such a URL names the public place its host
+/// and path name, and a public URL so spelled is named by every other spelling of its
+/// host and path, the configured URL of a private remote included.
+#[test]
+fn an_encoded_slash_in_a_credential_hides_no_public_place() {
+    under_each_release(|s| {
+        let t = s.transfer_workspace("workspace");
+        let hosted = s.dir().join("hosted/public.git");
+        s.bare_repository(&hosted);
+        let path = text(&hosted);
+        let origin = |url: &str| {
+            s.git(["remote", "set-url", "origin", url])
+                .from(&t.root)
+                .succeeds();
+        };
+        for credential in ["pass", "p%2Fss", "p%2fss"] {
+            let credentialed = format!("https://reader:{credential}@localhost{path}");
+            origin(&format!("https://localhost{path}"));
+            refused(s, &t, &t.root, &credentialed, "remote 'origin'");
+            origin(&credentialed);
+            for word in [
+                format!("ssh://git@localhost{path}"),
+                format!("file://localhost{path}"),
+            ] {
+                refused(s, &t, &t.root, &word, "remote 'origin'");
+            }
+        }
+        origin(&format!("https://reader:p%2Fss@localhost{path}"));
+        s.git([
+            "dupe",
+            "git",
+            "remote",
+            "add",
+            "origin",
+            &format!("file://localhost{path}"),
+        ])
+        .from(&t.root)
+        .succeeds();
+        let before = t.everything();
+        let hosted_before = Tree::of(&hosted);
+        let output = s
+            .git(["dupe", "push", "-u", "origin", "main"])
+            .from(&t.root)
+            .run();
+        refusal(&output, &[b"remote 'origin'", b"git dupe remote remove"]);
+        before.unchanged();
+        unchanged(&hosted_before, &hosted);
+    });
+}
+
+/// Git decodes a `file://` URL whole before it looks for the path and opens the path from
+/// the first `/` it then finds, whatever the host: a word whose authority holds an
+/// encoded `/` names the root when that path is the root, and also when its own path
+/// after the host is.
+#[test]
+fn a_file_url_names_its_own_path_and_the_path_git_opens_once_it_decodes_the_url_whole() {
+    under_each_release(|s| {
+        let t = s.transfer_workspace("workspace");
+        let root = text(&t.root);
+        let rest = root.strip_prefix('/').unwrap();
+        let place = format!("working tree '{root}'");
+        for word in [
+            format!("file://x%2F{rest}"),
+            format!("file://reader:p%2f{rest}"),
+            format!("file://reader:p%2Fss@localhost{root}"),
+        ] {
+            refused(s, &t, &t.root, &word, &place);
+        }
     });
 }
 
