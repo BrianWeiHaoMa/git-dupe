@@ -18,3 +18,16 @@ dupe restore . brings back every privately tracked file as last staged, the
 committed content or, where an edit was staged, the staged one. An edit never
 staged is gone. git dupe status shows what differs. Commit private work
 before a public pull or checkout, and before git clean -x.
+
+Under git dupe, Git's own messages are printed as Git wrote them, and some of
+them name a plain git command to run next: git add and git rebase --continue
+after a rebase stops, git push --set-upstream after a push from a branch with
+no upstream, git config pull.rebase false after a pull that finds divergent
+branches. Typed as written, such a command acts on the project's repository.
+After a rebase, am, cherry-pick, or revert that stops, a checkout or switch
+that detaches HEAD, a branch -d that refuses, a push or pull on a branch with
+no upstream, a rejected push, a pull that cannot reconcile divergent
+branches, and an add of a path the private repository ignores, git-dupe
+follows Git's output with a hint that names the git dupe form, such as git
+dupe rebase --continue, git dupe push -u origin main, or git dupe config
+pull.rebase false. Git's output and exit status are unchanged.

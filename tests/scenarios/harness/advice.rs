@@ -13,6 +13,12 @@ use super::output::{End, Output, names};
 use super::scenario::Scenario;
 use super::tree::Tree;
 
+/// The commands the hint after an add of a path the private repository ignores names.
+pub const IGNORED_HINT: [&[u8]; 2] = [
+    b"'git dupe add -f <path>'",
+    b"'git dupe config advice.addIgnoredFile false'",
+];
+
 /// The workspace at `root` copied aside, to be put back at the same path, so that the
 /// paths Git's output names are the same in every execution.
 struct Saved {
@@ -88,19 +94,25 @@ fn ours_and_gits(s: &Scenario, root: &Path, words: &[&str]) -> (Output, Output) 
 /// then one `hint:` line naming each of `parts`, before anything settle adds; its output.
 pub fn hinted(s: &Scenario, root: &Path, words: &[&str], parts: &[&[u8]]) -> Output {
     let (ours, gits) = ours_and_gits(s, root, words);
-    assert_eq!(ours.end, gits.end, "{words:?}: {ours:?}");
-    assert_eq!(ours.stdout, gits.stdout, "{words:?}: {ours:?}");
+    gits_then_one_hint(&ours, &gits, parts);
+    ours
+}
+
+/// `ours` ends as `gits`, with every byte of its output, and then one `hint:` line naming
+/// each of `parts`, nothing after it: for a scenario that makes Git's own run itself.
+pub fn gits_then_one_hint(ours: &Output, gits: &Output, parts: &[&[u8]]) {
+    assert_eq!(ours.end, gits.end, "{ours:?}; Git: {gits:?}");
+    assert_eq!(ours.stdout, gits.stdout, "{ours:?}; Git: {gits:?}");
     let hint = ours
         .stderr
         .strip_prefix(gits.stderr.as_slice())
         .and_then(|after| after.strip_prefix(b"hint: "))
         .and_then(|after| after.strip_suffix(b"\n"))
         .filter(|line| !line.contains(&b'\n'))
-        .unwrap_or_else(|| panic!("{words:?}: not Git's output and one hint: {ours:?}"));
+        .unwrap_or_else(|| panic!("not Git's output and one hint: {ours:?}; Git: {gits:?}"));
     for part in parts {
         names(hint, part);
     }
-    ours
 }
 
 /// `git dupe <words>` ends as Git's own run of them, with every byte of its output and

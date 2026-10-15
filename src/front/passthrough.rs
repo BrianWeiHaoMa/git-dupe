@@ -15,9 +15,9 @@
 //!   names a public place (G18, `transfer`); and `git dupe git`'s words, guarded by
 //!   nothing (G20). Settle is not their business: each returns into the sequence, which
 //!   settles. Of git-dupe's own lines only a hint may follow the run, before settle's
-//!   warnings: after a failed `push` whose configuration chooses no remote (`transfer`),
-//!   and after a word passed through whose outcome Git's advice names a plain `git`
-//!   command for (`advice`), which reads the words Git runs for its help request, an
+//!   warnings, where Git's advice for the outcome names a plain `git` command: after a
+//!   `push` or `pull`, decided from the guard's records (`transfer`), and after a word
+//!   passed through (`advice`), which reads the words Git runs for its help request, an
 //!   alias's expansion included, and asks nothing where no private repository stands;
 //!   never after `stash` or `git dupe git` (G20).
 //! - Where no workspace is attached, a help request after a word passed through, after

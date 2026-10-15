@@ -27,16 +27,27 @@
 //!   what a repository or its configuration holds (G22, R4). Each is git-dupe's own and
 //!   only reads (G5, R2); the `config` run has `GIT_CONFIG` removed and sees a remote a
 //!   `-c` before `dupe` or an alias chain's prefix defines, which `Run` carries.
-//! - `push` given no repository whose configuration chooses no remote
-//!   (`guards::transfer`) runs as Git itself all the same, and a run that did not exit 0
-//!   ends with one `hint:`, because Git's own advice there names plain `git remote add`
-//!   or `git push`, which under `git dupe` would act on the project's repository. It is
-//!   decided from the records the guard already read and the run's end alone, never from
-//!   what Git printed (R5), so it costs no run (G22). None follows a `push` among whose
-//!   words is `-h` or `--help`, so that a help request's output stays Git's alone under
-//!   every release, nor `pull`, `fetch`, `remote`, or a run the guard did not let start;
-//!   and none where the configuration was not asked, where there is no private
-//!   repository to add a remote to.
+//! - A run the guard let through may end with one `hint:` where Git's own advice names a
+//!   plain `git` command, which under `git dupe` would act on the project's repository
+//!   (`Holds/G18`, G25): after a `push` given no repository whose configuration chooses
+//!   no remote (`guards::transfer`), which runs as Git itself all the same, and that did
+//!   not exit 0, naming `git dupe remote add`; after a `push` given no repository, on a
+//!   branch with no upstream, that exited 128, naming `git dupe push -u` with the remote
+//!   Git takes and the branch; after any other `push` that exited 1, a rejected update
+//!   or a hook's refusal alike, naming `git dupe pull` and `git dupe fetch`; after a
+//!   `pull` given no repository, on a branch with no upstream, that did not exit 0,
+//!   naming `git dupe pull <remote> <branch>` and `git dupe branch --set-upstream-to`;
+//!   and after any other `pull` that exited 128 while neither the configuration nor an
+//!   exact word of the six chooses how to reconcile divergent branches, naming
+//!   `git dupe config pull.rebase` and `pull.ff`. A bundle or an abbreviation of those
+//!   words is not read, so the last may follow where Git chose, never where a key did.
+//! - Each hint is decided from the records the guard already read and the run's end
+//!   alone, never from what Git printed (R5), so it costs no run (G22): a `pull` given a
+//!   repository has no `HEAD` read, and its `branch.<name>.rebase` is then any branch's.
+//!   None follows a run among whose words is `-h` or `--help`, so that a help request's
+//!   output stays Git's alone under every release, nor `fetch`, `remote`, or a run the
+//!   guard did not let start; and none where the configuration was not asked, where
+//!   there is no private repository.
 
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
@@ -46,7 +57,7 @@ use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
 use super::places;
 use crate::guards::places::Place;
-use crate::guards::transfer::{self, DefaultRemote, Transfer};
+use crate::guards::transfer::{self, Current, DefaultRemote, Record, Transfer};
 use crate::runner::locate::Facts;
 use crate::runner::records;
 use crate::runner::{Against, End, Run};
@@ -58,14 +69,61 @@ const NO_REMOTE_CHOSEN: &[u8] = b"to push private history, 'git dupe remote add 
     adds a private remote and 'git dupe push -u <name> <branch>' pushes to it; plain \
     'git remote' and 'git push' act on the project's repository";
 
-/// What follows the run of words the guard let through.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The hint after a rejected `push`: Git's advice for a rejected update names plain
+/// `git pull`. It says what to do in that case, true too after a hook's refusal.
+const REJECTED: &[u8] = b"where a private push is rejected because the remote holds commits \
+    this branch lacks, 'git dupe pull', or 'git dupe fetch' and then a merge or rebase, \
+    brings them here before the next push; plain 'git pull' and 'git fetch' act on the \
+    project's repository";
+
+/// The hint after a failed `pull` on a branch with no upstream.
+const NOT_TRACKING: &[u8] = b"the current private branch has no upstream to pull from: \
+    'git dupe pull <remote> <branch>' pulls a branch this once, and \
+    'git dupe branch --set-upstream-to=<remote>/<branch>' makes it the upstream; plain \
+    'git pull' and 'git branch' act on the project's repository";
+
+/// The hint after a `pull` that exited 128 with no way to reconcile chosen.
+const UNRECONCILED: &[u8] = b"where a private pull finds divergent branches, \
+    'git dupe config pull.rebase false' has it merge, 'git dupe config pull.rebase true' \
+    rebase, and 'git dupe config pull.ff only' take only a fast-forward; plain \
+    'git config' acts on the project's repository";
+
+/// The words of `pull` that choose how to reconcile, each matched exactly; `--rebase`
+/// also with its value after `=`.
+const RECONCILING: [&[u8]; 6] = [
+    b"--rebase",
+    b"-r",
+    b"--no-rebase",
+    b"--ff",
+    b"--no-ff",
+    b"--ff-only",
+];
+
+/// What follows the run of words the guard let through, with no help request among them
+/// and the private configuration asked.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Then {
     /// Nothing of git-dupe's.
     Nothing,
-    /// The hint, after a run that did not exit 0: `push` given no repository whose
-    /// configuration chooses no remote, with no help request among its words.
-    HintUnlessSucceeded,
+    /// `push` given no repository whose configuration chooses no remote: its hint after a
+    /// run that did not exit 0.
+    NoRemoteChosen,
+    /// Any other `push`: after a run that exited 128, the hint naming `git dupe push -u`,
+    /// when given no repository on a branch with no upstream, which this holds; after a
+    /// run that exited 1, the hint after a rejected update.
+    Push(Option<Upstream>),
+    /// `pull`: after a run that did not exit 0, the hint for a branch with no upstream,
+    /// when `untracked`; otherwise, after a run that exited 128, the hint naming how to
+    /// reconcile, when `unreconciled`.
+    Pull { untracked: bool, unreconciled: bool },
+}
+
+/// A branch with no upstream that `push` given no repository was asked to push, and the
+/// remote Git takes for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Upstream {
+    remote: Vec<u8>,
+    branch: Vec<u8>,
 }
 
 /// Whether `words`, the command word first, may run against the repository `against`
@@ -116,27 +174,102 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
         }
     }
     let help = after.iter().any(|word| matches!(*word, b"-h" | b"--help"));
-    Ok(match (private, &head) {
-        (Some(Transfer::Push), Some(head))
-            if !help && transfer::push_chooses_no_remote(&records, records::branch_of(head)) =>
-        {
-            Then::HintUnlessSucceeded
-        }
-        _ => Then::Nothing,
+    let current = match &head {
+        None => Current::Unread,
+        Some(head) => records::branch_of(head).map_or(Current::Detached, Current::Branch),
+    };
+    Ok(match private {
+        _ if help => Then::Nothing,
+        Some(Transfer::Push) => match current {
+            Current::Unread => Then::Push(None),
+            Current::Detached if transfer::push_chooses_no_remote(&records, None) => {
+                Then::NoRemoteChosen
+            }
+            Current::Detached => Then::Push(None),
+            Current::Branch(branch) if transfer::push_chooses_no_remote(&records, Some(branch)) => {
+                Then::NoRemoteChosen
+            }
+            Current::Branch(branch) => Then::Push(without_upstream(&records, branch)),
+        },
+        Some(Transfer::Pull) => Then::Pull {
+            untracked: matches!(current, Current::Branch(branch)
+                if !transfer::has_upstream(&records, branch)),
+            unreconciled: !transfer::reconciliation_configured(&records, current)
+                && !after.iter().any(|word| reconciling(word)),
+        },
+        Some(Transfer::Fetch) | None => Then::Nothing,
     })
+}
+
+/// The upstream `push` given no repository on `branch` would set, when the configuration's
+/// `records` give the branch none.
+fn without_upstream(records: &[Record<'_>], branch: &[u8]) -> Option<Upstream> {
+    (!transfer::has_upstream(records, branch)).then(|| Upstream {
+        remote: transfer::push_remote(records, Some(branch)).to_vec(),
+        branch: branch.to_vec(),
+    })
+}
+
+/// Whether `word` is one of the words of `pull` that choose how to reconcile.
+fn reconciling(word: &[u8]) -> bool {
+    RECONCILING.contains(&word) || word.starts_with(b"--rebase=")
 }
 
 /// Writes what follows a run that ended as `ended`, the guard having decided `then`.
 pub fn after(then: Then, ended: &Outcome) {
-    if hinted(then, ended) {
-        lines::write(Level::Hint, NO_REMOTE_CHOSEN);
+    if let Some(hint) = hint(&then, ended) {
+        lines::write(Level::Hint, &hint);
     }
 }
 
-/// Whether the hint follows: after a run that started and did not exit 0, a run a signal
-/// killed included. A run that did not start is no run.
-fn hinted(then: Then, ended: &Outcome) -> bool {
-    then == Then::HintUnlessSucceeded && matches!(ended, Outcome::Git(end) if *end != End::Code(0))
+/// The hint that follows a run that started and ended as `ended`, the guard having
+/// decided `then`: "did not exit 0" is any end but exit 0, a signal included, and an end
+/// named by its number is never a signal's. A run that did not start is no run.
+fn hint(then: &Then, ended: &Outcome) -> Option<Vec<u8>> {
+    let Outcome::Git(end) = ended else {
+        return None;
+    };
+    let failed = *end != End::Code(0);
+    match then {
+        Then::NoRemoteChosen if failed => Some(NO_REMOTE_CHOSEN.to_vec()),
+        Then::Push(Some(upstream)) if *end == End::Code(128) => Some(no_upstream(upstream)),
+        Then::Push(_) if *end == End::Code(1) => Some(REJECTED.to_vec()),
+        Then::Pull {
+            untracked: true, ..
+        } if failed => Some(NOT_TRACKING.to_vec()),
+        Then::Pull {
+            unreconciled: true, ..
+        } if *end == End::Code(128) => Some(UNRECONCILED.to_vec()),
+        _ => None,
+    }
+}
+
+/// The hint after a `push` that exited 128 on a branch with no upstream, naming the
+/// remote Git takes and the branch where each is one word a shell takes as written, and a
+/// placeholder otherwise.
+fn no_upstream(upstream: &Upstream) -> Vec<u8> {
+    [
+        &b"the current private branch has no upstream: 'git dupe push -u "[..],
+        shell_word(&upstream.remote, b"<remote>"),
+        b" ",
+        shell_word(&upstream.branch, b"<branch>"),
+        b"' pushes it and sets one; plain 'git push' acts on the project's repository",
+    ]
+    .concat()
+}
+
+/// `name` where a shell takes it as one word as written and `push` reads it as the name
+/// it is, `placeholder` otherwise: a remote's name or URL from the configuration, or a
+/// branch's name, may hold any byte a shell reads otherwise, and may begin with `-`, an
+/// option to `push`, or `+`, which as a refspec forces the push of the name after it.
+fn shell_word<'a>(name: &'a [u8], placeholder: &'a [u8]) -> &'a [u8] {
+    let plain = name
+        .first()
+        .is_some_and(|&first| first != b'-' && first != b'+')
+        && name
+            .iter()
+            .all(|&byte| byte.is_ascii_alphanumeric() || b"-_./:@+=,%".contains(&byte));
+    if plain { name } else { placeholder }
 }
 
 /// The answer of the private `symbolic-ref -q HEAD`: its line on a branch, nothing on a
@@ -176,43 +309,4 @@ fn refuse_default(command: &[u8], found: DefaultRemote, place: &Place) -> Outcom
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_hint_follows_a_run_that_did_not_exit_0() {
-        let then = Then::HintUnlessSucceeded;
-        assert!(!hinted(then, &Outcome::Git(End::Code(0))));
-        assert!(hinted(then, &Outcome::Git(End::Code(128))));
-        assert!(hinted(then, &Outcome::Git(End::Code(1))));
-        assert!(hinted(then, &Outcome::Git(End::Signal(9))));
-        // A run that did not start, or a refusal, is no run.
-        assert!(!hinted(then, &Outcome::Refused));
-        for ended in [
-            Outcome::Git(End::Code(0)),
-            Outcome::Git(End::Code(128)),
-            Outcome::Git(End::Signal(9)),
-        ] {
-            assert!(!hinted(Then::Nothing, &ended));
-        }
-    }
-
-    #[test]
-    fn the_hint_names_the_git_dupe_commands_and_never_says_no_remote_exists() {
-        let hint = String::from_utf8(NO_REMOTE_CHOSEN.to_vec()).unwrap();
-        assert!(
-            hint.contains("'git dupe remote add <name> <url>'"),
-            "{hint}"
-        );
-        assert!(
-            hint.contains("'git dupe push -u <name> <branch>'"),
-            "{hint}"
-        );
-        assert!(
-            hint.find("git dupe remote add") < hint.find("git dupe push -u"),
-            "{hint}"
-        );
-        assert!(!hint.contains("no remote"), "{hint}");
-        assert!(!hint.contains('\n'), "{hint}");
-    }
-}
+mod tests;

@@ -104,6 +104,7 @@ mod status;
 mod status_run;
 mod table;
 mod transfer;
+mod transfer_advice;
 mod transfer_default;
 mod transfer_help;
 mod transfer_push_hint;

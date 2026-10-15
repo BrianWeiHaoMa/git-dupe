@@ -335,3 +335,115 @@ fn a_default_that_is_a_remote_with_a_url_is_not_compared_again() {
         Some(("branch.case.remote", "Origin"))
     );
 }
+
+#[test]
+fn push_takes_the_remote_of_its_first_key_reported_and_otherwise_origin() {
+    let main = Some(b"main".as_slice());
+    let remote = |listing: &[(&str, Option<&str>)], branch: Option<&[u8]>| {
+        std::str::from_utf8(push_remote(&records(listing), branch))
+            .unwrap()
+            .to_owned()
+    };
+    let all = [
+        ("branch.main.remote", Some("fetched")),
+        ("remote.pushdefault", Some("default")),
+        ("branch.main.pushremote", Some("pushed")),
+        ("remote.origin.url", Some("/srv/o.git")),
+    ];
+    assert_eq!(remote(&all, main), "pushed");
+    assert_eq!(remote(&all[..2], main), "default");
+    assert_eq!(remote(&all[..1], main), "fetched");
+    // A remote the configuration defines a URL for is named, as is a URL.
+    assert_eq!(remote(&all[3..], main), "origin");
+    assert_eq!(
+        remote(&[("branch.main.remote", Some("/srv/b.git"))], main),
+        "/srv/b.git"
+    );
+    // The last record is the value; a record without one is the empty value.
+    assert_eq!(
+        remote(
+            &[
+                ("branch.main.pushremote", Some("first")),
+                ("Branch.main.PushRemote", Some("last")),
+            ],
+            main
+        ),
+        "last"
+    );
+    assert_eq!(remote(&[("remote.pushdefault", None)], main), "");
+    // Another branch's keys, and on a detached `HEAD` every branch key, are not read.
+    assert_eq!(
+        remote(&[("branch.other.pushremote", Some("x"))], main),
+        "origin"
+    );
+    assert_eq!(remote(&all[..1], None), "origin");
+    assert_eq!(remote(&all, None), "default");
+}
+
+#[test]
+fn a_branch_has_an_upstream_while_its_merge_key_is_reported() {
+    let has = |listing: &[(&str, Option<&str>)], branch: &str| {
+        has_upstream(&records(listing), branch.as_bytes())
+    };
+    for listing in [
+        &[("branch.main.merge", Some("refs/heads/main"))][..],
+        &[("BRANCH.main.MERGE", Some("refs/heads/main"))],
+        &[("branch.main.merge", None)],
+    ] {
+        assert!(has(listing, "main"), "{listing:?}");
+    }
+    for listing in [
+        &[][..],
+        &[("branch.main.remote", Some("origin"))],
+        &[("branch.Main.merge", Some("refs/heads/main"))],
+        &[("branch.other.merge", Some("refs/heads/main"))],
+        &[("branch.merge", Some("refs/heads/main"))],
+        &[("branch.main.merge.x", Some("refs/heads/main"))],
+    ] {
+        assert!(!has(listing, "main"), "{listing:?}");
+    }
+}
+
+#[test]
+fn a_reconciliation_is_configured_by_pull_rebase_the_branchs_rebase_or_pull_ff() {
+    let main = Current::Branch(b"main");
+    let configured = |listing: &[(&str, Option<&str>)], current: Current<'_>| {
+        reconciliation_configured(&records(listing), current)
+    };
+    for listing in [
+        &[("pull.rebase", Some("false"))][..],
+        &[("pull.rebase", None)],
+        &[("Pull.Rebase", Some("merges"))],
+        &[("pull.ff", Some("only"))],
+        &[("pull.ff", None)],
+        &[("PULL.FF", Some("false"))],
+    ] {
+        for current in [main, Current::Detached, Current::Unread] {
+            assert!(configured(listing, current), "{listing:?} {current:?}");
+        }
+    }
+    let rebase_of_main = [("branch.main.rebase", Some("true"))];
+    assert!(configured(&rebase_of_main, main));
+    assert!(configured(&[("Branch.main.REBASE", None)], main));
+    // A detached `HEAD` reads no branch's key.
+    assert!(!configured(&rebase_of_main, Current::Detached));
+    // Another branch's key, and a name compared exactly, are not this branch's.
+    let rebase_of_other = [("branch.other.rebase", Some("true"))];
+    assert!(!configured(&rebase_of_other, main));
+    assert!(!configured(&[("branch.Main.rebase", Some("true"))], main));
+    // Where `HEAD` was not read, any branch's key counts.
+    assert!(configured(&rebase_of_other, Current::Unread));
+    assert!(configured(&rebase_of_main, Current::Unread));
+    for listing in [
+        &[][..],
+        &[("branch.main.merge", Some("refs/heads/main"))],
+        &[("pull.twohead", Some("ort"))],
+        &[("pull.rebase.x", Some("true"))],
+        &[("branch.rebase", Some("true"))],
+        &[("rebase.autoStash", Some("true"))],
+    ] {
+        for current in [main, Current::Detached, Current::Unread] {
+            assert!(!configured(listing, current), "{listing:?} {current:?}");
+        }
+    }
+}

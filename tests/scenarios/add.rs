@@ -4,9 +4,9 @@ use std::fs;
 use std::os::unix::fs::symlink;
 
 use crate::harness::{
-    End, daily_state, gitdupe_written_and_staged, holds, lines_in_order, names, names_number,
-    names_the_route_to_private, private_add, region_rules, staged_gitdupe, under_each_release,
-    warnings_in_any_order, write,
+    End, IGNORED_HINT, daily_state, gitdupe_written_and_staged, gits_then_one_hint, holds,
+    lines_in_order, names, names_number, names_the_route_to_private, private_add, region_rules,
+    staged_gitdupe, under_each_release, warnings_in_any_order, write,
 };
 
 #[test]
@@ -115,13 +115,9 @@ fn an_ignored_literal_file_keeps_gits_refusal() {
                 .is_empty()
         );
         assert!(!dir.join(".gitdupe").exists());
-        assert!(
-            output
-                .lines("hint")
-                .iter()
-                .all(|line| !holds(line, b"git dupe")),
-            "{output:?}"
-        );
+        // Git's refusal, then the one hint naming the `git dupe` forms of the commands
+        // Git's advice names (`Holds/G13, G14`).
+        gits_then_one_hint(&output, &expected, &IGNORED_HINT);
     });
 }
 

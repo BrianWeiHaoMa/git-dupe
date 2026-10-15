@@ -6,9 +6,9 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, changed_since, holds, leaving_public_git, names, privately_staged,
-    public_status, region_rules, staged_gitdupe, unchanged, under_each_release,
-    warnings_in_any_order, write,
+    End, IGNORED_HINT, Output, Scenario, Tree, changed_since, gits_then_one_hint, holds,
+    leaving_public_git, names, privately_staged, public_status, region_rules, staged_gitdupe,
+    unchanged, under_each_release, warnings_in_any_order, write,
 };
 
 const DATE: &str = "2000-01-01T00:00:00Z";
@@ -133,7 +133,8 @@ fn cloned_project_through_first_commit_and_daily_private_work() {
             .succeeds();
         let expected = direct(s, &dir, &["add", "--", ":(top,literal).env.local"]);
         assert_ne!(expected.end, End::Code(0), "{expected:?}");
-        assert_eq!(dupe(s, &dir, &["add", ".env.local"]), expected);
+        let refused = dupe(s, &dir, &["add", ".env.local"]);
+        gits_then_one_hint(&refused, &expected, &IGNORED_HINT);
         assert_eq!(
             s.private(&dir)
                 .git(["ls-files", "--stage", "-z"])

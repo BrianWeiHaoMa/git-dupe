@@ -2,9 +2,10 @@
 //! `Holds/G18`): whether the words give a repository, the URLs the private configuration
 //! gives its remotes, and the default remote of a command given no repository. `places`
 //! answers whether each names a public place; the front takes the configuration and the
-//! branch, and writes the lines. The same records say whether `push` given no repository
-//! leaves the choice of a remote to Git, which decides the front's hint after a failed
-//! run (`Holds/G18`).
+//! branch, and writes the lines. The same records decide the front's hints after a failed
+//! run (`Holds/G18`): whether `push` given no repository leaves the choice of a remote to
+//! Git, which remote it takes, whether a branch has an upstream, and whether `pull` is
+//! told how to reconcile divergent branches.
 //!
 //! What the code below cannot show:
 //!
@@ -257,21 +258,32 @@ pub fn default_remote<'a>(
     records: &[Record<'a>],
     branch: Option<&[u8]>,
 ) -> Option<DefaultRemote<'a>> {
-    let keys = default_keys(transfer, branch);
-    let found = keys.into_iter().find_map(|(section, name, variable)| {
-        records
-            .iter()
-            .rev()
-            .find(|&&(key, _)| is(key, section, name, variable))
-            .map(|&(key, value)| DefaultRemote {
-                key,
-                value: value.unwrap_or_default(),
-            })
-    })?;
+    let found = first_set(transfer, records, branch)?;
     let a_remote = records
         .iter()
         .any(|&(key, value)| value.is_some() && is(key, b"remote", Some(found.value), b"url"));
     (!a_remote).then_some(found)
+}
+
+/// The first of `transfer`'s default keys on `branch` that the configuration's `records`
+/// report, with its last record's value, the empty value for a record without one.
+fn first_set<'a>(
+    transfer: Transfer,
+    records: &[Record<'a>],
+    branch: Option<&[u8]>,
+) -> Option<DefaultRemote<'a>> {
+    default_keys(transfer, branch)
+        .into_iter()
+        .find_map(|(section, name, variable)| {
+            records
+                .iter()
+                .rev()
+                .find(|&&(key, _)| is(key, section, name, variable))
+                .map(|&(key, value)| DefaultRemote {
+                    key,
+                    value: value.unwrap_or_default(),
+                })
+        })
 }
 
 /// Whether the configuration's `records` leave `push`, given no repository, on `branch`
@@ -292,6 +304,60 @@ pub fn push_chooses_no_remote(records: &[Record<'_>], branch: Option<&[u8]>) -> 
         .any(|(section, name, variable)| reported(section, name, variable))
         && !reported(b"remote", origin, b"url")
         && !reported(b"remote", origin, b"pushurl")
+}
+
+/// The remote `push`, given no repository, takes on `branch`, or on a detached `HEAD` when
+/// `None`, where the configuration's `records` choose one (`push_chooses_no_remote` false):
+/// the value of the first of its three keys reported, a remote's name or a URL, and
+/// otherwise `origin`, which then has a URL (S13).
+pub fn push_remote<'a>(records: &[Record<'a>], branch: Option<&[u8]>) -> &'a [u8] {
+    first_set(Transfer::Push, records, branch).map_or(b"origin", |found| found.value)
+}
+
+/// Whether the configuration's `records` give `branch` an upstream: a
+/// `branch.<branch>.merge` reported, with a value or without.
+pub fn has_upstream(records: &[Record<'_>], branch: &[u8]) -> bool {
+    records
+        .iter()
+        .any(|&(key, _)| is(key, b"branch", Some(branch), b"merge"))
+}
+
+/// Where `HEAD` stands for `pull`, whose `branch.<name>.rebase` is that of the branch it
+/// names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Current<'a> {
+    /// On this branch.
+    Branch(&'a [u8]),
+    /// Detached: no branch key is read.
+    Detached,
+    /// Not read, as for a `pull` given a repository, whose runs do not ask where it
+    /// stands (G22).
+    Unread,
+}
+
+/// Whether the configuration's `records` tell `pull` on `current` how to reconcile
+/// divergent branches: `pull.rebase`, `branch.<name>.rebase` of the branch `HEAD` names,
+/// or `pull.ff` reported, with a value or without, which Git reads as true. Where `HEAD`
+/// was not read, a `branch.<name>.rebase` of any branch counts, so that the hint is
+/// withheld rather than given where that key may decide.
+pub fn reconciliation_configured(records: &[Record<'_>], current: Current<'_>) -> bool {
+    records.iter().any(|&(key, _)| {
+        let rebase_of = |branch: Option<&[u8]>| {
+            Key::of(key).is_some_and(|key| {
+                key.section.eq_ignore_ascii_case(b"branch")
+                    && key.variable.eq_ignore_ascii_case(b"rebase")
+                    && key.name.is_some()
+                    && (branch.is_none() || key.name == branch)
+            })
+        };
+        is(key, b"pull", None, b"rebase")
+            || is(key, b"pull", None, b"ff")
+            || match current {
+                Current::Branch(branch) => rebase_of(Some(branch)),
+                Current::Detached => false,
+                Current::Unread => rebase_of(None),
+            }
+    })
 }
 
 /// The keys that give `transfer`, given no repository, its default remote, in the order

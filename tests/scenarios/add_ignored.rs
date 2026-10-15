@@ -6,7 +6,8 @@ use std::fs;
 use std::os::unix::ffi::OsStrExt;
 
 use crate::harness::{
-    End, private_commit, privately_tracked, run_traced, under_each_release, write,
+    End, IGNORED_HINT, Output, gits_then_one_hint, holds, names, private_commit, privately_tracked,
+    run_traced, under_each_release, write,
 };
 
 /// A file the project ignores is added with `-f` once: tracked privately, its later
@@ -97,9 +98,9 @@ fn each_ignore_source_of_the_private_repository_keeps_gits_answer_until_forced()
             let words = adds[0].iter().map(|word| OsStr::from_bytes(word));
             let gits = s.private(&dir).git(words).run();
             assert_ne!(gits.end, End::Code(0), "{path} is not ignored: {gits:?}");
-            assert_eq!(ours.end, gits.end, "{path}: {ours:?}; Git: {gits:?}");
-            assert_eq!(ours.stderr, gits.stderr, "{path}: {ours:?}; Git: {gits:?}");
-            assert_eq!(ours.stdout, gits.stdout, "{path}: {ours:?}; Git: {gits:?}");
+            // Git's answer whole, then the hint naming the `git dupe` forms of what Git's
+            // advice names (`Holds/G13, G14`).
+            gits_then_one_hint(&ours, &gits, &IGNORED_HINT);
             let path_bytes = path.as_bytes().to_vec();
             assert!(!privately_tracked(s, &dir).contains(&path_bytes), "{path}");
             assert!(!dir.join(".gitdupe").exists(), "{path}");
@@ -111,5 +112,92 @@ fn each_ignore_source_of_the_private_repository_keeps_gits_answer_until_forced()
         let output = s.git(["dupe", "add", "public.txt"]).from(&dir).run();
         assert_eq!(output.end, End::Code(0), "{output:?}");
         assert!(privately_tracked(s, &dir).contains(&b"public.txt".to_vec()));
+    });
+}
+
+/// The lines of git-dupe's own `hint:` among `output`'s: those naming `git dupe`, which
+/// no line of Git's names.
+fn ours(output: &Output) -> Vec<&[u8]> {
+    output
+        .lines("hint")
+        .into_iter()
+        .filter(|line| holds(line, b"git dupe"))
+        .collect()
+}
+
+/// After the run that carries a literal operand exits 1 without `-f`, one private
+/// `check-ignore` asks about the literal operands, and the hint follows when it reports one
+/// ignored: one run more than an add that succeeds, at any count of private files (G22).
+/// None after a forced add, after a run that ended otherwise, or after a form, whose
+/// ignored paths lose their pathspec before the run (`Holds/G13, G14`).
+#[test]
+fn the_hint_after_an_ignored_literal_costs_one_run_after_exit_1_alone() {
+    under_each_release(|s| {
+        let dir = s.dir().join("project");
+        s.attached_project(&dir);
+        write(&dir, "notes/a.md", b"a\n");
+        s.git(["dupe", "add", "notes/"]).from(&dir).succeeds();
+        write(&dir, ".env.local", b"private\n");
+        let trace = s.dir().join("add.trace");
+        let traced = |words: &[&str]| -> (Output, Vec<Vec<u8>>) {
+            let dupe = ["dupe"].into_iter().chain(words.iter().copied());
+            let (output, runs) = run_traced(s.git(dupe).from(&dir), &trace);
+            let own = runs.own();
+            let commands = own.commands().into_iter().map(<[u8]>::to_vec).collect();
+            (output, commands)
+        };
+        let hinted = |output: &Output| {
+            assert_eq!(output.end, End::Code(1), "{output:?}");
+            let hints = ours(output);
+            assert_eq!(hints.len(), 1, "{output:?}");
+            for part in IGNORED_HINT {
+                names(hints[0], part);
+            }
+        };
+
+        let (dry, _) = traced(&["add", "-n", ".env.local"]);
+        hinted(&dry);
+        let (refused, refused_runs) = traced(&["add", ".env.local"]);
+        hinted(&refused);
+        write(&dir, "scratch.txt", b"scratch\n");
+        let (added, added_runs) = traced(&["add", "scratch.txt"]);
+        assert_eq!(added.end, End::Code(0), "{added:?}");
+        assert!(ours(&added).is_empty(), "{added:?}");
+        let at = added_runs
+            .iter()
+            .position(|command| command == b"add")
+            .unwrap();
+        let mut expected = added_runs.clone();
+        expected.insert(at + 1, b"check-ignore".to_vec());
+        assert_eq!(refused_runs, expected);
+
+        for index in 0..300 {
+            write(&dir, &format!("notes/many/{index}.md"), b"many\n");
+        }
+        s.git(["dupe", "add", "notes/"]).from(&dir).succeeds();
+        private_commit(s, &dir);
+        let (refused, many_runs) = traced(&["add", ".env.local"]);
+        hinted(&refused);
+        assert_eq!(many_runs, refused_runs);
+
+        // A run that ended otherwise asks nothing after it.
+        let (missing, missing_runs) = traced(&["add", "nosuch"]);
+        assert_eq!(missing.end, End::Code(128), "{missing:?}");
+        assert!(ours(&missing).is_empty(), "{missing:?}");
+        assert_eq!(missing_runs, added_runs);
+        let (forced, forced_runs) = traced(&["add", "-f", ".env.local"]);
+        assert_eq!(forced.end, End::Code(0), "{forced:?}");
+        assert!(ours(&forced).is_empty(), "{forced:?}");
+        assert_eq!(forced_runs, added_runs);
+
+        // A hidden directory the project ignores, under a form: its pathspec is dropped
+        // before the run, and nothing is refused.
+        s.git(["dupe", "hide", ".vscode"]).from(&dir).succeeds();
+        write(&dir, ".vscode/launch.json", b"{}\n");
+        for words in [&["add", "."][..], &["add", "-A"]] {
+            let (output, _) = traced(words);
+            assert_eq!(output.end, End::Code(0), "{words:?}: {output:?}");
+            assert!(ours(&output).is_empty(), "{words:?}: {output:?}");
+        }
     });
 }

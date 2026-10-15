@@ -13,6 +13,12 @@
 //!   word is the user's, so they carry `-c help.autocorrect=0` (`runner`).
 //! - A directory to hide is hidden by `hide::hide_paths`, the one operation that hides a
 //!   path, which decides its refusals and prints its `hint:`.
+//! - After the run that carries the literal operands exits 1, while the words spell
+//!   neither `-f` nor `--force`, one more private `check-ignore` asks about those
+//!   operands' paths, and a `hint:` names `git dupe add -f` when it reports any ignored,
+//!   because Git's own advice there names plain `git add -f` and `git config` (G25). It
+//!   comes after every run, the status Git's (F9); a question that fails gives no hint.
+//!   The forms' paths are not asked: the ignored ones lost their pathspec before the run.
 
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::{OsStr, OsString};
@@ -42,6 +48,12 @@ const NO_ALL: Entry = Entry::long("no-all", Value::None);
 const IGNORE_REMOVAL: Entry = Entry::long("ignore-removal", Value::None);
 const NO_IGNORE_REMOVAL: Entry = Entry::long("no-ignore-removal", Value::None);
 const REFRESH: Entry = Entry::long("refresh", Value::None);
+
+/// The hint after a refused add of a path the private repository ignores.
+const IGNORED: &[u8] = b"a path the private repository ignores is added with \
+    'git dupe add -f <path>', and 'git dupe config advice.addIgnoredFile false' turns \
+    Git's advice about it off; plain 'git add' and 'git config' act on the project's \
+    repository";
 
 /// P1's table for `add`.
 pub const TABLE: [Entry; 17] = [
@@ -196,13 +208,15 @@ pub fn add(
         .chain([OsString::from("-u")])
         .collect();
     let mut status = End::Code(0);
+    // The first run made carries every literal operand.
+    let mut literal_run = None;
     for (options, paths) in [(first, &pathspecs.first), (second, &pathspecs.second)] {
         if paths.is_empty() {
             continue;
         }
         match staging(workspace, options, paths, &pathspecs.exclusions) {
-            Ok(End::Code(0)) => {}
             Ok(End::Code(code)) => {
+                literal_run.get_or_insert(code);
                 if status == End::Code(0) {
                     status = End::Code(code);
                 }
@@ -211,10 +225,29 @@ pub fn add(
             Err(ended) => return ended,
         }
     }
+    let literals: Vec<&[u8]> = scope.literals.iter().map(Vec::as_slice).collect();
+    let forced = read.spells(&FORCE);
+    if ignored_hint_owed(literal_run, &literals, forced, || {
+        ignore_answer(workspace, &literals).is_ok_and(|ignored| !ignored.is_empty())
+    }) {
+        lines::write(Level::Hint, IGNORED);
+    }
     if !skipped.is_empty() {
         lines::write(Level::Warning, &skipped_line(skipped.len()));
     }
     Outcome::Git(status)
+}
+
+/// Whether the hint about an ignored path follows: the first run made, which carries every
+/// one of `literals`, exited with `literal_run` 1, the words did not force it, and
+/// `ignores_any`, asked only then, reports one of them ignored.
+fn ignored_hint_owed(
+    literal_run: Option<u8>,
+    literals: &[&[u8]],
+    forced: bool,
+    ignores_any: impl FnOnce() -> bool,
+) -> bool {
+    literal_run == Some(1) && !literals.is_empty() && !forced && ignores_any()
 }
 
 /// The run of the user's words unchanged.
@@ -279,10 +312,22 @@ fn found(root: &Path, forms: &[Vec<u8>], skipped: &[Vec<u8>]) -> Found {
     found
 }
 
+/// The paths among `paths` that the private repository's ignore rules ignore, asked
+/// before the runs: a question that fails ends the command.
+fn ignored(workspace: &Workspace, paths: &[&[u8]]) -> Result<BTreeSet<Vec<u8>>, Outcome> {
+    ignore_answer(workspace, paths).map_err(|failed| match failed {
+        Failed::Unreadable => outcome::refuse(
+            b"cannot read Git's answer about which paths the private repository ignores",
+        ),
+        failed => outcome::failed(failed),
+    })
+}
+
 /// The paths among `paths` that the private repository's ignore rules ignore, from one
 /// private `git check-ignore --no-index -v -n -z --stdin` from the root (S5). Exit 1
-/// means none is; any other failure ends the command.
-fn ignored(workspace: &Workspace, paths: &[&[u8]]) -> Result<BTreeSet<Vec<u8>>, Outcome> {
+/// means none is; any other end, a run that did not start, and an answer that cannot be
+/// read answer nothing.
+fn ignore_answer(workspace: &Workspace, paths: &[&[u8]]) -> Result<BTreeSet<Vec<u8>>, Failed> {
     if paths.is_empty() {
         return Ok(BTreeSet::new());
     }
@@ -294,20 +339,14 @@ fn ignored(workspace: &Workspace, paths: &[&[u8]]) -> Result<BTreeSet<Vec<u8>>, 
         .feed(records::ignore_question(paths))
         .capture_output()
         .start()
-        .map_err(|failure| {
-            outcome::failed(match failure {
-                Failure::TooLong => Failed::TooLong(paths.len()),
-                failure => Failed::NotStarted(failure),
-            })
+        .map_err(|failure| match failure {
+            Failure::TooLong => Failed::TooLong(paths.len()),
+            failure => Failed::NotStarted(failure),
         })?;
     if run.end != End::Code(0) && run.end != End::Code(1) {
-        return Err(Outcome::Git(run.end));
+        return Err(Failed::Exited(run.end));
     }
-    let Some(records) = records::ignore_records(&run.stdout, paths) else {
-        return Err(outcome::refuse(
-            b"cannot read Git's answer about which paths the private repository ignores",
-        ));
-    };
+    let records = records::ignore_records(&run.stdout, paths).ok_or(Failed::Unreadable)?;
     Ok(paths
         .iter()
         .zip(records)
@@ -374,6 +413,39 @@ mod tests {
             read.options_without(&ALL_FLAG),
             read_add(&["-v", "--chmod", "+x", "-n"])
         );
+    }
+
+    #[test]
+    fn the_ignored_hint_follows_exit_1_of_the_literal_run_when_one_is_ignored() {
+        let literal: &[&[u8]] = &[b".env.local"];
+        assert!(ignored_hint_owed(Some(1), literal, false, || true));
+        // The question decides, and is asked only once the rest holds.
+        assert!(!ignored_hint_owed(Some(1), literal, false, || false));
+        for (end, literals, forced) in [
+            (Some(0), literal, false),
+            (Some(128), literal, false),
+            (None, literal, false),
+            (Some(1), &[][..], false),
+            (Some(1), literal, true),
+        ] {
+            let owed = ignored_hint_owed(end, literals, forced, || {
+                panic!("asked after {end:?} {literals:?} {forced}")
+            });
+            assert!(!owed);
+        }
+    }
+
+    #[test]
+    fn the_ignored_hint_is_one_line_naming_the_git_dupe_commands() {
+        let hint = String::from_utf8(IGNORED.to_vec()).unwrap();
+        for part in [
+            "'git dupe add -f <path>'",
+            "'git dupe config advice.addIgnoredFile false'",
+            "plain 'git add' and 'git config' act on the project's repository",
+        ] {
+            assert!(hint.contains(part), "{hint}: {part}");
+        }
+        assert!(!hint.contains('\n'), "{hint}");
     }
 
     #[test]

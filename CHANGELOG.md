@@ -11,12 +11,16 @@ Every change a user of git-dupe would notice, newest first, in the form of
 ### Added
 
 - After a private `rebase` or `am` that stopped, a `cherry-pick` or `revert` that
-  stopped, a `checkout` or `switch` that left a branch for a detached `HEAD`, and a
-  `branch -d` that refused, `git dupe` now ends with a `hint:` naming the `git dupe`
-  commands to go on with, such as `git dupe rebase --continue` or
-  `git dupe switch -c <new-branch-name>`, because Git's own advice there names plain
-  `git` commands, which act on the project's repository. Git's output and exit status
-  are unchanged, and the hint also follows such a command reached through an alias.
+  stopped, a `checkout` or `switch` that left a branch for a detached `HEAD`, a
+  `branch -d` that refused, a `push` from a branch with no upstream, a rejected `push`,
+  a `pull` on a branch with no upstream, a `pull` that finds divergent branches with no
+  way to reconcile them configured, and an `add` of a path the private repository
+  ignores, `git dupe` now ends with a `hint:` naming the `git dupe` commands to go on
+  with, such as `git dupe rebase --continue`, `git dupe push -u origin main`, or
+  `git dupe add -f <path>`, because Git's own advice there names plain `git` commands,
+  which act on the project's repository. Git's output and exit status are unchanged,
+  and the hint also follows such a command reached through an alias. The manual page
+  says so under PLAIN GIT.
 
 ### Fixed
 
