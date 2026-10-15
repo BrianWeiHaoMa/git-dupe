@@ -8,7 +8,7 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Point, Scenario, Tree, Worktree, linked_on_branch, name_accepted, names,
+    End, Output, Point, Scenario, Tree, Worktree, completed_hint, linked_on_branch, name_accepted,
     unchanged, under_each_release,
 };
 
@@ -66,21 +66,6 @@ fn relative_and_resolved(s: &Scenario, wt: &Worktree) {
     assert!(!value.starts_with(b"/"));
     assert_eq!(value, relative(wt));
     plain_top(s, wt, s.dir());
-}
-
-fn completed_hint(output: &Output, completed: bool) {
-    assert_eq!(output.end, End::Code(0), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    let line = output.only_line("hint");
-    names(line, b"already attached");
-    names(
-        line,
-        if completed {
-            b"completed its settings"
-        } else {
-            b"nothing was missing"
-        },
-    );
 }
 
 fn init(s: &Scenario, wt: &Worktree) -> Output {

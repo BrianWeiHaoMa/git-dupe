@@ -1,7 +1,11 @@
 //! The keys `init` gives the private repository (F2, G1), and how it tells whether they
-//! are set: one private `config -z --local --list`, whose `core.worktree` is the
-//! relative work tree only after the last key of a finished `init`. Then none is set
-//! again, so that a key the developer edited afterward stays as they left it (S6).
+//! are set: one private `config -z --show-scope --no-includes --get-all core.worktree`,
+//! whose values in the repository's own files — the local `config` and, where
+//! `extensions.worktreeConfig` is set, as a private sparse checkout sets it, moving the
+//! key there, `config.worktree`, which Git reads after it (S12), the two files Git takes
+//! the work tree from — are all the relative work tree only after the last key of a
+//! finished `init`. Then none is set again, so that a key the developer edited
+//! afterward stays as they left it (S6).
 //!
 //! The **relative work tree** is the lexical path from the private Git directory to the
 //! root over their canonical forms (`Composition/Attachment`, R9): `../..` in the main
@@ -16,10 +20,13 @@
 //!
 //! Each key is its own `git config --replace-all` run, in a fixed order with
 //! `core.worktree` last: a key a template set more than once would make a plain `git
-//! config` refuse, and every later `init` with it. The identity is what the public
-//! repository's local configuration holds, a file it includes counted, where it holds
-//! one: `config --local --includes --get` answers nothing, exit 1, for a key set only
-//! globally.
+//! config` refuse, and every later `init` with it. Every key but `core.worktree` goes to
+//! the local file; `core.worktree` goes there too and, where Git read it from
+//! `config.worktree`, there as well, so that no stale value can outrank the one written.
+//! The identity is what
+//! the public repository's local configuration holds, a file it includes counted, where
+//! it holds one: `config --local --includes --get` answers nothing, exit 1, for a key set
+//! only globally.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -83,42 +90,97 @@ fn relative(from: &Path, to: &Path) -> Vec<u8> {
     parts.join(&b'/')
 }
 
-/// Whether the private configuration lacks `core.worktree` spelled as `work_tree`: an
-/// `init` that did not finish, or a linked worktree moved since. A repository without a
-/// configuration file has none of the keys, and Git refuses to list a file that is not
-/// there.
-pub fn unfinished(workspace: &Workspace, private: &Path, work_tree: &[u8]) -> Result<bool, Failed> {
-    if fs::symlink_metadata(private.join("config")).is_err() {
-        return Ok(true);
-    }
-    let run = Run::private(
-        private,
-        workspace.root(),
-        ["config", "-z", "--local", "--list"],
-    )
-    .capture_output();
-    let listing = step(run, &[0])?.stdout;
-    Ok(worktree(&listing) != Some(work_tree))
+/// `core.worktree` as the private repository's own files record it, from one private
+/// `config -z --show-scope --no-includes --get-all`: the values of scope `local`, its
+/// `config`, and `worktree`, its `config.worktree`, which Git reads after the local file
+/// and only where `extensions.worktreeConfig` is set. Git takes the work tree from these
+/// alone, following no `include.path`: a value given before `dupe` with `-c`, set in the
+/// global or system configuration, or reached through an include is no record of the
+/// repository's and is left out. Git answers nothing, exit 1, for an unset key, in a
+/// repository without a configuration file too (S12).
+pub struct Recorded {
+    values: Vec<Vec<u8>>,
+    in_worktree_file: bool,
 }
 
-/// Sets every key, `core.worktree` last, to `work_tree`. The public values are read
-/// before the first write, so that a failed read writes nothing.
-pub fn set(workspace: &Workspace, private: &Path, work_tree: &[u8]) -> Result<(), Failed> {
+/// Reads `core.worktree` in the private repository at `private`.
+pub fn recorded(workspace: &Workspace, private: &Path) -> Result<Recorded, Failed> {
+    let words = [
+        "config",
+        "-z",
+        "--show-scope",
+        "--no-includes",
+        "--get-all",
+        "core.worktree",
+    ];
+    let run = Run::private(private, workspace.root(), words).capture_output();
+    let answer = step(run, &[0, 1])?;
+    let scoped = match answer.end {
+        End::Code(0) => records::config_scoped_values(&answer.stdout).unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let own: Vec<_> = scoped
+        .into_iter()
+        .filter(|(scope, _)| matches!(*scope, b"local" | b"worktree"))
+        .collect();
+    Ok(Recorded {
+        in_worktree_file: own.iter().any(|(scope, _)| *scope == b"worktree"),
+        values: own.into_iter().map(|(_, value)| value.to_vec()).collect(),
+    })
+}
+
+impl Recorded {
+    /// Whether no value is recorded, or one is not spelled as `work_tree`: an `init` that
+    /// did not finish, or a linked worktree moved since. Every value counts, not only the
+    /// one Git reads: a template's `config.worktree` can name the root before any key is
+    /// set, Git's own `init` having left its absolute path in the local file.
+    pub fn unfinished(&self, work_tree: &[u8]) -> bool {
+        self.values.is_empty() || self.values.iter().any(|value| value != work_tree)
+    }
+
+    /// The scopes `core.worktree` is written with, so that every value Git reads is the
+    /// one written: `--local`, and `--worktree`, which writes `config.worktree`, where Git
+    /// read a value from there. Only there: without the extension `--worktree` would mean
+    /// the local file, but Git refuses it, exit 128, in a repository with a worktree of
+    /// its own, as `git dupe worktree add` makes one.
+    fn scopes(&self) -> &'static [&'static str] {
+        if self.in_worktree_file {
+            &["--local", "--worktree"]
+        } else {
+            &["--local"]
+        }
+    }
+}
+
+/// Sets every key, `core.worktree` last, to `work_tree`, `core.worktree` in each file
+/// `recorded` read it from. The public values are read before the first write, so that a
+/// failed read writes nothing.
+pub fn set(
+    workspace: &Workspace,
+    private: &Path,
+    work_tree: &[u8],
+    recorded: &Recorded,
+) -> Result<(), Failed> {
     let mut copied = Vec::new();
     for key in COPIED {
         if let Some(value) = public_local(key)? {
-            copied.push((key, value));
+            copied.push(("--local", key, value));
         }
     }
     let keys = FIXED
-        .map(|(key, value)| (key, value.as_bytes().to_vec()))
+        .map(|(key, value)| ("--local", key, value.as_bytes().to_vec()))
         .into_iter()
         .chain(copied)
-        .chain([("core.worktree", work_tree.to_vec())]);
-    for (key, value) in keys {
+        .chain(
+            recorded
+                .scopes()
+                .iter()
+                .map(|&scope| (scope, "core.worktree", work_tree.to_vec())),
+        );
+    for (scope, key, value) in keys {
         let words = [
             OsStr::new("config"),
-            OsStr::new("--local"),
+            OsStr::new(scope),
             OsStr::new("--replace-all"),
             OsStr::new(key),
             OsStr::from_bytes(&value),
@@ -141,35 +203,9 @@ fn public_local(key: &str) -> Result<Option<Vec<u8>>, Failed> {
     Ok(Some(records::config_value(&answer.stdout).to_vec()))
 }
 
-/// The last `core.worktree` of a `config -z --list`, as Git reads it; `None` when it is
-/// absent or has no value.
-fn worktree(listing: &[u8]) -> Option<&[u8]> {
-    records::config_records(listing)
-        .filter(|(key, _)| *key == b"core.worktree")
-        .last()
-        .and_then(|(_, value)| value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_last_core_worktree_decides() {
-        assert_eq!(worktree(b"core.worktree\n../..\0"), Some(&b"../.."[..]));
-        assert_eq!(
-            worktree(b"core.worktree\n/w/repo\0core.worktree\n../..\0"),
-            Some(&b"../.."[..])
-        );
-        assert_eq!(
-            worktree(b"core.worktree\n../..\0core.worktree\n/w/repo\0"),
-            Some(&b"/w/repo"[..])
-        );
-        assert_eq!(worktree(b"core.worktree\0"), None);
-        assert_eq!(worktree(b"core.bare\nfalse\0"), None);
-        // A value is never a key: `x.y` holding the text of another record.
-        assert_eq!(worktree(b"x.y\ncore.worktree\n../..\0"), None);
-    }
 
     fn relative_of(from: &[u8], to: &[u8]) -> Vec<u8> {
         relative(

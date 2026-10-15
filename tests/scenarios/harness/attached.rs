@@ -9,7 +9,7 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-use super::output::{End, Output};
+use super::output::{End, Output, names};
 use super::scenario::{Git, Scenario};
 
 impl Scenario {
@@ -77,6 +77,24 @@ impl<'s> Private<'s> {
             .git([git_dir, work_tree].into_iter().chain(words))
             .from(&self.root)
     }
+}
+
+/// `git dupe init` in a workspace already attached: exit 0, nothing on standard output,
+/// and one `hint:` saying so and whether it completed the settings or found nothing
+/// missing.
+pub fn completed_hint(output: &Output, completed: bool) {
+    assert_eq!(output.end, End::Code(0), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    let line = output.only_line("hint");
+    names(line, b"already attached");
+    names(
+        line,
+        if completed {
+            b"completed its settings"
+        } else {
+            b"nothing was missing"
+        },
+    );
 }
 
 /// Stages `path` in the private index of the workspace at `dir`, with `add -f`.

@@ -25,6 +25,15 @@ Every change a user of git-dupe would notice, newest first, in the form of
   one made on a detached `HEAD`, is on no remote-tracking branch, as it already refused
   for a commit on a branch, tag, or stash entry, where it removed the private repository
   and that commit with it.
+- `git dupe init` in an attached workspace whose private repository has a sparse
+  checkout (`git dupe sparse-checkout set`) now reads and records the work tree in
+  `config.worktree`, where the sparse checkout moved it and where Git reads it first:
+  after `git worktree move` it records the linked worktree's new place there, so that
+  plain Git reads the private repository again, where it wrote the local file that
+  `config.worktree` outranks; and on an attachment that was already complete it changes
+  nothing, where it took the attachment for unfinished and set the identity,
+  `status.showUntrackedFiles`, and `advice.statusHints` again over the developer's own
+  values.
 
 ## [0.3.0] - 2026-10-12
 

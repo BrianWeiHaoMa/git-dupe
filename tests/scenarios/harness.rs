@@ -34,9 +34,9 @@ mod worktrees;
 
 pub use aliases::{global_alias, private_alias};
 pub use attached::{
-    Region, daily_edited, daily_state, dupe_succeeds, gitdupe_written_and_staged, private_add,
-    private_commit, private_config_value, private_head, privately_staged, region, region_in,
-    region_rules, staged_gitdupe,
+    Region, completed_hint, daily_edited, daily_state, dupe_succeeds, gitdupe_written_and_staged,
+    private_add, private_commit, private_config_value, private_head, privately_staged, region,
+    region_in, region_rules, staged_gitdupe,
 };
 pub use clean::{EVERY_KIND_SPARED, Twin, hidden_path_of_every_kind};
 pub use concurrent::started_together;

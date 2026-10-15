@@ -1,8 +1,9 @@
 //! Readers of the machine forms Git answers in (R5): a `-z` listing of paths, a
-//! `config -z` answer, as one `--get` value or as the records of `--list` and
-//! `--get-regexp`, the records of `check-ignore -v -n -z --stdin`, the name lines of
-//! `--list-cmds`, the records of `worktree list --porcelain -z`, the line of
-//! `symbolic-ref -q HEAD`, and the `ref:` line of `ls-remote --symref`.
+//! `config -z` answer, as one `--get` value, as the scoped values of
+//! `--show-scope --get-all`, or as the records of `--list` and `--get-regexp`, the
+//! records of `check-ignore -v -n -z --stdin`, the name lines of `--list-cmds`, the
+//! records of `worktree list --porcelain -z`, the line of `symbolic-ref -q HEAD`, and the
+//! `ref:` line of `ls-remote --symref`.
 //!
 //! A reader parses its form and nothing more. Which listing or key is asked for, and what
 //! an answer means, stay with the part that asks. A form read by one caller whose checks
@@ -22,6 +23,23 @@ pub fn paths(listing: &[u8]) -> BTreeSet<Vec<u8>> {
 /// The value in a `config -z --get` answer: its bytes before the terminating NUL.
 pub fn config_value(answer: &[u8]) -> &[u8] {
     answer.strip_suffix(b"\0").unwrap_or(answer)
+}
+
+/// The scopes and values of a `config -z --show-scope --get-all` answer, in Git's order:
+/// for each value, the scope Git names its file by and the value, each NUL terminated.
+/// `None` when the answer is not of that shape, which is never taken for an answer.
+pub fn config_scoped_values(answer: &[u8]) -> Option<Vec<(&[u8], &[u8])>> {
+    if answer.is_empty() {
+        return Some(Vec::new());
+    }
+    let fields: Vec<&[u8]> = answer
+        .strip_suffix(b"\0")?
+        .split(|&byte| byte == 0)
+        .collect();
+    if !fields.len().is_multiple_of(2) {
+        return None;
+    }
+    Some(fields.chunks(2).map(|pair| (pair[0], pair[1])).collect())
 }
 
 /// The records of `config -z --list` or `--get-regexp`: each the key, a newline, and the
@@ -304,5 +322,21 @@ mod tests {
         assert_eq!(config_value(b"A Name\0"), b"A Name");
         assert_eq!(config_value(b"two\nlines\0"), b"two\nlines");
         assert_eq!(config_value(b"\0"), b"");
+    }
+
+    #[test]
+    fn scoped_config_values_pair_each_scope_with_its_value() {
+        assert_eq!(
+            config_scoped_values(b"local\0../..\0worktree\0two\nlines\0command\0\0"),
+            Some(vec![
+                (&b"local"[..], &b"../.."[..]),
+                (b"worktree", b"two\nlines"),
+                (b"command", b""),
+            ])
+        );
+        assert_eq!(config_scoped_values(b""), Some(Vec::new()));
+        // A scope without its value, and a value without its NUL.
+        assert_eq!(config_scoped_values(b"local\0"), None);
+        assert_eq!(config_scoped_values(b"local\0../.."), None);
     }
 }

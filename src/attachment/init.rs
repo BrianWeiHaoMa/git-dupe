@@ -93,9 +93,10 @@ pub(super) fn attach(
     if repository {
         make(workspace, &private, branch)?;
     }
-    let settings = settings::unfinished(workspace, &private, &work_tree)?;
+    let recorded = settings::recorded(workspace, &private)?;
+    let settings = recorded.unfinished(&work_tree);
     if settings {
-        settings::set(workspace, &private, &work_tree)?;
+        settings::set(workspace, &private, &work_tree, &recorded)?;
     }
     Ok(Initialized {
         repository,

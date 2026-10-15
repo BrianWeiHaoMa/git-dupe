@@ -72,6 +72,7 @@ mod in_use;
 mod in_use_scripted;
 mod init;
 mod init_template;
+mod init_worktree_config;
 mod isolation;
 mod killed;
 mod macos_volume;

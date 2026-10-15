@@ -16,9 +16,11 @@
 //!   status, the workspace attached to the extent of the steps done; `init` run again
 //!   completes it, and `detach --force` and `clone` start a `clone` over.
 //! - `core.worktree` set to the relative work tree (`settings`), `../..` in the main
-//!   worktree, is the last step of `init`, so that any other value, or none, is an `init`
-//!   that did not finish, however it came to be so, a linked worktree moved since
-//!   included.
+//!   worktree, is the last step of `init`, so that any other value in the private
+//!   repository's own configuration files, or none, is an `init` that did not finish,
+//!   however it came to be so, a linked worktree moved since included. It is written to
+//!   the local file and, once a private sparse checkout has moved it into
+//!   `config.worktree`, which Git reads first, there too.
 //! - In the working tree, this part has Git write only what `clone`'s write step feeds
 //!   it: privately tracked files absent from disk, never over anything present (`write`).
 //! - `detach` deletes the region before it removes the private repository, and removes
