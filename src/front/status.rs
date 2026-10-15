@@ -122,7 +122,7 @@ pub fn status(workspace: &Workspace, read: &Read, paths: Option<&[Vec<u8>]>) -> 
     }
     words.push("--".into());
     words.extend(confined);
-    words.extend(exclusions.iter().map(confinement::Exclusion::pathspec));
+    words.extend(exclusions.iter().map(|path| confinement::excluded(path)));
 
     let private = workspace.private_directory();
     match Run::private(&private, workspace.root(), words)

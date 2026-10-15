@@ -10,23 +10,13 @@ use super::operand;
 use super::pathspec;
 use super::scope;
 
-/// A publicly tracked path under the scope that `status`'s run leaves out.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Exclusion {
-    /// The path and everything below it.
-    Whole(Vec<u8>),
-    /// The path alone, because a staged deletion below it stays shown.
-    Exact(Vec<u8>),
-}
-
-impl Exclusion {
-    /// The pathspec that leaves it out (`Composition/Guards`).
-    pub fn pathspec(&self) -> OsString {
-        match self {
-            Exclusion::Whole(path) => pathspec::top_literal_exclude(path),
-            Exclusion::Exact(path) => pathspec::top_glob_exclude_exact(path),
-        }
-    }
+/// The pathspec that leaves out one of the exclusions: the path alone, never what lies
+/// below it (`Composition/Guards`). A literal exclusion would also leave out a staged
+/// deletion below the path, and the untracked and ignored files under a directory standing
+/// where the public index holds a file, which G12 shows; where a file or nothing stands at
+/// the path the two leave out the same.
+pub fn excluded(path: &[u8]) -> OsString {
+    pathspec::top_glob_exclude_exact(path)
 }
 
 /// The scope: without user paths, every region path and every staged deletion; with them,
@@ -65,17 +55,15 @@ pub fn scope(
 
 /// The exclusions: each publicly tracked path at or below a scope path, unless the private
 /// repository tracks it, has its deletion staged, or tracks a file below it, because the
-/// status shows those and what stands at them; the path alone where a staged deletion
-/// lies below it, so that the deletion stays shown. In byte order.
+/// status shows those and what stands at them. In byte order, each written by `excluded`.
 pub fn exclusions(
     scope: &[Vec<u8>],
     publicly_tracked: &BTreeSet<Vec<u8>>,
     privately_tracked: &BTreeSet<Vec<u8>>,
     deletions: &BTreeSet<Vec<u8>>,
-) -> Vec<Exclusion> {
+) -> Vec<Vec<u8>> {
     let scope: BTreeSet<&[u8]> = scope.iter().map(Vec::as_slice).collect();
     let above_private = above(privately_tracked);
-    let above_deleted = above(deletions);
     publicly_tracked
         .iter()
         .filter(|path| {
@@ -87,13 +75,7 @@ pub fn exclusions(
                 && !deletions.contains(*path)
                 && !above_private.contains(path.as_slice())
         })
-        .map(|path| {
-            if above_deleted.contains(path.as_slice()) {
-                Exclusion::Exact(path.clone())
-            } else {
-                Exclusion::Whole(path.clone())
-            }
-        })
+        .cloned()
         .collect()
 }
 
@@ -115,13 +97,6 @@ mod tests {
 
     fn set(paths: &[&[u8]]) -> BTreeSet<Vec<u8>> {
         paths.iter().map(|path| path.to_vec()).collect()
-    }
-
-    fn whole(paths: &[&[u8]]) -> Vec<Exclusion> {
-        paths
-            .iter()
-            .map(|path| Exclusion::Whole(path.to_vec()))
-            .collect()
     }
 
     const REGION: [&[u8]; 5] = [
@@ -212,13 +187,13 @@ mod tests {
         let scope = paths(&[b"notes", b"notes/old.md", b"top"]);
         assert_eq!(
             exclusions(&scope, &publicly_tracked, &privately_tracked, &deletions),
-            whole(&[b"notes/shared.md", b"top/other"])
+            paths(&[b"notes/shared.md", b"top/other"])
         );
         assert!(exclusions(&[], &publicly_tracked, &privately_tracked, &deletions).is_empty());
     }
 
     #[test]
-    fn a_publicly_tracked_path_with_a_staged_deletion_below_it_is_excluded_alone() {
+    fn a_publicly_tracked_path_with_a_staged_deletion_below_it_is_excluded() {
         let privately_tracked = set(&[b"notes/a.md", b"top/conf/local.ini"]);
         let deletions = set(&[b"notes/sub/y", b"h/x", b"top/conf/gone", b"notes/subtle"]);
         let publicly_tracked = set(&[
@@ -233,21 +208,15 @@ mod tests {
         let scope = paths(&[b"h", b"h/x", b"notes", b"notes/sub/y", b"top"]);
         assert_eq!(
             exclusions(&scope, &publicly_tracked, &privately_tracked, &deletions),
-            vec![
-                Exclusion::Exact(b"h".to_vec()),
-                Exclusion::Whole(b"notes/shared.md".to_vec()),
-                Exclusion::Whole(b"notes/su".to_vec()),
-                Exclusion::Exact(b"notes/sub".to_vec()),
-            ]
+            paths(&[b"h", b"notes/shared.md", b"notes/su", b"notes/sub"])
         );
-        assert_eq!(
-            Exclusion::Exact(b"notes/sub".to_vec()).pathspec(),
-            pathspec::top_glob_exclude_exact(b"notes/sub")
-        );
-        assert_eq!(
-            Exclusion::Whole(b"notes/su".to_vec()).pathspec(),
-            pathspec::top_literal_exclude(b"notes/su")
-        );
+    }
+
+    #[test]
+    fn every_exclusion_leaves_out_the_path_alone() {
+        for path in [&b"notes/sub"[..], b"notes/shared.md", b"h"] {
+            assert_eq!(excluded(path), pathspec::top_glob_exclude_exact(path));
+        }
     }
 
     #[test]
@@ -258,18 +227,18 @@ mod tests {
         let everything = scope(&region, &none, None);
         assert_eq!(
             exclusions(&everything, &publicly_tracked, &none, &none),
-            whole(&[b".gitdupe", b"notes/shared.md"])
+            paths(&[b".gitdupe", b"notes/shared.md"])
         );
         let notes = scope(&region, &none, Some(&paths(&[b"notes"])));
         assert_eq!(
             exclusions(&notes, &publicly_tracked, &none, &none),
-            whole(&[b"notes/shared.md"])
+            paths(&[b"notes/shared.md"])
         );
         // Privately tracked as well: tracked by both, and shown.
         let private = set(&[b".gitdupe"]);
         assert_eq!(
             exclusions(&everything, &publicly_tracked, &private, &none),
-            whole(&[b"notes/shared.md"])
+            paths(&[b"notes/shared.md"])
         );
     }
 }

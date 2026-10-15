@@ -5,8 +5,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, daily_state, holds, names, private_add, private_commit,
-    under_each_release, write,
+    End, Output, Scenario, daily_state, dupe_succeeds, holds, names, private_add, private_commit,
+    public_status, under_each_release, write,
 };
 
 const CHANGES: &[&str] = &[
@@ -146,6 +146,55 @@ fn publicly_tracked_files_under_hidden_paths_are_excluded() {
             .succeeds();
         let output = s.git(["dupe", "status", "--porcelain"]).from(&dir).run();
         quiet_records(&output, CHANGES);
+    });
+}
+
+/// A teammate's file below a hidden directory, replaced in the working tree by a directory:
+/// the untracked and ignored files under it show, collapsed as Git collapses them, and the
+/// teammate's files do not, whether a file or nothing stands at them (G12).
+#[test]
+fn what_stands_under_a_directory_at_a_publicly_tracked_file_is_shown() {
+    under_each_release(|s| {
+        let dir = s.dir().join("project");
+        s.attached_project(&dir);
+        s.git(["switch", "-q", "-c", "teammate"])
+            .from(&dir)
+            .succeeds();
+        write(&dir, ".gitignore", b".env.local\n.vscode/\nbuild/\n*.log\n");
+        for path in ["notes/topic", "notes/shared.md", "notes/gone.md"] {
+            write(&dir, path, b"public\n");
+        }
+        s.git(["add", "--", ".gitignore", "notes"])
+            .from(&dir)
+            .succeeds();
+        s.commit_public(&dir);
+        s.git(["switch", "-q", "main"]).from(&dir).succeeds();
+        dupe_succeeds(s, &dir, &["hide", "notes"]);
+        private_commit(s, &dir);
+        s.git(["switch", "-q", "teammate"]).from(&dir).succeeds();
+        fs::remove_file(dir.join("notes/topic")).unwrap();
+        fs::remove_file(dir.join("notes/gone.md")).unwrap();
+        write(&dir, "notes/topic/draft.md", b"draft\n");
+        write(&dir, "notes/topic/out.log", b"ignored\n");
+        let status = |words: &[&str]| {
+            let words = ["dupe", "status", "--porcelain"].iter().chain(words);
+            s.git(words).from(&dir).run()
+        };
+        let below_topic = &["?? notes/topic/draft.md", "!! notes/topic/out.log"][..];
+        quiet_records(&status(&["-uall"]), below_topic);
+        quiet_records(&status(&["-uall", "notes/topic"]), below_topic);
+        // Nothing privately tracked lies under `notes`, so Git collapses it whole.
+        quiet_records(&status(&[]), &["?? notes/", "!! notes/topic/out.log"]);
+        assert_eq!(
+            public_status(s, &dir),
+            b" D notes/gone.md\n D notes/topic\n"
+        );
+        write(&dir, "notes/a.md", b"private\n");
+        dupe_succeeds(s, &dir, &["add", "notes/a.md"]);
+        quiet_records(
+            &status(&[]),
+            &["A  notes/a.md", "?? notes/topic/", "!! notes/topic/out.log"],
+        );
     });
 }
 

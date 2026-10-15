@@ -34,6 +34,10 @@ Every change a user of git-dupe would notice, newest first, in the form of
   nothing, where it took the attachment for unfinished and set the identity,
   `status.showUntrackedFiles`, and `advice.statusHints` again over the developer's own
   values.
+- `git dupe status` now shows the untracked and ignored files under a directory that
+  stands, below a hidden path, where the project's Git tracks a file, as when a draft
+  directory replaces a teammate's file, where it left out the directory and everything
+  in it; the project's file itself is still not listed.
 
 ## [0.3.0] - 2026-10-12
 
