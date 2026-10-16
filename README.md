@@ -198,11 +198,11 @@ files, or `cargo uninstall git-dupe` after an install from source.
 - **What it writes.** Of its own accord, git-dupe writes the worktree's dupe, its own
   marked region of `.git/info/exclude` (and `.git/info` when it is missing, and the
   removal of a region whose worktree's dupe is gone), and `.gitdupe`; `git dupe clone`
-  also writes the files it checks out, and `git dupe clean` deletes what your
-  `git clean` would, hidden paths excepted. Beyond that, a Git command writes where your
-  words tell Git to. No hook, no daemon, no edit to `.gitignore` or to the project's
-  configuration, no dependency beyond Rust's standard library, and the only program it
-  runs is `git`.
+  also writes the files it checks out, and `git dupe clean` runs your `git clean`,
+  never deleting a hidden path, or refuses the few forms that could take one. Beyond
+  that, a Git command writes where your words tell Git to. No hook, no daemon, no edit
+  to `.gitignore` or to the project's configuration, no dependency beyond Rust's
+  standard library, and the only program it runs is `git`.
 
 ## Limits
 
