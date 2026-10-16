@@ -53,7 +53,8 @@ Every change a user of git-dupe would notice, newest first, in the form of
   directory replaces a teammate's file, where it left out the directory and everything
   in it; the project's file itself is still not listed, and a directory holding a
   `.git` entry that stands at such a path, as a submodule's checkout does, is not
-  listed as untracked.
+  listed as untracked unless the deletion of a private file at that same path is
+  staged.
 - `git dupe push`, `pull`, `fetch`, `remote`, and `clone` now refuse a URL of the
   project's remote whose credentials hold an encoded `/`, as
   `https://reader:p%2Fss@example.com/team/project.git` does, and every other spelling
