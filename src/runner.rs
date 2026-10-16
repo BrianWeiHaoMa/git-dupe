@@ -6,7 +6,9 @@
 //! words as bytes, whether its command word is the user's, which streams it captures, the
 //! bytes it is fed, whether its paths are git-dupe's own, and whether it reads the index
 //! the user's own command reads. Its environment is built by `environment` alone, never
-//! by a caller (G10).
+//! by a caller (G10), but for a variable one run sets over it for itself, by `variable`:
+//! `GIT_GRAFT_FILE` on the `rev-list` that `detach` decides by, and on no other run
+//! (`Composition/Runner`, `Holds/G3`).
 //!
 //! A run whose command word is the user's carries `-c help.autocorrect=0` before that
 //! word, written by `arguments` and nowhere else, so that a word Git does not know is
@@ -95,6 +97,7 @@ pub struct Run<'r> {
     own_paths: bool,
     users_command: bool,
     users_index: bool,
+    variables: Vec<(OsString, OsString)>,
 }
 
 impl<'r> Run<'r> {
@@ -140,13 +143,15 @@ impl<'r> Run<'r> {
             own_paths: false,
             users_command: false,
             users_index: false,
+            variables: Vec::new(),
         }
     }
 
     /// Global options before the words, after any carried prefix: for a lookup of an
     /// alias chain, the options its expansions have set so far (`Holds/G19`); for the
     /// status `detach` reads, `--no-optional-locks`, and for its `rev-list`,
-    /// `--no-replace-objects` (`Holds/G3`).
+    /// `--no-replace-objects` and the `-c` that turns Git's advice on grafts off
+    /// (`Holds/G3`).
     pub fn prefixed(mut self, prefix: &'r [OsString]) -> Self {
         self.prefix = prefix;
         self
@@ -205,6 +210,14 @@ impl<'r> Run<'r> {
         self
     }
 
+    /// `name` set to `value` for this run alone, over what the environment rules give it,
+    /// a value received under that name included.
+    pub fn variable(mut self, name: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> Self {
+        self.variables
+            .push((name.as_ref().to_owned(), value.as_ref().to_owned()));
+        self
+    }
+
     /// Runs it to its end.
     pub fn start(self) -> Result<Finished, Failure> {
         let own_command = if self.users_command {
@@ -212,7 +225,7 @@ impl<'r> Run<'r> {
         } else {
             self.words.first().map(OsString::as_os_str)
         };
-        let environment = environment::of(
+        let mut environment = environment::of(
             &self.against,
             own_command,
             self.own_paths,
@@ -221,6 +234,7 @@ impl<'r> Run<'r> {
             std::env::current_dir,
         )
         .map_err(Failure::Other)?;
+        environment.extend(self.variables);
         let carried = CARRIED.get().map_or(&[][..], Vec::as_slice);
         let words = arguments(
             [carried, self.prefix].concat(),
@@ -302,6 +316,7 @@ fn end(status: ExitStatus) -> Result<End, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::ffi::OsStrExt;
 
     #[test]
     fn an_argument_the_kernel_refuses_is_the_too_long_outcome_and_nothing_runs() {
@@ -368,6 +383,23 @@ mod tests {
             arguments(Vec::new(), false, owned(&["config"])),
             owned(&["config"])
         );
+    }
+
+    #[test]
+    fn a_runs_own_variable_reaches_its_git_alone_over_the_value_received() {
+        // The alias prints `HOME` as its `git` received it: the run's own value there,
+        // the value this process received in every other run.
+        let printed = |run: Run| {
+            let finished = run.capture_output().start().expect("a run");
+            assert_eq!(finished.end, End::Code(0));
+            finished.stdout
+        };
+        let print = || Run::public(["-c", "alias.print=!printf %s \"$HOME\"", "print"]);
+        let received = std::env::var_os("HOME").unwrap_or_default();
+        let mut own = received.clone();
+        own.push("/elsewhere");
+        assert_eq!(printed(print().variable("HOME", &own)), own.as_bytes());
+        assert_eq!(printed(print()), received.as_bytes());
     }
 
     #[test]

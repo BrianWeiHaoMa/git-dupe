@@ -1,5 +1,6 @@
 //! What `git dupe detach` refuses, and that a refusal changes nothing anywhere.
 
+use std::ffi::OsString;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::symlink;
@@ -212,71 +213,184 @@ fn the_commit_a_detached_head_names_counts() {
     });
 }
 
-/// The history as stored decides (G3): a commit that a replace ref alone grafts under the
-/// pushed `main` is on no remote-tracking branch, whether a global option, its variable,
-/// or a setting before `dupe` turns replace refs off or on, until it is pushed itself.
-#[test]
-fn a_commit_a_replace_ref_grafts_under_pushed_history_is_still_unpushed() {
-    under_each_release(|s| {
-        let transfer = s.pushed_workspace("grafted");
-        let root = &transfer.root;
-        let main = commit_of(s, root, "main");
-        s.private(root)
-            .git(["switch", "-q", "--orphan", "rescue"])
-            .succeeds();
-        write(root, "unique", b"only here\n");
-        private_add(s, root, "unique");
-        private_commit(s, root);
-        let rescue = commit_of(s, root, "rescue");
-        s.private(root).git(["switch", "-q", "main"]).succeeds();
-        dupe_succeeds(s, root, &["replace", "--graft", &main, &rescue]);
-        assert!(!unpushed(s, root, "rescue", &[]));
-        assert!(unpushed(s, root, "rescue", &["--no-replace-objects"]));
-        clean(s, root);
+/// A way the private repository's own view grafts commits, which no remote holds (G3).
+#[derive(Clone, Copy, Debug)]
+enum Graft {
+    /// A replace ref, `git replace --graft`.
+    ReplaceRef,
+    /// A line of the grafts file, which every run that parses a commit reads, with Git's
+    /// advice that grafts are deprecated unless the configuration turns it off.
+    GraftsFile,
+}
 
-        let line = refused(s, &transfer);
-        names(&line, b"no remote-tracking branch");
-        for (global, variable) in [
-            (["--no-replace-objects", "dupe"].as_slice(), None),
-            (&["dupe"], Some("GIT_NO_REPLACE_OBJECTS")),
-            (&["-c", "core.useReplaceRefs=true", "dupe"], None),
-        ] {
-            let again = refused_as(&transfer, || {
-                let detach = s.git(global.iter().chain(&["detach"])).from(root);
-                match variable {
-                    Some(name) => detach.variable(name, "1").run(),
-                    None => detach.run(),
-                }
-            });
-            assert_eq!(again, line, "{global:?} {variable:?}");
+const GRAFTS: [Graft; 2] = [Graft::ReplaceRef, Graft::GraftsFile];
+
+const GRAFTS_FILE: &str = ".git/dupe/info/grafts";
+
+/// The global options a caller puts before `detach`, and a variable it sets for the run.
+type Caller = (&'static [&'static str], Option<(&'static str, OsString)>);
+
+impl Graft {
+    /// Gives `commit` the parents `parents` in the view of the private repository at
+    /// `root`; a grafts line with Git's advice on it off there, as the advice says, so
+    /// that `detach`'s other runs, which read the file, add no line of Git's either.
+    fn graft(self, s: &Scenario, root: &Path, commit: &str, parents: &[&str]) {
+        let words: Vec<&str> = [commit]
+            .into_iter()
+            .chain(parents.iter().copied())
+            .collect();
+        match self {
+            Graft::ReplaceRef => {
+                dupe_succeeds(s, root, &[&["replace", "--graft"], &words[..]].concat());
+            }
+            Graft::GraftsFile => {
+                write(
+                    root,
+                    GRAFTS_FILE,
+                    format!("{}\n", words.join(" ")).as_bytes(),
+                );
+                s.private(root)
+                    .git(["config", "advice.graftFileDeprecated", "false"])
+                    .succeeds();
+            }
         }
+    }
 
-        dupe_succeeds(s, root, &["replace", "-d", &main]);
-        assert_eq!(refused(s, &transfer), line);
-        dupe_succeeds(s, root, &["push", "-q", "origin", "rescue"]);
-        dupe_succeeds(s, root, &["replace", "--graft", &main, &rescue]);
-        detaches_keeping_every_file(s, root, &["detach"]);
+    /// Takes the graft of `commit` away again.
+    fn ungraft(self, s: &Scenario, root: &Path, commit: &str) {
+        match self {
+            Graft::ReplaceRef => {
+                dupe_succeeds(s, root, &["replace", "-d", commit]);
+            }
+            Graft::GraftsFile => fs::remove_file(root.join(GRAFTS_FILE)).unwrap(),
+        }
+    }
+
+    /// Whether `name` is on no remote-tracking branch of the private repository at `root`:
+    /// as `git dupe` walks it, which reads the graft as Git does, or, when `aside`, as Git
+    /// walks the history as stored.
+    fn unpushed(self, s: &Scenario, root: &Path, name: &str, aside: bool) -> bool {
+        let words = ["rev-list", "-n", "1", name, "--not", "--remotes"];
+        let walk = match (self, aside) {
+            (_, false) => s.git(["dupe"].iter().chain(&words)).from(root),
+            (Graft::ReplaceRef, true) => s
+                .private(root)
+                .git(["--no-replace-objects"].iter().chain(&words)),
+            (Graft::GraftsFile, true) => s
+                .private(root)
+                .git(words)
+                .variable("GIT_GRAFT_FILE", "/dev/null"),
+        };
+        !walk.succeeds().stdout.is_empty()
+    }
+
+    /// What a caller puts before `detach` to set this graft aside or keep it in force:
+    /// global options, and a variable.
+    fn callers(self, root: &Path) -> Vec<Caller> {
+        match self {
+            Graft::ReplaceRef => vec![
+                (["--no-replace-objects", "dupe"].as_slice(), None),
+                (&["dupe"], Some(("GIT_NO_REPLACE_OBJECTS", "1".into()))),
+                (&["-c", "core.useReplaceRefs=true", "dupe"], None),
+            ],
+            Graft::GraftsFile => vec![(
+                ["dupe"].as_slice(),
+                Some(("GIT_GRAFT_FILE", root.join(GRAFTS_FILE).into())),
+            )],
+        }
+    }
+}
+
+/// The history as stored decides (G3): a commit that a replace ref or a grafts line alone
+/// grafts under the pushed `main` is on no remote-tracking branch, whatever a caller puts
+/// before `dupe`, until it is pushed itself; `git dupe` itself walks the graft as Git
+/// does; and the walk that decides adds no line of Git's to the refusal, whatever a
+/// caller sets of Git's advice on grafts.
+#[test]
+fn a_commit_grafted_under_pushed_history_is_still_unpushed() {
+    under_each_release(|s| {
+        for graft in GRAFTS {
+            let transfer = s.pushed_workspace(&format!("grafted-{graft:?}"));
+            let root = &transfer.root;
+            let main = commit_of(s, root, "main");
+            s.private(root)
+                .git(["switch", "-q", "--orphan", "rescue"])
+                .succeeds();
+            write(root, "unique", b"only here\n");
+            private_add(s, root, "unique");
+            private_commit(s, root);
+            let rescue = commit_of(s, root, "rescue");
+            s.private(root).git(["switch", "-q", "main"]).succeeds();
+            graft.graft(s, root, &main, &[&rescue]);
+            assert!(!graft.unpushed(s, root, "rescue", false), "{graft:?}");
+            assert!(graft.unpushed(s, root, "rescue", true), "{graft:?}");
+            clean(s, root);
+
+            let line = refused(s, &transfer);
+            names(&line, b"no remote-tracking branch");
+            for (global, variable) in graft.callers(root) {
+                let again = refused_as(&transfer, || {
+                    let detach = s.git(global.iter().chain(&["detach"])).from(root);
+                    match &variable {
+                        Some((name, value)) => detach.variable(name, value).run(),
+                        None => detach.run(),
+                    }
+                });
+                assert_eq!(again, line, "{graft:?} {global:?} {variable:?}");
+            }
+            if let Graft::GraftsFile = graft {
+                // The runs before the walk read the grafts file as Git does, and Git's
+                // advice on it, turned on again, reaches standard error before the refusal.
+                let before = before_refusal(&transfer);
+                let output = s
+                    .git(["-c", "advice.graftFileDeprecated=true", "dupe", "detach"])
+                    .from(root)
+                    .run();
+                let fatal = [b"fatal: ", &line[..], b"\n"].concat();
+                let gits = output.stderr.strip_suffix(&fatal[..]);
+                assert!(gits.is_some_and(|gits| !gits.is_empty()), "{output:?}");
+                assert_eq!(output.end, End::Code(128), "{output:?}");
+                before.unchanged();
+            }
+
+            graft.ungraft(s, root, &main);
+            for global in [
+                ["dupe"].as_slice(),
+                &["-c", "advice.graftFileDeprecated=true", "dupe"],
+            ] {
+                let again = refused_as(&transfer, || {
+                    s.git(global.iter().chain(&["detach"])).from(root).run()
+                });
+                assert_eq!(again, line, "{graft:?} {global:?}");
+            }
+            dupe_succeeds(s, root, &["push", "-q", "origin", "rescue"]);
+            graft.graft(s, root, &main, &[&rescue]);
+            detaches_keeping_every_file(s, root, &["detach"]);
+        }
     });
 }
 
 /// The other direction (G3): a pushed commit is on its remote-tracking branch as stored,
-/// although a replace ref cuts it away from the pushed commit above it here.
+/// although a replace ref or a grafts line cuts it away from the pushed commit above it
+/// here.
 #[test]
-fn a_pushed_commit_a_replace_ref_cuts_away_is_still_pushed() {
+fn a_pushed_commit_a_graft_cuts_away_is_still_pushed() {
     under_each_release(|s| {
-        let transfer = s.pushed_workspace("cut");
-        let root = &transfer.root;
-        dupe_succeeds(s, root, &["branch", "old"]);
-        write(root, "notes/a.md", b"second\n");
-        private_add(s, root, "notes/a.md");
-        private_commit(s, root);
-        dupe_succeeds(s, root, &["push", "-q", "origin", "main"]);
-        let tip = commit_of(s, root, "main");
-        dupe_succeeds(s, root, &["replace", "--graft", &tip]);
-        assert!(unpushed(s, root, "old", &[]));
-        assert!(!unpushed(s, root, "old", &["--no-replace-objects"]));
-        clean(s, root);
-        detaches_keeping_every_file(s, root, &["detach"]);
+        for graft in GRAFTS {
+            let transfer = s.pushed_workspace(&format!("cut-{graft:?}"));
+            let root = &transfer.root;
+            dupe_succeeds(s, root, &["branch", "old"]);
+            write(root, "notes/a.md", b"second\n");
+            private_add(s, root, "notes/a.md");
+            private_commit(s, root);
+            dupe_succeeds(s, root, &["push", "-q", "origin", "main"]);
+            let tip = commit_of(s, root, "main");
+            graft.graft(s, root, &tip, &[]);
+            assert!(graft.unpushed(s, root, "old", false), "{graft:?}");
+            assert!(!graft.unpushed(s, root, "old", true), "{graft:?}");
+            clean(s, root);
+            detaches_keeping_every_file(s, root, &["detach"]);
+        }
     });
 }
 
@@ -290,14 +404,6 @@ fn commit_of(s: &Scenario, root: &Path, name: &str) -> String {
         .unwrap()
         .trim_end()
         .to_owned()
-}
-
-/// Whether `name` is on no remote-tracking branch of the private repository at `root`, as
-/// Git walks it under the global options `global`.
-fn unpushed(s: &Scenario, root: &Path, name: &str, global: &[&str]) -> bool {
-    let words = ["rev-list", "-n", "1", name, "--not", "--remotes"];
-    let found = s.private(root).git(global.iter().chain(&words)).succeeds();
-    !found.stdout.is_empty()
 }
 
 /// `git dupe <words>` from `root` succeeds and leaves it unattached, every file of the

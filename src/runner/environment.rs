@@ -1,5 +1,6 @@
 //! The environments of the two kinds of run (G10). Every run's environment is built here
-//! from the one git-dupe received, by the fixed rules below and by nothing else:
+//! from the one git-dupe received, by the fixed rules below and by nothing else, before
+//! the one run that sets a variable of its own sets it over them (`Run::variable`):
 //!
 //! - A **public run** keeps the environment as received, except that a relative
 //!   `GIT_DIR` or `GIT_WORK_TREE` is made absolute against the user's directory, so that
@@ -24,8 +25,8 @@
 //!   word is the user's has no own command word, and neither rule that reads one applies
 //!   to it: the user's `git dupe config` reads `GIT_CONFIG` as `git config` does.
 //!
-//! No variable is set or removed but those named here; `LC_ALL` and `LANG` are never set
-//! (R5).
+//! No variable is set or removed but those named here and that one run's; `LC_ALL` and
+//! `LANG` are never set (R5).
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};

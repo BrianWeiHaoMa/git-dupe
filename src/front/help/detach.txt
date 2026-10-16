@@ -11,9 +11,9 @@ Without --force it refuses, changing nothing, while the private repository has
 a change not committed (to a file it tracks, or a staged addition or
 deletion), while a commit on a private branch, tag, or stash entry, or the
 commit HEAD names, is on no remote-tracking branch in the history as stored,
-replace refs set aside (with no remote configured, every commit counts), and
-while the private repository cannot be read: commit, push, or run
-"git dupe init" to complete an interrupted init first.
+replace refs and a grafts file set aside (with no remote configured, every
+commit counts), and while the private repository cannot be read: commit,
+push, or run "git dupe init" to complete an interrupted init first.
 
 --force detaches all the same. History removed by "git dupe detach --force"
 is gone; git-dupe keeps no copy. It also completes an interrupted detach.
