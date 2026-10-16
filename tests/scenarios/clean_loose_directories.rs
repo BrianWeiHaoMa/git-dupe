@@ -183,19 +183,10 @@ fn a_non_literal_pathspec_over_a_loose_directory_is_refused_in_every_spelling_an
             .from(&dir.join("cache"))
             .run();
         names_cache(&inside, ":(exclude)secret", false);
-        let words = [
-            "--literal-pathspecs",
-            "dupe",
-            "clean",
-            "-fd",
-            "--",
-            ":(exclude)cache/secret",
-        ];
-        names_cache(
-            &s.git(words).from(&dir).run(),
-            ":(exclude)cache/secret",
-            false,
-        );
+        for word in [":(exclude)cache/secret", "cache?"] {
+            let words = ["--literal-pathspecs", "dupe", "clean", "-fd", "--", word];
+            names_cache(&s.git(words).from(&dir).run(), word, false);
+        }
         // A word holding a newline is named on the one line, quoted as Git quotes it.
         names_cache(
             &clean(&["-fd", "--", ":(exclude)a\nb"]),
