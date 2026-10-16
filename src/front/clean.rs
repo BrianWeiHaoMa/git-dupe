@@ -7,7 +7,8 @@
 //!   repository every file of the project is untracked, and `clean` there deletes the
 //!   project (R1, G10). It is the one public run that writes (R2). Its command word is
 //!   the user's, so it carries `-c help.autocorrect=0` (`runner`).
-//! - The user's operands are Git's pathspecs, read by Git and never by git-dupe: the run
+//! - The user's operands are Git's pathspecs, read by Git, and by git-dupe only by their
+//!   bytes, for the refusal of a non-literal one (`guards::clean::non_literal`): the run
 //!   is not marked as having git-dupe's own paths, so a pathspec setting before `dupe`
 //!   governs them (G19). git-dupe adds no pathspec of its own; it adds `-e` patterns,
 //!   before the user's `--` when there is one and after every other word otherwise, so
@@ -16,19 +17,22 @@
 //!   link among its ancestors, in every form, `-X` beside `-e` included, because Git
 //!   never looks beyond the link, and can delete the link itself as one entry, the
 //!   hidden path's only way to what stands at it, without following it (G16, S5); the
-//!   refusal from the words alone; the words alone when the last one is an `-e` lacking
-//!   its value, which Git refuses before deleting anything; then
-//!   `lstat` of the region paths' ancestors and, under `-X` without `-d` or a pathspec,
-//!   of the region paths, the one public listing under the ancestors holding a `.git`
-//!   entry and those region paths at which a directory stands, when there is one of
-//!   either, and under `-X` the one ignore question, any failure of which ends the
-//!   command before `clean` runs; then the run. No Git run is made per path, and the
-//!   only per-path work here is `lstat` (R4, G22).
+//!   refusal from the words alone; then `lstat` of the region paths' ancestors and,
+//!   under `-X` without `-d` or a pathspec, of the region paths, and the one public
+//!   listing under the ancestors holding a `.git` entry, those region paths at which a
+//!   directory stands, and, given a non-literal pathspec, the outermost ancestor of each
+//!   region path, when there is one of any; the refusal of a non-literal pathspec while a
+//!   region path lies below a directory under which that listing names nothing, decided
+//!   before the run because Git's `clean` can delete such a directory whole, the hidden
+//!   path with it (G16, S4); the words alone when the last one is an `-e` lacking its
+//!   value, which Git refuses before deleting anything; under `-X` the one ignore
+//!   question, any failure of which ends the command before `clean` runs; then the run.
+//!   No Git run is made per path, and the only per-path work here is `lstat` (R4, G22).
 //! - The listing reads the index the `clean` run reads, from the same directory: a hook's
 //!   temporary index when `GIT_INDEX_FILE` names one (S9), else the public index. Which
-//!   directory holding a `.git` entry Git takes whole, and which directory at a hidden
-//!   path it enters, depend on that index (S4), so the two must agree on it
-//!   (`Holds/G16`).
+//!   directory holding a `.git` entry Git takes whole, which directory at a hidden path
+//!   it enters, and which directory it reads whole for a pathspec depend on that index
+//!   (S4), so the two must agree on it (`Holds/G16`).
 
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::{OsStr, OsString};
@@ -36,6 +40,7 @@ use std::fs;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 
+use super::lines;
 use super::outcome::{self, Outcome};
 use super::table::{Entry, Read, Value};
 use crate::guards::clean::{self as patterns, Arrangement};
@@ -83,16 +88,20 @@ pub fn clean(workspace: &Workspace, read: &Read, words: &[OsString]) -> Outcome 
     if patterns::refused(only_ignored, read.spells(&EXCLUDE)) {
         return outcome::refuse(REFUSED);
     }
-    if read.lacking_a_value() == Some(&EXCLUDE) {
-        return run(words.to_vec(), 0);
-    }
     let region = &hidden.paths.region;
+    let non_literal = read
+        .operands
+        .iter()
+        .find(|word| patterns::non_literal(word.as_bytes()));
     let keep_directories_whole =
         only_ignored && !read.spells(&DIRECTORIES) && read.operands.is_empty();
     let holding_git = holding_a_git_entry(root, region);
     let mut query = holding_git.clone();
     if keep_directories_whole {
         query.extend(directories_at(root, region));
+    }
+    if non_literal.is_some() {
+        query.extend(patterns::outermost_ancestors(region));
     }
     let tracked = if query.is_empty() {
         BTreeSet::new()
@@ -103,6 +112,21 @@ pub fn clean(workspace: &Workspace, read: &Read, words: &[OsString]) -> Outcome 
             Err(failed) => return outcome::failed(failed),
         }
     };
+    if let Some(word) = non_literal
+        && let Some((path, directory)) = patterns::loose(region, &tracked)
+    {
+        return outcome::refuse(&over_a_loose_directory(
+            word.as_bytes(),
+            directory,
+            path,
+            only_ignored,
+        ));
+    }
+    // After the refusals, which hold in every form: Git refuses these words before it
+    // deletes anything, and a pattern of git-dupe's after them would be their value.
+    if read.lacking_a_value() == Some(&EXCLUDE) {
+        return run(words.to_vec(), 0);
+    }
     let nested = patterns::nested(&holding_git, &tracked);
     let spared = patterns::spared(region, &nested);
     let ignored_ancestors = if only_ignored {
@@ -144,6 +168,33 @@ fn beyond_a_link(path: &[u8], link: &[u8]) -> Vec<u8> {
         link,
         b": Git's clean does not follow the link and can delete it, the hidden path's only \
           way to what stands at it",
+    ]
+    .concat()
+}
+
+/// The refusal of the non-literal pathspec `word`, as typed, while the hidden path `path`
+/// lies below the loose directory `directory`, its outermost (G16). Under `-X`, which
+/// refuses `-e`, the way out is literal pathspecs alone.
+fn over_a_loose_directory(
+    word: &[u8],
+    directory: &[u8],
+    path: &[u8],
+    only_ignored: bool,
+) -> Vec<u8> {
+    let way_out: &[u8] = if only_ignored {
+        b"; give literal pathspecs instead"
+    } else {
+        b"; give literal pathspecs instead, and -e <pattern> for what to keep"
+    };
+    [
+        b"git dupe clean cannot spare the hidden path ",
+        path,
+        b" given the pathspec ",
+        &lines::typed(word),
+        b", which is not a literal path: Git's clean can delete ",
+        directory,
+        b", which is not hidden and holds nothing the project tracks, whole with it",
+        way_out,
     ]
     .concat()
 }

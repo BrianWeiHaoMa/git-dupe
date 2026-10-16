@@ -3,7 +3,8 @@
 //! `lstat` found among the hidden paths' ancestors, the region paths, the
 //! ancestor directories `lstat` found holding a `.git` entry and, under `-X` without `-d`
 //! or a pathspec, the region paths it found to be directories, the tracked paths at or
-//! below either in the index `clean` reads, and, under `-X`, the ancestors public Git
+//! below either, and, given a non-literal pathspec, below the outermost ancestor of each
+//! region path, in the index `clean` reads, and, under `-X`, the ancestors public Git
 //! ignores. This part runs nothing and reads no file; the rule of a path is the keeper's
 //! one rule form, handed in by the caller, so that nothing here escapes a path a second
 //! way.
@@ -41,6 +42,50 @@ pub fn refused_beyond_a_link<'p>(
     hidden
         .into_iter()
         .find_map(|path| link_above(path).map(|link| (path, link)))
+}
+
+/// Whether `word`, one of the user's pathspecs, is a non-literal pathspec (G16): one
+/// holding `*`, `?`, `[`, or `\`, or beginning with `:` other than `:/`. It is read by its
+/// bytes alone, as `operand::rooted_or_literal` reads an operand of `status` or `add`,
+/// with `\` added, which Git reads as an escape in a pathspec it does not take literally:
+/// such a word can match a directory and fail, or leave out, a file below it, which a
+/// literal path cannot (S4). No magic is parsed and no setting before `dupe` is read, so
+/// that under `--literal-pathspecs`, and for `top`, `literal`, or `icase` magic on a word
+/// holding none of the four bytes, the answer is over-inclusive (`Holds/G16`).
+pub fn non_literal(word: &[u8]) -> bool {
+    operand::rooted_or_literal(word).is_err() || word.contains(&b'\\')
+}
+
+/// The outermost proper ancestor below the root of each region path that has one: what
+/// the caller's listing is also asked about when a non-literal pathspec is given, so that
+/// it names every path the index holds below an ancestor of a region path (`loose`).
+pub fn outermost_ancestors(region: &[Vec<u8>]) -> BTreeSet<Vec<u8>> {
+    region
+        .iter()
+        .filter_map(|path| operand::ancestors(path).next())
+        .map(<[u8]>::to_vec)
+        .collect()
+}
+
+/// The refusal of a non-literal pathspec over a loose directory (G16): the first region
+/// path, in the order of `region`, with a loose directory above it, and the outermost
+/// such directory. A loose directory is a proper ancestor below the root of a region path
+/// under which `publicly_tracked`, the caller's listing under `outermost_ancestors` in the
+/// index the `clean` run reads, names no path: Git's `clean`, given a pathspec, reads it
+/// whole, and deletes it whole unless its walk met inside it an entry a rule excludes
+/// (S4). The test is lexical: nothing need stand at the directory, because where nothing
+/// or a file does, Git can delete nothing below it and the refusal costs nothing. Only
+/// the region paths are asked about, because every other hidden path lies below one of
+/// them, inside what its pattern spares.
+pub fn loose<'r>(
+    region: &'r [Vec<u8>],
+    publicly_tracked: &BTreeSet<Vec<u8>>,
+) -> Option<(&'r [u8], &'r [u8])> {
+    region.iter().find_map(|path| {
+        operand::ancestors(path)
+            .find(|ancestor| !operand::any_at_or_below(publicly_tracked, ancestor))
+            .map(|directory| (path.as_slice(), directory))
+    })
 }
 
 /// What the user's words ask of the patterns: Git's standard rules or `-x`, where a
@@ -151,254 +196,4 @@ pub fn patterns(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A stand-in for the region rule: `/` before the path, `\` before a space. The rule
-    /// form itself is the keeper's and checked there.
-    fn rule(path: &[u8]) -> Vec<u8> {
-        let mut rule = b"/".to_vec();
-        for &byte in path {
-            if byte == b' ' {
-                rule.push(b'\\');
-            }
-            rule.push(byte);
-        }
-        rule
-    }
-
-    fn paths(paths: &[&str]) -> Vec<Vec<u8>> {
-        paths.iter().map(|path| path.as_bytes().to_vec()).collect()
-    }
-
-    fn set(paths: &[&str]) -> BTreeSet<Vec<u8>> {
-        paths.iter().map(|path| path.as_bytes().to_vec()).collect()
-    }
-
-    /// The options as the strings they are, `-e` words included.
-    fn written(options: Vec<Vec<u8>>) -> Vec<String> {
-        options
-            .into_iter()
-            .map(|word| String::from_utf8(word).unwrap())
-            .collect()
-    }
-
-    #[test]
-    fn only_x_beside_a_pattern_of_the_users_is_refused() {
-        assert!(refused(true, true));
-        assert!(!refused(true, false));
-        assert!(!refused(false, true));
-        assert!(!refused(false, false));
-    }
-
-    #[test]
-    fn the_first_hidden_path_beyond_a_link_is_refused_with_the_link_found() {
-        let hidden = paths(&[".gitdupe", "a/x", "b/link/y", "c/link/z"]);
-        // A stand-in for `lstat`: `b/link` and `c/link` are links.
-        let found = refused_beyond_a_link(hidden.iter().map(Vec::as_slice), |path| {
-            (path.starts_with(b"b/") || path.starts_with(b"c/")).then(|| &path[..6])
-        });
-        assert_eq!(found, Some((&b"b/link/y"[..], &b"b/link"[..])));
-        let none = refused_beyond_a_link(hidden.iter().map(Vec::as_slice), |_| None);
-        assert_eq!(none, None);
-    }
-
-    #[test]
-    fn a_directory_holding_a_git_entry_is_nested_only_while_the_project_tracks_nothing_in_it() {
-        let holding_git = set(&["opened", "outer", "outer/inner", "tracked", "gitlink"]);
-        // `outer` holds a tracked path below its inner repository, which is no more
-        // nested than it; `gitlink` is itself an entry of the public index.
-        let publicly_tracked = set(&["README.md", "outer/inner/x", "tracked/a/b", "gitlink"]);
-        assert_eq!(nested(&holding_git, &publicly_tracked), set(&["opened"]));
-        // A tracked path beside a directory, or named like it, is not under it.
-        let publicly_tracked = set(&["opened.txt", "opene", "outer2/x"]);
-        assert_eq!(nested(&holding_git, &publicly_tracked), holding_git);
-        assert!(nested(&set(&[]), &publicly_tracked).is_empty());
-        // A region path in a tracked directory is spared alone; an untracked repository
-        // inside such a directory is still spared whole.
-        let region = paths(&["tracked/secret", "tracked/inner/x", "tracked/inner/y"]);
-        let holding_git = set(&["tracked", "tracked/inner"]);
-        let nested = nested(&holding_git, &set(&["tracked/public"]));
-        assert_eq!(nested, set(&["tracked/inner"]));
-        assert_eq!(
-            spared(&region, &nested),
-            paths(&["tracked/secret", "tracked/inner"])
-        );
-    }
-
-    #[test]
-    fn a_nested_repository_above_a_region_path_is_spared_in_its_place() {
-        let region = paths(&[".gitdupe", "notes", "vendor/lib/secret.txt"]);
-        assert_eq!(
-            spared(&region, &set(&["vendor/lib"])),
-            paths(&[".gitdupe", "notes", "vendor/lib"])
-        );
-        // No nested repository: every region path, in order.
-        assert_eq!(spared(&region, &set(&[])), region);
-        // A directory found holding `.git` that lies above no region path changes nothing.
-        assert_eq!(spared(&region, &set(&["other"])), region);
-    }
-
-    #[test]
-    fn one_nested_repository_above_two_region_paths_is_spared_once() {
-        let region = paths(&["a.txt", "vendor/lib/one", "vendor/lib/two/x", "z"]);
-        assert_eq!(
-            spared(&region, &set(&["vendor/lib"])),
-            paths(&["a.txt", "vendor/lib", "z"])
-        );
-    }
-
-    #[test]
-    fn of_two_nested_repositories_one_inside_the_other_the_outermost_is_spared() {
-        let region = paths(&["outer/inner/secret", "outer/beside"]);
-        let nested = set(&["outer", "outer/inner"]);
-        assert_eq!(spared(&region, &nested), paths(&["outer"]));
-        // The inner one alone.
-        let nested = set(&["outer/inner"]);
-        assert_eq!(
-            spared(&region, &nested),
-            paths(&["outer/inner", "outer/beside"])
-        );
-    }
-
-    #[test]
-    fn the_ancestors_asked_about_are_every_proper_ancestor_once() {
-        let spared = paths(&["a/b/c", "a/d", "top", "a/b/e/f"]);
-        assert_eq!(ancestors(&spared), set(&["a", "a/b", "a/b/e"]));
-        assert!(ancestors(&paths(&["top"])).is_empty());
-    }
-
-    #[test]
-    fn without_x_each_spared_path_is_one_exclusion() {
-        let spared = paths(&["notes", "has space/x"]);
-        assert_eq!(
-            written(patterns(&spared, &Arrangement::Excluded, rule)),
-            ["-e", "/notes", "-e", "/has\\ space/x"]
-        );
-        assert!(patterns(&[], &Arrangement::Excluded, rule).is_empty());
-    }
-
-    #[test]
-    fn with_x_ignored_ancestors_come_outermost_first_then_each_spared_path() {
-        let spared = paths(&["build/deep/keep.txt", "notes", "build/local.cfg"]);
-        let ignored = set(&["build/deep", "build"]);
-        let tracked = set(&[]);
-        let arrangement = Arrangement::Unignored {
-            ignored_ancestors: &ignored,
-            keep_directories_whole: true,
-            publicly_tracked: &tracked,
-        };
-        assert_eq!(
-            written(patterns(&spared, &arrangement, rule)),
-            [
-                "-e",
-                "!/build",
-                "-e",
-                "/build/*",
-                "-e",
-                "!/build/deep",
-                "-e",
-                "/build/deep/*",
-                "-e",
-                "!/build/deep/keep.txt",
-                "-e",
-                "!/build/deep/keep.txt/**",
-                "-e",
-                "/build/deep/keep.txt/",
-                "-e",
-                "!/notes",
-                "-e",
-                "!/notes/**",
-                "-e",
-                "/notes/",
-                "-e",
-                "!/build/local.cfg",
-                "-e",
-                "!/build/local.cfg/**",
-                "-e",
-                "/build/local.cfg/",
-            ]
-        );
-    }
-
-    #[test]
-    fn with_x_a_spared_path_the_index_holds_a_path_at_or_below_is_not_kept_out_whole() {
-        let spared = paths(&["notes", "ign/keep", "pile/h", "vendor/lib"]);
-        let ignored = set(&["ign"]);
-        // A tracked path beside a spared path, or named like it, is not under it; a
-        // gitlink at a spared path is at it.
-        let tracked = set(&[
-            "notes/shared.md",
-            "ign/keep/a/b",
-            "pile/h.txt",
-            "vendor/lib",
-        ]);
-        let arrangement = Arrangement::Unignored {
-            ignored_ancestors: &ignored,
-            keep_directories_whole: true,
-            publicly_tracked: &tracked,
-        };
-        assert_eq!(
-            written(patterns(&spared, &arrangement, rule)),
-            [
-                "-e",
-                "!/ign",
-                "-e",
-                "/ign/*",
-                "-e",
-                "!/notes",
-                "-e",
-                "!/notes/**",
-                "-e",
-                "!/ign/keep",
-                "-e",
-                "!/ign/keep/**",
-                "-e",
-                "!/pile/h",
-                "-e",
-                "!/pile/h/**",
-                "-e",
-                "/pile/h/",
-                "-e",
-                "!/vendor/lib",
-                "-e",
-                "!/vendor/lib/**",
-            ]
-        );
-    }
-
-    #[test]
-    fn with_x_and_d_or_a_pathspec_no_directory_is_kept_out_whole() {
-        let spared = paths(&["notes"]);
-        let ignored = set(&[]);
-        let tracked = set(&[]);
-        let arrangement = Arrangement::Unignored {
-            ignored_ancestors: &ignored,
-            keep_directories_whole: false,
-            publicly_tracked: &tracked,
-        };
-        assert_eq!(
-            written(patterns(&spared, &arrangement, rule)),
-            ["-e", "!/notes", "-e", "!/notes/**"]
-        );
-        let ignored = set(&["ign"]);
-        let arrangement = Arrangement::Unignored {
-            ignored_ancestors: &ignored,
-            keep_directories_whole: false,
-            publicly_tracked: &tracked,
-        };
-        assert_eq!(
-            written(patterns(&paths(&["ign/keep"]), &arrangement, rule)),
-            [
-                "-e",
-                "!/ign",
-                "-e",
-                "/ign/*",
-                "-e",
-                "!/ign/keep",
-                "-e",
-                "!/ign/keep/**"
-            ]
-        );
-    }
-}
+mod tests;

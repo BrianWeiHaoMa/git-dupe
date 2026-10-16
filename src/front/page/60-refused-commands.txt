@@ -24,3 +24,15 @@ git dupe git push runs Git's push unguarded. This is a comparison of names,
 not a proof that a destination is private: a URL Git rewrites through
 url.<base>.insteadOf, a path beginning with ~ and a user's name, and a remote
 defined by a file in a remotes or branches directory are not seen through.
+
+git dupe clean is refused, deleting nothing, given a pathspec that is not a
+literal path, one holding *, ?, [, or \, or beginning with : other than :/,
+while a hidden path lies in a directory that is not hidden and under which the
+project tracks nothing. Given any pathspec, Git's clean deletes such a
+directory whole, with everything in it, unless it meets inside it a path a
+rule excludes, and such a pathspec can keep the hidden path from being met: an
+exclusion that names it, an attribute that does not select it, or a pattern
+that matches the directory and not the file. A literal path cannot, because
+one that matches a directory matches everything below it. The refusal names
+the pathspec, the directory, and the hidden path: give literal pathspecs
+instead, and -e <pattern> for what to keep.

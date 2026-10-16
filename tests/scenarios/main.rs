@@ -47,6 +47,7 @@ mod alias_runs;
 mod clean;
 mod clean_cases;
 mod clean_forms;
+mod clean_loose_directories;
 mod clean_run;
 mod clone;
 mod clone_alias;

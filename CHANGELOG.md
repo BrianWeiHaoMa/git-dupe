@@ -8,6 +8,17 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Fixed
+
+- `git dupe clean` given a pathspec that is not a literal path, one holding `*`, `?`,
+  `[`, or `\`, or beginning with `:` other than `:/`, such as `:(exclude)notes/x` or
+  `cache?`, is now refused, deleting nothing, while a hidden path lies in a directory
+  that is not hidden and under which the project tracks nothing, where Git's clean could
+  delete that directory whole, the never-committed private files in it included. The
+  refusal names the pathspec, the directory, and the hidden path; literal pathspecs and
+  `-e` patterns run as before, and the manual page explains the refusal under REFUSED
+  COMMANDS.
+
 ## [0.3.1] - 2026-10-16
 
 ### Added

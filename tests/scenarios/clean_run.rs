@@ -84,26 +84,20 @@ fn a_pathspec_setting_before_dupe_governs_the_users_pathspecs_alone() {
         let built = s.dir().join("workspace");
         s.attached_project(&built);
         write(&built, ".gitdupe", b"");
-        write(&built, "build/local.cfg", b"private\n");
-        private_add(s, &built, "build/local.cfg");
         private_add(s, &built, ".gitdupe");
         private_commit(s, &built);
-        for path in ["a*", "ab", "ac", "build/out.js"] {
+        for path in ["a*", "ab", "ac"] {
             write(&built, path, format!("{path}\n").as_bytes());
         }
         s.git(["dupe", "status"]).from(&built).succeeds();
 
+        // No hidden path lies below a directory the project tracks nothing under, where
+        // a pattern among the pathspecs is refused (G16): here it reaches Git.
         let twin = Twin::of(s, &built, &[".gitdupe", "build/local.cfg"]);
         twin.clean(&["-f", "--", "a*"])
             .global_option("--literal-pathspecs")
             .run();
         twin.clean(&["-f", "--", "a*"]).run();
-        let output = twin
-            .clean(&["-fX"])
-            .global_option("--literal-pathspecs")
-            .admitting(&["build/out.js"])
-            .run();
-        assert_eq!(output.end, End::Code(0), "{output:?}");
 
         // What plain Git did, said without it: the literal pathspec names one file, the
         // glob all three.
@@ -122,6 +116,18 @@ fn a_pathspec_setting_before_dupe_governs_the_users_pathspecs_alone() {
             .run();
         assert_eq!(glob.end, End::Code(0), "{glob:?}");
         assert_eq!(changed_since(&before, &built), ["a*", "ab", "ac"]);
+
+        write(&built, "build/local.cfg", b"private\n");
+        private_add(s, &built, "build/local.cfg");
+        private_commit(s, &built);
+        write(&built, "build/out.js", b"build/out.js\n");
+        s.git(["dupe", "status"]).from(&built).succeeds();
+        let output = twin
+            .clean(&["-fX"])
+            .global_option("--literal-pathspecs")
+            .admitting(&["build/out.js"])
+            .run();
+        assert_eq!(output.end, End::Code(0), "{output:?}");
     });
 }
 

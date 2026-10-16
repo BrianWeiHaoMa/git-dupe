@@ -5,7 +5,8 @@
 use std::fs;
 
 use crate::harness::{
-    EVERY_KIND_SPARED, End, Scenario, Twin, hidden_path_of_every_kind, under_each_release, write,
+    EVERY_KIND_SPARED, End, Scenario, Tree, Twin, changed_since, hidden_path_of_every_kind,
+    refusal, under_each_release, write,
 };
 
 fn every_kind(s: &Scenario) -> Twin<'_> {
@@ -79,7 +80,6 @@ fn a_pathspec_with_or_without_the_end_of_options_spares_every_hidden_path() {
             &["-fx", "--", "notes", "build"],
             &["-fX", "--", "build", "ign"],
             &["-fdx", "--", "vendor", "fake", "dangling"],
-            &["-fx", "--", "w*", "*.o", "cr*"],
             &["-fd", "--", "swapped-file", "swapped-dir", "absent"],
             &["-fx", "notes", "build"],
             &["-fX", "build", "ign"],
@@ -89,6 +89,16 @@ fn a_pathspec_with_or_without_the_end_of_options_spares_every_hidden_path() {
         ] {
             twin.clean(words).run();
         }
+        // Patterns among the pathspecs, while hidden paths lie below directories the
+        // project tracks nothing under, are refused, deleting nothing (G16).
+        let built = s.dir().join("workspace");
+        let before = Tree::working(&built);
+        let output = s
+            .git(["dupe", "clean", "-fx", "--", "w*", "*.o", "cr*"])
+            .from(&built)
+            .run();
+        refusal(&output, &[b"'w*'", b"allign/keep.txt"]);
+        assert!(changed_since(&before, &built).is_empty(), "{output:?}");
     });
 }
 
