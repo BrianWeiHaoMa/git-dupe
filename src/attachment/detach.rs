@@ -7,8 +7,9 @@
 //!    Git's and its output captured: `--no-optional-locks status`, so that the private
 //!    index is left as it was (S8); `stash list`; `rev-parse -q --verify HEAD`, whose exit
 //!    1 is an unborn `HEAD`; `config`, whose exit status alone says whether a remote is
-//!    configured; and `rev-list`, fed the stash hashes and `HEAD`'s byte for byte, with
-//!    `--not --remotes` only where a remote is configured. Whether an answer is empty is
+//!    configured; and `--no-replace-objects rev-list`, fed the stash hashes and `HEAD`'s
+//!    byte for byte, with `--not --remotes` only where a remote is configured, so that it
+//!    walks the history as stored, a replace ref set aside. Whether an answer is empty is
 //!    all that is read of it. A run that fails, or does not start, is a private repository
 //!    that cannot be read, and refuses; one killed by a signal ends the command with 128
 //!    plus its number. Nothing has changed.
@@ -41,7 +42,8 @@ pub enum NotDetached {
     /// Git's status of the private repository reports a change not committed.
     Uncommitted,
     /// A commit on a private branch, tag, or stash entry, or the commit `HEAD` names, is on
-    /// no remote-tracking branch; with no remote configured, a commit at all.
+    /// no remote-tracking branch in the history as stored; with no remote configured, a
+    /// commit at all.
     Unpushed { remote_configured: bool },
     /// A run that decides, or the private listing, failed: the private repository cannot
     /// be read. Git's message, where it gave one, is already on standard error.
@@ -121,6 +123,7 @@ fn decide(workspace: &Workspace) -> Result<(), NotDetached> {
             .capture_output()
     };
     let no_optional_locks = [OsString::from("--no-optional-locks")];
+    let no_replace_objects = [OsString::from("--no-replace-objects")];
 
     let status =
         run(&["status", "--porcelain", "-z", "--untracked-files=no"]).prefixed(&no_optional_locks);
@@ -145,7 +148,12 @@ fn decide(workspace: &Workspace) -> Result<(), NotDetached> {
     if remote_configured {
         words.extend(["--not", "--remotes"]);
     }
-    let found = step(run(&words).feed(commits), &[0]).map_err(unreadable)?;
+    // A replace ref grafts or substitutes commits in this repository's view alone, and a
+    // remote holds the history as stored, so the walk follows the parents as stored: the
+    // global option stands before the command word, where `rev-list` would refuse it
+    // (`Holds/G3`, S12).
+    let walk = run(&words).prefixed(&no_replace_objects).feed(commits);
+    let found = step(walk, &[0]).map_err(unreadable)?;
     if !found.stdout.is_empty() {
         return Err(NotDetached::Unpushed { remote_configured });
     }

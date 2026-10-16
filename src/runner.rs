@@ -145,7 +145,8 @@ impl<'r> Run<'r> {
 
     /// Global options before the words, after any carried prefix: for a lookup of an
     /// alias chain, the options its expansions have set so far (`Holds/G19`); for the
-    /// status `detach` reads, `--no-optional-locks` (`Holds/G3`).
+    /// status `detach` reads, `--no-optional-locks`, and for its `rev-list`,
+    /// `--no-replace-objects` (`Holds/G3`).
     pub fn prefixed(mut self, prefix: &'r [OsString]) -> Self {
         self.prefix = prefix;
         self

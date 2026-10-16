@@ -18,6 +18,11 @@ Every change a user of git-dupe would notice, newest first, in the form of
   refusal names the pathspec, the directory, and the hidden path; literal pathspecs and
   `-e` patterns run as before, and the manual page explains the refusal under REFUSED
   COMMANDS.
+- `git dupe detach` without `--force` now decides whether a private commit is on a
+  remote-tracking branch over the history as stored, replace refs (`git replace`) set
+  aside, as a remote holds it: a commit that only a replace ref grafts under pushed
+  history is refused as unpushed, where it was removed with the private repository, and
+  pushed history that a replace ref cuts away from its descendants no longer refuses.
 
 ## [0.3.1] - 2026-10-16
 

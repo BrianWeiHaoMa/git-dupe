@@ -6,9 +6,9 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
-    End, Everything, Scenario, Transfer, Tree, detached, dupe_succeeds, holds, names, private_add,
-    private_commit, refusal, region, run_traced, stale_file_timestamp, stale_timestamp, unchanged,
-    under_each_release, write,
+    End, Everything, Output, Scenario, Transfer, Tree, detached, dupe_succeeds, holds, names,
+    private_add, private_commit, refusal, region, run_traced, stale_file_timestamp,
+    stale_timestamp, unchanged, under_each_release, write,
 };
 
 fn before_refusal(transfer: &Transfer) -> Everything {
@@ -17,8 +17,15 @@ fn before_refusal(transfer: &Transfer) -> Everything {
 }
 
 fn refused(s: &Scenario, transfer: &Transfer) -> Vec<u8> {
+    refused_as(transfer, || {
+        s.git(["dupe", "detach"]).from(&transfer.root).run()
+    })
+}
+
+/// `refused`, with `detach` the run `detach` makes: under a global option or a variable.
+fn refused_as(transfer: &Transfer, detach: impl FnOnce() -> Output) -> Vec<u8> {
     let before = before_refusal(transfer);
-    let output = s.git(["dupe", "detach"]).from(&transfer.root).run();
+    let output = detach();
     let line = refusal(&output, &[b"git dupe detach --force"]).to_vec();
     before.unchanged();
     assert!(transfer.root.join(".git/dupe").is_dir());
@@ -203,6 +210,94 @@ fn the_commit_a_detached_head_names_counts() {
         clean(s, &never.root);
         names(&refused(s, &never), b"no remote is configured");
     });
+}
+
+/// The history as stored decides (G3): a commit that a replace ref alone grafts under the
+/// pushed `main` is on no remote-tracking branch, whether a global option, its variable,
+/// or a setting before `dupe` turns replace refs off or on, until it is pushed itself.
+#[test]
+fn a_commit_a_replace_ref_grafts_under_pushed_history_is_still_unpushed() {
+    under_each_release(|s| {
+        let transfer = s.pushed_workspace("grafted");
+        let root = &transfer.root;
+        let main = commit_of(s, root, "main");
+        s.private(root)
+            .git(["switch", "-q", "--orphan", "rescue"])
+            .succeeds();
+        write(root, "unique", b"only here\n");
+        private_add(s, root, "unique");
+        private_commit(s, root);
+        let rescue = commit_of(s, root, "rescue");
+        s.private(root).git(["switch", "-q", "main"]).succeeds();
+        dupe_succeeds(s, root, &["replace", "--graft", &main, &rescue]);
+        assert!(!unpushed(s, root, "rescue", &[]));
+        assert!(unpushed(s, root, "rescue", &["--no-replace-objects"]));
+        clean(s, root);
+
+        let line = refused(s, &transfer);
+        names(&line, b"no remote-tracking branch");
+        for (global, variable) in [
+            (["--no-replace-objects", "dupe"].as_slice(), None),
+            (&["dupe"], Some("GIT_NO_REPLACE_OBJECTS")),
+            (&["-c", "core.useReplaceRefs=true", "dupe"], None),
+        ] {
+            let again = refused_as(&transfer, || {
+                let detach = s.git(global.iter().chain(&["detach"])).from(root);
+                match variable {
+                    Some(name) => detach.variable(name, "1").run(),
+                    None => detach.run(),
+                }
+            });
+            assert_eq!(again, line, "{global:?} {variable:?}");
+        }
+
+        dupe_succeeds(s, root, &["replace", "-d", &main]);
+        assert_eq!(refused(s, &transfer), line);
+        dupe_succeeds(s, root, &["push", "-q", "origin", "rescue"]);
+        dupe_succeeds(s, root, &["replace", "--graft", &main, &rescue]);
+        detaches_keeping_every_file(s, root, &["detach"]);
+    });
+}
+
+/// The other direction (G3): a pushed commit is on its remote-tracking branch as stored,
+/// although a replace ref cuts it away from the pushed commit above it here.
+#[test]
+fn a_pushed_commit_a_replace_ref_cuts_away_is_still_pushed() {
+    under_each_release(|s| {
+        let transfer = s.pushed_workspace("cut");
+        let root = &transfer.root;
+        dupe_succeeds(s, root, &["branch", "old"]);
+        write(root, "notes/a.md", b"second\n");
+        private_add(s, root, "notes/a.md");
+        private_commit(s, root);
+        dupe_succeeds(s, root, &["push", "-q", "origin", "main"]);
+        let tip = commit_of(s, root, "main");
+        dupe_succeeds(s, root, &["replace", "--graft", &tip]);
+        assert!(unpushed(s, root, "old", &[]));
+        assert!(!unpushed(s, root, "old", &["--no-replace-objects"]));
+        clean(s, root);
+        detaches_keeping_every_file(s, root, &["detach"]);
+    });
+}
+
+/// The commit `name` names in the private repository at `root`, by its full hash.
+fn commit_of(s: &Scenario, root: &Path, name: &str) -> String {
+    let output = s
+        .private(root)
+        .git(["rev-parse", "--verify", name])
+        .succeeds();
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .trim_end()
+        .to_owned()
+}
+
+/// Whether `name` is on no remote-tracking branch of the private repository at `root`, as
+/// Git walks it under the global options `global`.
+fn unpushed(s: &Scenario, root: &Path, name: &str, global: &[&str]) -> bool {
+    let words = ["rev-list", "-n", "1", name, "--not", "--remotes"];
+    let found = s.private(root).git(global.iter().chain(&words)).succeeds();
+    !found.stdout.is_empty()
 }
 
 /// `git dupe <words>` from `root` succeeds and leaves it unattached, every file of the

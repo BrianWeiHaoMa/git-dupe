@@ -1,9 +1,14 @@
-//! `init` under a template directory of the developer's that holds a `HEAD`.
+//! `init` under a template directory of the developer's: one that holds a `HEAD`, one
+//! whose `config` a kill left partly copied, and one whose `config` includes a file.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::path::Path;
 
-use crate::harness::{End, under_each_release};
+use crate::harness::{
+    End, Output, Scenario, Tree, completed_hint, detached, dupe_succeeds, private_config_value,
+    unchanged, under_each_release,
+};
 
 /// The template is copied as plain `git init` copies it, and its `HEAD` stands in place of
 /// the branch `-b` or the public `HEAD` names.
@@ -55,4 +60,130 @@ fn a_templates_head_stands_in_place_of_the_initial_branch() {
             assert_eq!(worktree.stdout, b"../..\n");
         }
     });
+}
+
+/// A kill inside Git's copy of a template's `config`, which Git makes in pieces of 8 KiB
+/// before `HEAD`, `objects`, and `refs`, leaves a prefix of the file alone in the private
+/// directory. Run again, Git's `init` keeps the file and cannot read it: `init` fails as
+/// Git fails, changing nothing, and `detach --force` then `init` start over (G21, S6).
+#[test]
+fn a_templates_config_left_partly_copied_is_started_over_by_detach_force_then_init() {
+    under_each_release(|s| {
+        let value = "x".repeat(32 * 1024);
+        let config = format!("[audit]\n\tvalue = \"{value}\"\n");
+        let template_dir = template(s, &[("config", config.as_bytes())]);
+
+        let control = s.dir().join("control");
+        s.repository(&control);
+        let whole = init_under(s, &template_dir, &control);
+        assert_eq!(whole.end, End::Code(0), "{whole:?}");
+        private_config_value(s, &control, "core.worktree", "../..");
+        private_config_value(s, &control, "status.showUntrackedFiles", "no");
+
+        let killed = s.dir().join("killed");
+        s.repository(&killed);
+        let private = killed.join(".git/dupe");
+        fs::create_dir(&private).unwrap();
+        fs::write(private.join("config"), &config.as_bytes()[..8192]).unwrap();
+        let before = Tree::of(&killed);
+        for _ in 0..2 {
+            let failed = init_under(s, &template_dir, &killed);
+            assert_eq!(failed.end, End::Code(128), "{failed:?}");
+            assert!(failed.stdout.is_empty(), "{failed:?}");
+            // Git says so, naming the file (G21): its `fatal:` lines reach standard error,
+            // their words unread, beside git-dupe's own, which here are warnings alone.
+            assert!(!failed.lines("fatal").is_empty(), "{failed:?}");
+            unchanged(&before, &killed);
+        }
+        assert!(!private.join("HEAD").exists());
+
+        dupe_succeeds(s, &killed, &["detach", "--force"]);
+        detached(&killed);
+        unchanged(&before.without(&[&private]), &killed);
+        let started_over = init_under(s, &template_dir, &killed);
+        assert_eq!(started_over.end, End::Code(0), "{started_over:?}");
+        for (key, expected) in [
+            ("audit.value", value.as_str()),
+            ("core.worktree", "../.."),
+            ("status.showUntrackedFiles", "no"),
+            ("advice.statusHints", "false"),
+        ] {
+            private_config_value(s, &killed, key, expected);
+        }
+        dupe_succeeds(s, &killed, &["status"]);
+    });
+}
+
+/// A file a template's `config` includes is read after the keys `init` writes in place in
+/// the repository's own `config`, and keeps its own values of them: F2's keys and the
+/// identity G1 copies stand in the own file, the included values are the ones Git reads,
+/// and neither file is edited, by `init` or by `init` run again (F2, G1, S12).
+#[test]
+fn a_file_a_templates_config_includes_keeps_its_values_over_inits_keys() {
+    under_each_release(|s| {
+        let overrides = b"[status]\n\tshowUntrackedFiles = normal\n[advice]\n\tstatusHints = yes\n\
+            [user]\n\tname = Included Name\n\temail = included@example.invalid\n";
+        let config = b"[status]\n\tshowUntrackedFiles = all\n[advice]\n\tstatusHints = true\n\
+            [user]\n\tname = Template Name\n\temail = template@example.invalid\n\
+            [include]\n\tpath = overrides\n";
+        let template_dir = template(s, &[("config", config), ("overrides", overrides)]);
+        let dir = s.dir().join("workspace");
+        s.repository(&dir);
+        for (key, value) in [
+            ("user.name", "Public Name"),
+            ("user.email", "public@example.invalid"),
+        ] {
+            s.git(["config", key, value]).from(&dir).succeeds();
+        }
+
+        let output = init_under(s, &template_dir, &dir);
+        assert_eq!(output.end, End::Code(0), "{output:?}");
+        let get = |scope: &str, key: &str| {
+            let output = dupe_succeeds(s, &dir, &["config", scope, "--get", key]);
+            String::from_utf8(output.stdout).unwrap()
+        };
+        for (key, written, included) in [
+            ("status.showUntrackedFiles", "no", "normal"),
+            ("advice.statusHints", "false", "yes"),
+            ("user.name", "Public Name", "Included Name"),
+            (
+                "user.email",
+                "public@example.invalid",
+                "included@example.invalid",
+            ),
+        ] {
+            assert_eq!(get("--local", key), format!("{written}\n"), "{key}");
+            assert_eq!(get("--includes", key), format!("{included}\n"), "{key}");
+        }
+        let private = dir.join(".git/dupe");
+        assert_eq!(fs::read(private.join("overrides")).unwrap(), overrides);
+        let configured = Tree::of(&private);
+
+        completed_hint(&s.git(["dupe", "init"]).from(&dir).run(), false);
+        unchanged(&configured, &private);
+    });
+}
+
+/// A template directory holding `files`, each name with its bytes, as the word
+/// `init.templateDir=<directory>` that a `-c` before `dupe` gives.
+fn template(s: &Scenario, files: &[(&str, &[u8])]) -> OsString {
+    let template = s.dir().join("template");
+    fs::create_dir(&template).unwrap();
+    for (name, bytes) in files {
+        fs::write(template.join(name), bytes).unwrap();
+    }
+    let mut word = OsString::from("init.templateDir=");
+    word.push(&template);
+    word
+}
+
+/// `git -c <template_dir> dupe init` from `dir`, as it ends.
+fn init_under(s: &Scenario, template_dir: &OsStr, dir: &Path) -> Output {
+    let words = [
+        OsStr::new("-c"),
+        template_dir,
+        OsStr::new("dupe"),
+        OsStr::new("init"),
+    ];
+    s.git(words).from(dir).run()
 }
