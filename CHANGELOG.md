@@ -8,6 +8,8 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-16
+
 ### Added
 
 - After a private `rebase` or `am` that stopped, a `cherry-pick` or `revert` that
