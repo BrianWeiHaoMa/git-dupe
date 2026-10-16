@@ -11,8 +11,8 @@ pathspec, its other ignored files are deleted; otherwise those Git reaches from
 the current directory and pathspecs are, and, without -d or a pathspec, a
 directory holding only these, hidden directories, and ignored files is kept
 whole. Refused: -X with -e; any form while a hidden path lies beyond a symbolic
-link; a pathspec holding *, ?, [, or \, or beginning with : but :/, while one
-lies in a directory not hidden that holds nothing the project tracks.
+link; a pathspec holding *, ?, [, or \, or beginning with : and not :/ alone,
+while one lies in a directory not hidden that holds nothing the project tracks.
 
 Options, each meaning what it means to Git:
   -n, --dry-run  -f, --force  -i, --interactive  -q, --quiet  -d  -x  -X

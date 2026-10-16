@@ -159,6 +159,11 @@ fn a_non_literal_pathspec_over_a_loose_directory_is_refused_in_every_spelling_an
             &["-fd", "--", ":(top)cache"],
             &["-fd", "--", ":(literal)cache"],
             &["-fd", "--", ":/cache*"],
+            // Git reads short magic after `:/`: an exclusion there, and `top` alone, as
+            // `:(top)cache` is; only `:/` itself is a literal path.
+            &["-fd", "--", ":/!cache/secret"],
+            &["-fd", "--", ":/^cache/secret"],
+            &["-fd", "--", ":/cache"],
             // An `-e` lacking its value, which Git refuses: refused here first.
             &["-fd", "cache?", "-e"],
         ] {
@@ -295,9 +300,7 @@ fn literal_pathspecs_over_a_loose_directory_run_as_plain_git_clean_runs() {
         ] {
             twin.clean(words).run();
         }
-        for words in [&["-fd", "--", "../cache"][..], &["-fd", "--", ":/cache"]] {
-            twin.clean(words).below("docs").run();
-        }
+        twin.clean(&["-fd", "--", "../cache"]).below("docs").run();
     });
 }
 
@@ -478,8 +481,9 @@ fn the_help_text_names_the_refusal() {
             let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(
                 text.contains(
-                    "a pathspec holding *, ?, [, or \\, or beginning with : but :/, while \
-                     one lies in a directory not hidden that holds nothing the project tracks"
+                    "a pathspec holding *, ?, [, or \\, or beginning with : and not :/ \
+                     alone, while one lies in a directory not hidden that holds nothing the \
+                     project tracks"
                 ),
                 "{text}"
             );

@@ -45,15 +45,18 @@ pub fn refused_beyond_a_link<'p>(
 }
 
 /// Whether `word`, one of the user's pathspecs, is a non-literal pathspec (G16): one
-/// holding `*`, `?`, `[`, or `\`, or beginning with `:` other than `:/`. It is read by its
-/// bytes alone, as `operand::rooted_or_literal` reads an operand of `status` or `add`,
-/// with `\` added, which Git reads as an escape in a pathspec it does not take literally:
-/// such a word can match a directory and fail, or leave out, a file below it, which a
-/// literal path cannot (S4). No magic is parsed and no setting before `dupe` is read, so
-/// that under `--literal-pathspecs`, and for `top`, `literal`, or `icase` magic on a word
-/// holding none of the four bytes, the answer is over-inclusive (`Holds/G16`).
+/// holding `*`, `?`, `[`, or `\`, or beginning with `:` other than the word `:/` alone. It
+/// is read by its bytes alone, as `operand::literal` reads a word, with `\` added, which
+/// Git reads as an escape in a pathspec it does not take literally: such a word can match
+/// a directory and fail, or leave out, a file below it, which a literal path cannot (S4).
+/// Unlike an operand of `status` or `add` (`operand::rooted_or_literal`), whose path
+/// git-dupe writes itself, the word reaches Git as typed, and Git reads short magic after
+/// `:/`, so that `:/!<path>` is an exclusion; `:/<path>`, `top` magic, is refused with it.
+/// No magic is parsed and no setting before `dupe` is read, so that under
+/// `--literal-pathspecs`, and for `top`, `literal`, or `icase` magic on a word holding
+/// none of the four bytes, the answer is over-inclusive (`Holds/G16`).
 pub fn non_literal(word: &[u8]) -> bool {
-    operand::rooted_or_literal(word).is_err() || word.contains(&b'\\')
+    (operand::literal(word).is_err() && word != b":/") || word.contains(&b'\\')
 }
 
 /// The outermost proper ancestor below the root of each region path that has one: what

@@ -318,6 +318,31 @@ fn every_url_and_push_url_of_every_remote_is_compared() {
     );
 }
 
+#[test]
+fn every_word_of_every_remote_group_is_a_member() {
+    let listing = records(&[
+        ("remotes.g", Some("origin /srv/root")),
+        ("remote.g.url", Some("/srv/private.git")),
+        ("remotes.ws", Some(" a\tb\n c\r ")),
+        ("Remotes.Dotted.Name", Some("..")),
+        ("remotes.empty", Some("")),
+        ("remotes.novalue", None),
+        ("remotes", Some("/nowhere")),
+        ("remote.remotes", Some("/nowhere")),
+    ]);
+    assert_eq!(
+        group_members(&listing),
+        [
+            (&b"remotes.g"[..], &b"origin"[..]),
+            (b"remotes.g", b"/srv/root"),
+            (b"remotes.ws", b"a"),
+            (b"remotes.ws", b"b"),
+            (b"remotes.ws", b"c\r"),
+            (b"Remotes.Dotted.Name", b".."),
+        ]
+    );
+}
+
 fn default_of<'a>(
     transfer: Transfer,
     listing: &[Record<'a>],

@@ -14,10 +14,13 @@ project, the root or a linked worktree, its .git, or its Git directory, by an
 absolute path, a path from ~, or a path relative to the root. push, pull, and
 fetch are also refused when a URL that the private repository's configuration
 gives any of its remotes names such a place, the refusal naming that remote
-and git dupe remote remove, and, given no repository, when the default remote
-Git takes in its place is a URL or path that names one: for push, the first
-set of branch.<name>.pushRemote, remote.pushDefault, and branch.<name>.remote,
-and for pull and fetch, branch.<name>.remote.
+and git dupe remote remove; when a member of a remote group, a word of the
+value of any remotes.<group> key, names one, whatever the command's own words
+name, the refusal naming the key and git dupe config --unset remotes.<group>;
+and, given no repository, when the default remote Git takes in its place is a
+URL or path that names one: for push, the first set of
+branch.<name>.pushRemote, remote.pushDefault, and branch.<name>.remote, and
+for pull and fetch, branch.<name>.remote.
 
 The refusal names the place, and git dupe git for a destination you mean:
 git dupe git push runs Git's push unguarded. This is a comparison of names,
@@ -26,13 +29,14 @@ url.<base>.insteadOf, a path beginning with ~ and a user's name, and a remote
 defined by a file in a remotes or branches directory are not seen through.
 
 git dupe clean is refused, deleting nothing, given a pathspec that is not a
-literal path, one holding *, ?, [, or \, or beginning with : other than :/,
-while a hidden path lies in a directory that is not hidden and under which the
-project tracks nothing. Given any pathspec, Git's clean deletes such a
-directory whole, with everything in it, unless it meets inside it a path a
-rule excludes, and such a pathspec can keep the hidden path from being met: an
-exclusion that names it, an attribute that does not select it, or a pattern
-that matches the directory and not the file. A literal path cannot, because
-one that matches a directory matches everything below it. The refusal names
-the pathspec, the directory, and the hidden path: give literal pathspecs
-instead, and -e <pattern> for what to keep.
+literal path, one holding *, ?, [, or \, or beginning with : other than :/
+alone, as :/!<path>, an exclusion to Git, does, while a hidden path lies in a
+directory that is not hidden and under which the project tracks nothing. Given
+any pathspec, Git's clean deletes such a directory whole, with everything in
+it, unless it meets inside it a path a rule excludes, and such a pathspec can
+keep the hidden path from being met: an exclusion that names it, an attribute
+that does not select it, or a pattern that matches the directory and not the
+file. A literal path cannot, because one that matches a directory matches
+everything below it. The refusal names the pathspec, the directory, and the
+hidden path: give literal pathspecs instead, and -e <pattern> for what to
+keep.

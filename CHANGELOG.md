@@ -11,8 +11,8 @@ Every change a user of git-dupe would notice, newest first, in the form of
 ### Fixed
 
 - `git dupe clean` given a pathspec that is not a literal path, one holding `*`, `?`,
-  `[`, or `\`, or beginning with `:` other than `:/`, such as `:(exclude)notes/x` or
-  `cache?`, is now refused, deleting nothing, while a hidden path lies in a directory
+  `[`, or `\`, or beginning with `:` other than `:/` alone, such as `:(exclude)notes/x`,
+  `:/!notes/x`, or `cache?`, is now refused, deleting nothing, while a hidden path lies in a directory
   that is not hidden and under which the project tracks nothing, where Git's clean could
   delete that directory whole, the never-committed private files in it included. The
   refusal names the pathspec, the directory, and the hidden path; literal pathspecs and
@@ -24,6 +24,12 @@ Every change a user of git-dupe would notice, newest first, in the form of
   replace ref or a grafts line grafts under pushed history is refused as unpushed, where
   it was removed with the private repository, and pushed history that a replace ref or a
   grafts line cuts away from its descendants no longer refuses.
+- `git dupe push`, `pull`, and `fetch` are now refused, sending and fetching nothing,
+  while a member of a private remote group, a word of the value of any `remotes.<group>`
+  key, names the project's repository or a remote of it, whatever the command's own
+  words name, the refusal naming the key and `git dupe config --unset remotes.<group>`:
+  `git dupe fetch <group>` and `pull <group>` with two or more members, and from Git
+  2.55.0 `git dupe push <group>`, ran against each member unguarded.
 - On a branch with no upstream, a `git dupe push <remote>` with no refspec that Git
   refuses, where `<remote>` is the branch's `branch.<name>.remote`, or, where that is
   unset, the only remote the private configuration defines, `<remote>` counted among

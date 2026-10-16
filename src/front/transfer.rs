@@ -12,7 +12,11 @@
 //! - `push`, `pull`, and `fetch` are also compared by what Git reaches without a typed
 //!   destination (`guards::transfer`): first every URL the private configuration gives
 //!   any remote, whatever destination is typed, its refusal naming the remote and `git
-//!   dupe remote remove`; then the words; then, given no repository, the default remote.
+//!   dupe remote remove`; then every member of every remote group, each as a typed word
+//!   is compared, whatever the words name, because `fetch` and `pull` run against each
+//!   member of a group of two or more and `push` from 2.55.0 against each of any group
+//!   (S13), its refusal naming the key and `git dupe config --unset`; then the words;
+//!   then, given no repository, the default remote.
 //!   `remote` is not, so that `git dupe remote remove` can always repair such a remote.
 //! - The guard stands wherever such a command's run could follow (`passthrough`): in an
 //!   attached workspace before the private run, and before the help request's run where
@@ -173,6 +177,11 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
             return Err(refuse_remote(name, place));
         }
     }
+    for (key, member) in transfer::group_members(&records) {
+        if let Some(place) = places.named_by(member) {
+            return Err(refuse_group(key, place));
+        }
+    }
     for word in &after {
         if let Some(place) = places.named_by(word) {
             return Err(places::refuse(word, place));
@@ -331,6 +340,19 @@ fn refuse_remote(name: &[u8], place: &Place) -> Outcome {
     line.extend_from_slice(b" names ");
     line.extend_from_slice(&places::described(place));
     line.extend_from_slice(b"; 'git dupe remote remove' removes that remote");
+    outcome::refuse(&line)
+}
+
+/// The refusal of the private remote group `key`, a member of which names `place`. The
+/// member is not named: it is the configuration's, a URL that may hold a credential (G25).
+fn refuse_group(key: &[u8], place: &Place) -> Outcome {
+    let mut line = b"a member of the private remote group ".to_vec();
+    line.extend_from_slice(&lines::typed(key));
+    line.extend_from_slice(b" names ");
+    line.extend_from_slice(&places::described(place));
+    line.extend_from_slice(b"; 'git dupe config --unset ");
+    line.extend_from_slice(&shell_word(key));
+    line.extend_from_slice(b"' removes that group");
     outcome::refuse(&line)
 }
 

@@ -1,6 +1,7 @@
 //! What `push`, `pull`, and `fetch` are compared by beyond their words (G18,
 //! `Holds/G18`): whether the words give a repository, the URLs the private configuration
-//! gives its remotes, and the default remote of a command given no repository. `places`
+//! gives its remotes, the members of its remote groups, and the default remote of a
+//! command given no repository. `places`
 //! answers whether each names a public place; the front takes the configuration and the
 //! branch, and writes the lines. The same words and records decide the front's hints
 //! after a failed run (`Holds/G18`): whether `push` given no repository leaves the choice
@@ -267,6 +268,27 @@ pub fn remote_urls<'a>(records: &[Record<'a>]) -> Vec<(&'a [u8], &'a [u8])> {
                 return None;
             }
             Some((key.name?, value?))
+        })
+        .collect()
+}
+
+/// Every member of a remote group the configuration's `records` give, each with its key
+/// as the configuration printed it, in the records' order: the words of the value of a
+/// key whose section is `remotes`, split at spaces, tabs, and newlines as Git splits it
+/// (S13). Git reads what follows `remotes.` as the group's name, a subsection's dot
+/// included, so every such key is a group here. A key without a value has no member.
+pub fn group_members<'a>(records: &[Record<'a>]) -> Vec<(&'a [u8], &'a [u8])> {
+    records
+        .iter()
+        .filter(|&&(key, _)| {
+            Key::of(key).is_some_and(|key| key.section.eq_ignore_ascii_case(b"remotes"))
+        })
+        .filter_map(|&(key, value)| Some((key, value?)))
+        .flat_map(|(key, value)| {
+            value
+                .split(|byte| matches!(byte, b' ' | b'\t' | b'\n'))
+                .filter(|member| !member.is_empty())
+                .map(move |member| (key, member))
         })
         .collect()
 }

@@ -142,19 +142,15 @@ fn a_pathspec_is_non_literal_by_its_bytes_whatever_its_magic_says() {
         b"doc?",
         b":/cache*",
         b":/a\\b",
+        b":/!cache/secret",
+        b":/^cache/secret",
+        b":///!cache/secret",
+        b":/cache",
         b":(exclude)a\nb",
     ] {
         assert!(non_literal(word), "{}", word.escape_ascii());
     }
-    for word in [
-        &b"cache"[..],
-        b"cache/",
-        b"../cache",
-        b".",
-        b":/",
-        b":/cache",
-        b"a b",
-    ] {
+    for word in [&b"cache"[..], b"cache/", b"../cache", b".", b":/", b"a b"] {
         assert!(!non_literal(word), "{}", word.escape_ascii());
     }
 }

@@ -216,6 +216,68 @@ fn pushurl_and_every_url_record_are_guarded() {
     });
 }
 
+/// Every word of every remote group's value is compared as a typed destination is, under
+/// every release, whatever the command's words name: `push` from 2.55.0, and `fetch` and
+/// `pull` given a group of two or more, run against each member. `remote` is not.
+#[test]
+fn a_remote_groups_members_are_compared_whatever_the_words_name() {
+    under_each_release(|s| {
+        let t = s.transfer_workspace("workspace");
+        add_origin(s, &t);
+        let private = text(&t.private_remote);
+        for (key, value, place) in [
+            (
+                "remotes.g",
+                format!("{private} {}", text(&t.root)),
+                text(&t.root),
+            ),
+            (
+                "remotes.one",
+                "git@example.com:team/project.git".to_string(),
+                "origin",
+            ),
+            (
+                "remotes.mixed",
+                format!("origin\t{private}\n{}", text(&t.linked)),
+                text(&t.linked),
+            ),
+        ] {
+            s.git(["dupe", "git", "config", key, &value])
+                .from(&t.root)
+                .succeeds();
+            let unset = format!("git dupe config --unset {key}");
+            for words in [
+                &["push", "g", "main:leak"][..],
+                &["push", "origin", "main"],
+                &["push"],
+                &["fetch", "g"],
+                &["fetch", "origin"],
+                &["pull", "g"],
+            ] {
+                let before = t.everything();
+                let output = s
+                    .git(["dupe"].into_iter().chain(words.iter().copied()))
+                    .from(&t.root)
+                    .run();
+                let line = refusal(&output, &[unset.as_bytes(), place.as_bytes()]);
+                names(line, format!("private remote group '{key}'").as_bytes());
+                before.unchanged();
+            }
+            let listed = s.git(["dupe", "remote", "-v"]).from(&t.root).run();
+            assert_eq!(listed.end, End::Code(0), "{listed:?}");
+            s.git(["dupe", "config", "--unset", key])
+                .from(&t.root)
+                .succeeds();
+        }
+        s.git(["dupe", "push", "origin", "main"])
+            .from(&t.root)
+            .succeeds();
+        arrived(s, &t, &t.private_remote);
+        let lost = s.git(["rev-parse", "-q", "--verify", "refs/heads/leak"]);
+        assert_eq!(lost.from(&t.root).run().end, End::Code(1));
+    });
+}
+
 /// Git's command-line configuration participates in the private URL check.
 #[test]
 fn command_line_remote_url_is_guarded() {
