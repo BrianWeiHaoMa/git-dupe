@@ -22,30 +22,36 @@
 //!   directory: anywhere else there is no private remote and no default for the run to
 //!   reach, and it can transfer nothing.
 //! - Every run is made before anything is compared: the two of the places, then the
-//!   private `config -z --list`, then, given no repository, the private `symbolic-ref -q
-//!   HEAD`. Their number follows the command word, the words, and where it stands, never
-//!   what a repository or its configuration holds (G22, R4). Each is git-dupe's own and
-//!   only reads (G5, R2); the `config` run has `GIT_CONFIG` removed and sees a remote a
-//!   `-c` before `dupe` or an alias chain's prefix defines, which `Run` carries.
+//!   private `config -z --list`, then, given no repository, or for a `push` or `pull`
+//!   given a repository word and no refspec and no help request among the words, the
+//!   private `symbolic-ref -q HEAD`, which the second reads for a hint alone, so that its
+//!   failure there gives none and ends nothing. Their number follows the command word,
+//!   the words, and where it stands, never what a repository or its configuration holds
+//!   (G22, R4). Each is git-dupe's own and only reads (G5, R2); the `config` run has
+//!   `GIT_CONFIG` removed and sees a remote a `-c` before `dupe` or an alias chain's
+//!   prefix defines, which `Run` carries.
 //! - A run the guard let through may end with one `hint:` where Git's own advice names a
 //!   plain `git` command, which under `git dupe` would act on the project's repository
 //!   (`Holds/G18`, G25): after a `push` given no repository whose configuration chooses
 //!   no remote (`guards::transfer`), which runs as Git itself all the same, and that did
-//!   not exit 0, naming `git dupe remote add`; after a `push` given no repository, on a
-//!   branch with no upstream, that exited 128, naming `git dupe push -u` with the remote
-//!   Git takes and `HEAD`, which pushes the branch to the one of its name there whatever
-//!   tag or other ref shares the name, where the branch's own name would be refused as
-//!   ambiguous (S13); after any other `push` that exited 1, a rejected update
+//!   not exit 0, naming `git dupe remote add`; after a `push` on a branch with no
+//!   upstream that exited 128, given no repository, or given the branch's remote and no
+//!   refspec (`guards::transfer`), naming `git dupe push -u` with the remote Git takes or
+//!   the word typed, and `HEAD`, which pushes the branch to the one of its name there
+//!   whatever tag or other ref shares the name, where the branch's own name would be
+//!   refused as ambiguous (S13); after any other `push` that exited 1, a rejected update
 //!   or a hook's refusal alike, naming `git dupe pull` and `git dupe fetch`; after a
-//!   `pull` given no repository, on a branch with no upstream, that did not exit 0,
-//!   naming `git dupe pull <remote> <branch>` and `git dupe branch --set-upstream-to`;
+//!   `pull` on a branch with no upstream that did not exit 0, given no repository, or
+//!   given the branch's `branch.<name>.remote` and no refspec, naming
+//!   `git dupe pull <remote> <branch>` and `git dupe branch --set-upstream-to`;
 //!   and after any other `pull` that exited 128 while neither the configuration nor an
 //!   exact word of the six chooses how to reconcile divergent branches, naming
 //!   `git dupe config pull.rebase` and `pull.ff`. A bundle or an abbreviation of those
 //!   words is not read, so the last may follow where Git chose, never where a key did.
 //! - Each hint is decided from the records the guard already read and the run's end
-//!   alone, never from what Git printed (R5), so it costs no run (G22): a `pull` given a
-//!   repository has no `HEAD` read, and its `branch.<name>.rebase` is then any branch's.
+//!   alone, never from what Git printed (R5), so it costs no run (G22): for a `pull`
+//!   given a repository, the `branch.<name>.rebase` that keeps the last away is any
+//!   branch's, whether or not `HEAD` was read for the tracking hint.
 //!   None follows a run among whose words is `-h` or `--help`, so that a help request's
 //!   output stays Git's alone under every release, nor `fetch`, `remote`, or a run the
 //!   guard did not let start; and none where the configuration was not asked, where
@@ -60,7 +66,7 @@ use super::outcome::{self, Outcome};
 use super::places;
 use crate::guards::places::Place;
 use crate::guards::quoted::shell_word;
-use crate::guards::transfer::{self, Current, DefaultRemote, Record, Transfer};
+use crate::guards::transfer::{self, Current, DefaultRemote, Record, Repository, Transfer};
 use crate::runner::locate::Facts;
 use crate::runner::records;
 use crate::runner::{Against, End, Run};
@@ -112,8 +118,9 @@ pub enum Then {
     /// run that did not exit 0.
     NoRemoteChosen,
     /// Any other `push`: after a run that exited 128, the hint naming `git dupe push -u`,
-    /// when given no repository on a branch with no upstream, which this holds; after a
-    /// run that exited 1, the hint after a rejected update.
+    /// on a branch with no upstream given no repository or the branch's remote and no
+    /// refspec, which this holds; after a run that exited 1, the hint after a rejected
+    /// update.
     Push(Option<Upstream>),
     /// `pull`: after a run that did not exit 0, the hint for a branch with no upstream,
     /// when `untracked`; otherwise, after a run that exited 128, the hint naming how to
@@ -121,8 +128,8 @@ pub enum Then {
     Pull { untracked: bool, unreconciled: bool },
 }
 
-/// The remote Git takes for a branch with no upstream that `push` given no repository
-/// was asked to push.
+/// The remote the upstream hint names for a branch with no upstream that `push` was asked
+/// to push: the one Git takes, given no repository, or the repository word typed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Upstream {
     remote: Vec<u8>,
@@ -145,13 +152,17 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
     };
     let places = places::take(facts)?;
     let private = moving.filter(|_| against.private_repository().is_some());
+    let repository = private.map(|moving| transfer::repository(moving, &after));
     let configuration = match private {
         Some(_) => places::asked(Run::against(against, ["config", "-z", "--list"]), false)?,
         None => Vec::new(),
     };
-    let head = match private {
-        Some(moving) if !transfer::gives_a_repository(moving, &after) => {
-            Some(current_branch(against)?)
+    let help = after.iter().any(|word| matches!(*word, b"-h" | b"--help"));
+    let head = match (private, repository) {
+        (_, Some(Repository::Default)) => Some(current_branch(against)?),
+        // Read for a hint alone, which no help request draws.
+        (Some(Transfer::Push | Transfer::Pull), Some(Repository::Alone(_))) if !help => {
+            current_branch(against).ok()
         }
         _ => None,
     };
@@ -167,7 +178,7 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
             return Err(places::refuse(word, place));
         }
     }
-    if let (Some(moving), Some(head)) = (private, &head) {
+    if let (Some(moving), Some(Repository::Default), Some(head)) = (private, repository, &head) {
         let found = transfer::default_remote(moving, &records, records::branch_of(head));
         if let Some(found) = found
             && let Some(place) = places.named_by_whole(found.value)
@@ -175,15 +186,14 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
             return Err(refuse_default(command.as_bytes(), found, place));
         }
     }
-    let help = after.iter().any(|word| matches!(*word, b"-h" | b"--help"));
     let current = match &head {
-        None => Current::Unread,
+        None => Current::AnyBranch,
         Some(head) => records::branch_of(head).map_or(Current::Detached, Current::Branch),
     };
-    Ok(match private {
+    Ok(match (private, repository) {
         _ if help => Then::Nothing,
-        Some(Transfer::Push) => match current {
-            Current::Unread => Then::Push(None),
+        (Some(Transfer::Push), Some(Repository::Default)) => match current {
+            Current::AnyBranch => Then::Push(None),
             Current::Detached if transfer::push_chooses_no_remote(&records, None) => {
                 Then::NoRemoteChosen
             }
@@ -191,23 +201,53 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
             Current::Branch(branch) if transfer::push_chooses_no_remote(&records, Some(branch)) => {
                 Then::NoRemoteChosen
             }
-            Current::Branch(branch) => Then::Push(without_upstream(&records, branch)),
+            Current::Branch(branch) => Then::Push(without_upstream(&records, branch, None)),
         },
-        Some(Transfer::Pull) => Then::Pull {
-            untracked: matches!(current, Current::Branch(branch)
-                if !transfer::has_upstream(&records, branch)),
-            unreconciled: !transfer::reconciliation_configured(&records, current)
-                && !after.iter().any(|word| reconciling(word)),
+        (Some(Transfer::Push), Some(given)) => Then::Push(match (given, current) {
+            (Repository::Alone(word), Current::Branch(branch)) => {
+                without_upstream(&records, branch, Some(word))
+            }
+            _ => None,
+        }),
+        (Some(Transfer::Pull), Some(given)) => Then::Pull {
+            untracked: match (given, current) {
+                (Repository::Default, Current::Branch(branch)) => {
+                    !transfer::has_upstream(&records, branch)
+                }
+                (Repository::Alone(word), Current::Branch(branch)) => {
+                    !transfer::has_upstream(&records, branch)
+                        && transfer::is_the_branch_remote(Transfer::Pull, &records, branch, word)
+                }
+                _ => false,
+            },
+            unreconciled: !transfer::reconciliation_configured(
+                &records,
+                match given {
+                    Repository::Default => current,
+                    _ => Current::AnyBranch,
+                },
+            ) && !after.iter().any(|word| reconciling(word)),
         },
-        Some(Transfer::Fetch) | None => Then::Nothing,
+        _ => Then::Nothing,
     })
 }
 
-/// The upstream `push` given no repository on `branch` would set, when the configuration's
-/// `records` give the branch none.
-fn without_upstream(records: &[Record<'_>], branch: &[u8]) -> Option<Upstream> {
+/// The upstream `push` on `branch` would set, when the configuration's `records` give the
+/// branch none and Git's advice names a plain command: given no repository when `word` is
+/// `None`, the remote Git takes; given the repository `word` and no refspec, that word as
+/// typed, where it is the branch's remote.
+fn without_upstream(
+    records: &[Record<'_>],
+    branch: &[u8],
+    word: Option<&[u8]>,
+) -> Option<Upstream> {
+    let remote = match word {
+        None => transfer::push_remote(records, Some(branch)),
+        Some(word) if transfer::is_the_branch_remote(Transfer::Push, records, branch, word) => word,
+        Some(_) => return None,
+    };
     (!transfer::has_upstream(records, branch)).then(|| Upstream {
-        remote: transfer::push_remote(records, Some(branch)).to_vec(),
+        remote: remote.to_vec(),
     })
 }
 

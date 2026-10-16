@@ -1,10 +1,11 @@
 //! The hints after a `push` or `pull` whose outcome Git's own advice names a plain `git`
-//! command for (`Holds/G18`, G25): a `push` given no repository on a branch with no
-//! upstream, a rejected `push`, a `pull` given no repository on a branch with no upstream,
-//! and a `pull` that finds divergent branches with no way to reconcile chosen. Git's own
-//! run and output unchanged, then one `hint:` naming the `git dupe` form; none after a
-//! help request, after a run whose end or state the family does not name, or after
-//! `git dupe git` (G19, G20, F9). The hint `push` owes where no remote is chosen is
+//! command for (`Holds/G18`, G25): a `push` on a branch with no upstream given no
+//! repository, or given the branch's remote and no refspec, a rejected `push`, a `pull` on
+//! a branch with no upstream given no repository, or given its `branch.<name>.remote` and
+//! no refspec, and a `pull` that finds divergent branches with no way to reconcile chosen.
+//! Git's own run and output unchanged, then one `hint:` naming the `git dupe` form; none
+//! after a help request, after a run whose end or state the family does not name, or
+//! after `git dupe git` (G19, G20, F9). The hint `push` owes where no remote is chosen is
 //! `transfer_push_hint`'s.
 
 use std::path::Path;
@@ -109,9 +110,10 @@ fn a_push_on_a_branch_with_no_upstream_names_push_u_with_the_remote_git_takes() 
         assert_eq!(ours.end, End::Code(128), "{ours:?}");
         dupe(s, root, &["config", "alias.p", "push"]);
         hinted(s, root, &["p"], &[UPSTREAM]);
-        // A repository given, where Git refuses the same: not given no repository. A help
-        // request, or a `--help` Git takes as the value of `-o` before it fails so.
-        assert_eq!(unhinted(s, root, &["push", "origin"]).end, End::Code(128));
+        // The branch's remote given, with no refspec: the same hint. A help request, or a
+        // `--help` Git takes as the value of `-o` before it fails so: none.
+        let ours = hinted(s, root, &["push", "origin"], &[UPSTREAM]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
         for words in [&["push", "-h"][..], &["push", "-o", "--help"]] {
             unhinted(s, root, words);
         }
@@ -143,6 +145,116 @@ fn a_push_on_a_branch_with_no_upstream_names_push_u_with_the_remote_git_takes() 
         // On a detached `HEAD` no branch lacks an upstream.
         dupe(s, root, &["checkout", "-q", "--detach"]);
         assert_eq!(unhinted(s, root, &["push"]).end, End::Code(128));
+    });
+}
+
+#[test]
+fn a_push_given_the_branchs_remote_and_no_refspec_names_push_u_with_it() {
+    under_each_release(|s| {
+        without_maintenance(s);
+        let t = s.transfer_workspace("workspace");
+        let root = &t.root;
+        let remote = text(&t.private_remote);
+        dupe(s, root, &["remote", "add", "origin", remote]);
+        dupe(s, root, &["config", "alias.p", "push"]);
+        // An option or an option's value about the remote is no refspec.
+        for words in [
+            &["push", "--", "origin"][..],
+            &["push", "--repo", "origin"],
+            &["push", "--repo=origin"],
+            &["push", "-v", "origin"],
+            &["push", "origin", "-n"],
+            &["p", "origin"],
+        ] {
+            let ours = hinted(s, root, words, &[UPSTREAM]);
+            assert_eq!(ours.end, End::Code(128), "{words:?}: {ours:?}");
+        }
+        // A help request among the words, wherever it stands: Git's output alone.
+        for words in [
+            &["push", "origin", "--help"][..],
+            &["push", "-o", "--help", "origin"],
+        ] {
+            unhinted(s, root, words);
+        }
+        // Where the push URL names nothing, Git refuses a refspec too, naming no command.
+        let nowhere = s.dir().join("nowhere.git");
+        dupe(
+            s,
+            root,
+            &["config", "remote.origin.pushurl", text(&nowhere)],
+        );
+        let ours = hinted(s, root, &["push", "origin"], &[UPSTREAM]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        for words in [
+            &["push", "origin", "main"][..],
+            &["push", "origin", "HEAD"],
+            &["push", "--", "origin", "main"],
+            &["push", "origin", "--", "main"],
+        ] {
+            assert_eq!(unhinted(s, root, words).end, End::Code(128), "{words:?}");
+        }
+        dupe(s, root, &["config", "--unset", "remote.origin.pushurl"]);
+        // The branch's remote by a name a shell reads back only quoted: named as typed.
+        dupe(s, root, &["remote", "add", "it's", remote]);
+        dupe(s, root, &["config", "branch.main.remote", "it's"]);
+        let named = b"'git dupe push -u \"it's\" HEAD'";
+        let ours = hinted(s, root, &["push", "it's"], &[named]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        dupe(s, root, &["config", "--unset", "branch.main.remote"]);
+        // With an upstream, or on a detached `HEAD`, no upstream hint is owed.
+        let output = s
+            .git(["dupe", "push", "-u", "origin", "HEAD"])
+            .from(root)
+            .run();
+        succeeded_without_a_hint(&output);
+        assert_eq!(unhinted(s, root, &["push", "origin"]).end, End::Code(0));
+        dupe(s, root, &["checkout", "-q", "--detach"]);
+        assert_eq!(unhinted(s, root, &["push", "origin"]).end, End::Code(128));
+    });
+}
+
+/// Git compares a remote given with no refspec with `branch.<name>.remote`, else `origin`,
+/// whatever the push keys hold, and pushes the branch to another under its name (S13).
+#[test]
+fn a_push_given_another_remote_than_the_branchs_owes_no_upstream_hint() {
+    under_each_release(|s| {
+        without_maintenance(s);
+        let t = s.transfer_workspace("workspace");
+        let root = &t.root;
+        let backup = s.dir().join("backup.git");
+        s.bare_repository(&backup);
+        dupe(
+            s,
+            root,
+            &["remote", "add", "origin", text(&t.private_remote)],
+        );
+        dupe(s, root, &["remote", "add", "backup", text(&backup)]);
+        let pushed = |remote: &str| {
+            let output = s.git(["dupe", "push", remote]).from(root).run();
+            succeeded_without_a_hint(&output);
+        };
+        pushed("backup");
+        for key in ["remote.pushDefault", "branch.main.pushRemote"] {
+            dupe(s, root, &["config", key, "backup"]);
+            let ours = hinted(s, root, &["push", "origin"], &[UPSTREAM]);
+            assert_eq!(ours.end, End::Code(128), "{key}: {ours:?}");
+            pushed("backup");
+            dupe(s, root, &["config", "--unset", key]);
+        }
+        dupe(s, root, &["config", "branch.main.remote", "backup"]);
+        let named = b"'git dupe push -u backup HEAD'";
+        let ours = hinted(s, root, &["push", "backup"], &[named]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        pushed("origin");
+        dupe(s, root, &["config", "--unset", "branch.main.remote"]);
+        // Under `upstream` Git refuses another remote naming no command; under `current`
+        // it pushes to the branch's.
+        dupe(s, root, &["config", "push.default", "upstream"]);
+        assert_eq!(unhinted(s, root, &["push", "backup"]).end, End::Code(128));
+        let ours = hinted(s, root, &["push", "origin"], &[UPSTREAM]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        dupe(s, root, &["config", "push.default", "current"]);
+        pushed("origin");
     });
 }
 
@@ -280,6 +392,44 @@ fn a_pull_on_a_branch_with_no_upstream_names_pull_and_set_upstream_to() {
 }
 
 #[test]
+fn a_pull_given_the_branchs_remote_and_no_refspec_names_pull_and_set_upstream_to() {
+    under_each_release(|s| {
+        without_maintenance(s);
+        let t = s.transfer_workspace("workspace");
+        let root = &t.root;
+        let backup = s.dir().join("backup.git");
+        s.bare_repository(&backup);
+        dupe(
+            s,
+            root,
+            &["remote", "add", "origin", text(&t.private_remote)],
+        );
+        dupe(s, root, &["remote", "add", "backup", text(&backup)]);
+        // Only the branch's own `branch.<name>.remote` is the form; with the key unset,
+        // Git names no command (above).
+        dupe(s, root, &["config", "branch.main.remote", "origin"]);
+        for words in [&["pull", "origin"][..], &["pull", "-v", "origin"]] {
+            let ours = hinted(s, root, words, &NOT_TRACKING);
+            assert_eq!(ours.end, End::Code(1), "{words:?}: {ours:?}");
+        }
+        // Another remote, a refspec: Git's output alone.
+        for words in [&["pull", "backup"][..], &["pull", "origin", "main"]] {
+            assert_ne!(unhinted(s, root, words).end, End::Code(0), "{words:?}");
+        }
+        // A help request, or a `--help` Git takes as the value of `-o` before it fails.
+        for words in [
+            &["pull", "origin", "--help"][..],
+            &["pull", "-o", "--help", "origin"],
+        ] {
+            unhinted(s, root, words);
+        }
+        // With the upstream set, Git pulls.
+        dupe(s, root, &["push", "-u", "origin", "HEAD"]);
+        succeeded_without_a_hint(&s.git(["dupe", "pull", "origin"]).from(root).run());
+    });
+}
+
+#[test]
 fn a_divergent_pull_with_no_way_to_reconcile_names_pull_rebase_and_pull_ff() {
     under_each_release(|s| {
         without_maintenance(s);
@@ -316,12 +466,14 @@ fn a_divergent_pull_with_no_way_to_reconcile_names_pull_rebase_and_pull_ff() {
             .run();
         assert_eq!(ours, gits);
         assert_eq!(ours.end, End::Code(128), "{ours:?}");
-        // Another branch's key is not this branch's; where a repository is given, `HEAD`
-        // is not read, and any branch's key keeps the hint away.
+        // Another branch's key is not this branch's; where a repository is given, any
+        // branch's key keeps the hint away, whether or not `HEAD` is read for another hint.
         dupe(s, root, &["config", "branch.other.rebase", "true"]);
         assert_eq!(hinted(s, root, &["pull"], &RECONCILE).end, End::Code(128));
-        let ours = unhinted(s, root, &["pull", "origin", "main"]);
-        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        for words in [&["pull", "origin", "main"][..], &["pull", "origin"]] {
+            let ours = unhinted(s, root, words);
+            assert_eq!(ours.end, End::Code(128), "{words:?}: {ours:?}");
+        }
         dupe(s, root, &["config", "--unset", "branch.other.rebase"]);
         write(root, "notes/a.md", b"private\n");
         // Each way the hint names reconciles: no hint.

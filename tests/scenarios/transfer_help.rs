@@ -57,3 +57,27 @@ fn a_help_request_after_a_separator_runs_where_no_workspace_is_attached() {
         }
     });
 }
+
+/// After a repository word a help request draws no hint, so nothing of git-dupe's asks
+/// where `HEAD` stands: where that cannot be read, the output is still Git's alone.
+#[test]
+fn a_help_request_after_a_remote_is_gits_own_where_head_cannot_be_read() {
+    under_each_release(|s| {
+        let t = s.transfer_workspace("workspace");
+        for words in [
+            ["symbolic-ref", "refs/heads/loop", "refs/heads/loop"],
+            ["symbolic-ref", "HEAD", "refs/heads/loop"],
+        ] {
+            s.private(&t.root).git(words).succeeds();
+        }
+        for command in ["push", "pull"] {
+            let words = [command, "origin", "-h"];
+            let expected = s
+                .private(&t.root)
+                .git(["-c", "help.autocorrect=0"].into_iter().chain(words))
+                .run();
+            let ours = s.git(["dupe"].into_iter().chain(words)).from(&t.root).run();
+            assert_eq!(ours, expected, "{command}");
+        }
+    });
+}

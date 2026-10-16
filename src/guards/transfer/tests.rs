@@ -1,8 +1,12 @@
 use super::*;
 
-fn given(transfer: Transfer, words: &str) -> bool {
+fn read(transfer: Transfer, words: &str) -> Repository<'_> {
     let words: Vec<&[u8]> = words.split(' ').map(str::as_bytes).collect();
-    gives_a_repository(transfer, &words)
+    repository(transfer, &words)
+}
+
+fn given(transfer: Transfer, words: &str) -> bool {
+    read(transfer, words) != Repository::Default
 }
 
 #[test]
@@ -37,7 +41,11 @@ fn a_command_with_no_such_word_is_given_no_repository() {
             words.split(' ').map(str::as_bytes).collect()
         };
         for transfer in [Transfer::Push, Transfer::Pull, Transfer::Fetch] {
-            assert!(!gives_a_repository(transfer, &words), "{words:?}");
+            assert_eq!(
+                repository(transfer, &words),
+                Repository::Default,
+                "{words:?}"
+            );
         }
     }
 }
@@ -117,6 +125,160 @@ fn push_is_given_a_repository_by_a_repo_with_a_value() {
     ] {
         assert!(given(Transfer::Push, words), "push {words}");
     }
+}
+
+/// The repository word is the first word that is no option, as Git takes it, else a
+/// standing `--repo`'s value; a later such word is a refspec, an option or a value is not.
+#[test]
+fn the_repository_word_stands_alone_until_a_refspec_follows_it() {
+    for (words, word) in [
+        ("origin", "origin"),
+        ("-v origin", "origin"),
+        ("origin -n", "origin"),
+        ("origin -o --help", "origin"),
+        ("-- origin", "origin"),
+        ("origin --", "origin"),
+        ("--repo origin", "origin"),
+        ("--repo=origin", "origin"),
+        ("--repo origin --", "origin"),
+        // Git pushes to the word, whatever `--repo` says, before or after it.
+        ("--repo origin backup", "backup"),
+        ("backup --repo=origin", "backup"),
+        // A word presumed a value is no refspec.
+        ("--repo=origin main", "origin"),
+    ] {
+        let expected = Repository::Alone(word.as_bytes());
+        assert_eq!(read(Transfer::Push, words), expected, "push {words}");
+    }
+    for words in [
+        "origin main",
+        "origin HEAD",
+        "-- origin main",
+        "origin -- main",
+    ] {
+        assert_eq!(
+            read(Transfer::Push, words),
+            Repository::WithRefspec,
+            "push {words}"
+        );
+        assert_eq!(
+            read(Transfer::Pull, words),
+            Repository::WithRefspec,
+            "pull {words}"
+        );
+    }
+    for words in ["origin", "--rebase origin", "origin -v", "--jobs 1 origin"] {
+        assert_eq!(
+            read(Transfer::Pull, words),
+            Repository::Alone(b"origin"),
+            "pull {words}"
+        );
+    }
+    // A cleared `--repo`, and one `pull` does not have, give none.
+    assert_eq!(
+        read(Transfer::Push, "--repo=origin --no-repo"),
+        Repository::Default
+    );
+    assert_eq!(read(Transfer::Pull, "--repo=origin"), Repository::Default);
+}
+
+#[test]
+fn a_given_remote_is_the_branchs_remote_else_origin_for_push_alone() {
+    let is = |listing: &[(&str, Option<&str>)], transfer, word: &str| {
+        is_the_branch_remote(transfer, &records(listing), b"main", word.as_bytes())
+    };
+    let two = [
+        ("remote.backup.url", Some("/b")),
+        ("remote.other.url", Some("/o")),
+    ];
+    let keyed = [("branch.main.remote", Some("backup"))];
+    for transfer in [Transfer::Push, Transfer::Pull] {
+        assert!(is(&keyed, transfer, "backup"));
+        assert!(!is(&keyed, transfer, "origin"));
+        assert!(!is(&keyed, transfer, "Backup"));
+        // The last record is the value.
+        let twice = [keyed[0], ("Branch.main.REMOTE", Some("origin"))];
+        assert!(is(&twice, transfer, "origin"));
+        // Another branch's key is not this one's.
+        let other = [two[0], two[1], ("branch.other.remote", Some("backup"))];
+        assert!(!is(&other, transfer, "backup"));
+    }
+    // With the key unset and two remotes defined, the word counted, `push` compares
+    // `origin`, whatever the push keys hold; `pull` compares nothing.
+    for push_key in [
+        None,
+        Some(("remote.pushdefault", Some("backup"))),
+        Some(("branch.main.pushremote", Some("backup"))),
+    ] {
+        let listing: Vec<_> = two.into_iter().chain(push_key).collect();
+        assert!(is(&listing, Transfer::Push, "origin"), "{listing:?}");
+        assert!(!is(&listing, Transfer::Push, "backup"), "{listing:?}");
+        assert!(!is(&listing, Transfer::Pull, "origin"), "{listing:?}");
+        assert!(!is(&listing, Transfer::Pull, "backup"), "{listing:?}");
+    }
+}
+
+#[test]
+fn with_the_key_unset_push_compares_the_one_remote_defined_the_word_counted() {
+    let is = |listing: &[(&str, Option<&str>)], transfer, word: &str| {
+        is_the_branch_remote(transfer, &records(listing), b"main", word.as_bytes())
+    };
+    // No remote defined: the word is the one; the push keys define none.
+    for listing in [
+        &[][..],
+        &[("remote.pushdefault", Some("backup"))],
+        &[("branch.main.pushremote", Some("backup"))],
+        &[("remotes.group", Some("backup other"))],
+    ] {
+        for word in ["backup", "nosuch", "/a/path", "origin"] {
+            assert!(is(listing, Transfer::Push, word), "{listing:?} {word}");
+        }
+        assert!(!is(listing, Transfer::Pull, "backup"), "{listing:?}");
+    }
+    // One remote defined, by any of its keys, with a value or without: that one, and
+    // `origin` once another word makes two.
+    for key in [
+        "remote.backup.url",
+        "Remote.backup.VCS",
+        "remote.backup.fetch",
+    ] {
+        for value in [Some("/b"), None] {
+            let listing = [(key, value)];
+            assert!(is(&listing, Transfer::Push, "backup"), "{listing:?}");
+            assert!(is(&listing, Transfer::Push, "origin"), "{listing:?}");
+            assert!(!is(&listing, Transfer::Push, "Backup"), "{listing:?}");
+            assert!(!is(&listing, Transfer::Push, "other"), "{listing:?}");
+        }
+    }
+    // A name holding a dot is one name.
+    let dotted = [("remote.back.up.url", Some("/b"))];
+    assert!(is(&dotted, Transfer::Push, "back.up"));
+    assert!(!is(&dotted, Transfer::Push, "back"));
+    // Two keys of one remote define one; two remotes, `origin` alone.
+    let one = [
+        ("remote.backup.url", Some("/b")),
+        (
+            "remote.backup.fetch",
+            Some("+refs/heads/*:refs/remotes/backup/*"),
+        ),
+    ];
+    assert!(is(&one, Transfer::Push, "backup"));
+    let with_origin = [one[0], ("remote.origin.fetch", Some("x"))];
+    assert!(!is(&with_origin, Transfer::Push, "backup"));
+    assert!(is(&with_origin, Transfer::Push, "origin"));
+    // A name beginning with `/` defines none; an empty name defines `.<variable>`.
+    let slashed = [("remote./x.url", Some("/b"))];
+    assert!(is(&slashed, Transfer::Push, "backup"));
+    let empty = [("remote..url", Some("/b"))];
+    assert!(!is(&empty, Transfer::Push, "backup"));
+    assert!(is(&empty, Transfer::Push, ".url"));
+    assert!(!is(&empty, Transfer::Push, ".fetch"));
+    assert!(!is(&empty, Transfer::Push, "url"));
+    // The branch's key, where set, decides alone.
+    let keyed = [one[0], ("branch.main.remote", Some("other"))];
+    assert!(!is(&keyed, Transfer::Push, "backup"));
+    assert!(!is(&keyed, Transfer::Push, "origin"));
+    assert!(is(&keyed, Transfer::Push, "other"));
 }
 
 fn records<'a>(listing: &[(&'a str, Option<&'a str>)]) -> Vec<Record<'a>> {
@@ -418,7 +580,7 @@ fn a_reconciliation_is_configured_by_pull_rebase_the_branchs_rebase_or_pull_ff()
         &[("pull.ff", None)],
         &[("PULL.FF", Some("false"))],
     ] {
-        for current in [main, Current::Detached, Current::Unread] {
+        for current in [main, Current::Detached, Current::AnyBranch] {
             assert!(configured(listing, current), "{listing:?} {current:?}");
         }
     }
@@ -432,8 +594,8 @@ fn a_reconciliation_is_configured_by_pull_rebase_the_branchs_rebase_or_pull_ff()
     assert!(!configured(&rebase_of_other, main));
     assert!(!configured(&[("branch.Main.rebase", Some("true"))], main));
     // Where `HEAD` was not read, any branch's key counts.
-    assert!(configured(&rebase_of_other, Current::Unread));
-    assert!(configured(&rebase_of_main, Current::Unread));
+    assert!(configured(&rebase_of_other, Current::AnyBranch));
+    assert!(configured(&rebase_of_main, Current::AnyBranch));
     for listing in [
         &[][..],
         &[("branch.main.merge", Some("refs/heads/main"))],
@@ -442,7 +604,7 @@ fn a_reconciliation_is_configured_by_pull_rebase_the_branchs_rebase_or_pull_ff()
         &[("branch.rebase", Some("true"))],
         &[("rebase.autoStash", Some("true"))],
     ] {
-        for current in [main, Current::Detached, Current::Unread] {
+        for current in [main, Current::Detached, Current::AnyBranch] {
             assert!(!configured(listing, current), "{listing:?} {current:?}");
         }
     }

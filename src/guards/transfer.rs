@@ -2,10 +2,11 @@
 //! `Holds/G18`): whether the words give a repository, the URLs the private configuration
 //! gives its remotes, and the default remote of a command given no repository. `places`
 //! answers whether each names a public place; the front takes the configuration and the
-//! branch, and writes the lines. The same records decide the front's hints after a failed
-//! run (`Holds/G18`): whether `push` given no repository leaves the choice of a remote to
-//! Git, which remote it takes, whether a branch has an upstream, and whether `pull` is
-//! told how to reconcile divergent branches.
+//! branch, and writes the lines. The same words and records decide the front's hints
+//! after a failed run (`Holds/G18`): whether `push` given no repository leaves the choice
+//! of a remote to Git, which remote it takes, whether a repository given with no refspec
+//! is the one Git's advice names a plain command for, whether a branch has an upstream,
+//! and whether `pull` is told how to reconcile divergent branches.
 //!
 //! What the code below cannot show:
 //!
@@ -25,6 +26,12 @@
 //!   attached or as the next word, that is not itself presumed a value, unless a later
 //!   word is `--no-repo` or a prefix of it at least as long as `--no-r`, which Git reads,
 //!   or may come to read, as clearing it. `fetch` and `pull` have no `--repo`.
+//! - The **repository word** is the first word that gives a repository so, as Git takes
+//!   the first word that is no option as the repository whatever a `--repo` says, and
+//!   only where there is none the value of a `--repo` that stands; a **refspec** is any
+//!   later word that would give one, so that an option and a word presumed a value after
+//!   the repository word are not refspecs. The reading serves the hints alone: the
+//!   comparison of destinations takes every word whatever it is.
 //! - A configuration key is matched as Git reads one: its section and variable without
 //!   regard to ASCII case, the name between them exactly. Every `url` and `pushurl`
 //!   record of every remote is a URL, whichever command runs, because Git pushes to every
@@ -183,34 +190,58 @@ impl Transfer {
     }
 }
 
-/// Whether `words`, those after the command, give `transfer` a repository; when they do
-/// not, Git takes the default remote in its place.
-pub fn gives_a_repository(transfer: Transfer, words: &[&[u8]]) -> bool {
+/// What the words after a transfer command give it in place of the default remote.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Repository<'a> {
+    /// No repository: Git takes the default remote in its place.
+    Default,
+    /// The repository word, with no refspec after it.
+    Alone(&'a [u8]),
+    /// A repository with a refspec after it.
+    WithRefspec,
+}
+
+/// What `words`, those after the command, give `transfer` in place of the default remote.
+pub fn repository<'a>(transfer: Transfer, words: &[&'a [u8]]) -> Repository<'a> {
     let known = transfer.known();
-    let mut by_repo = false;
+    let mut by_repo = None;
+    let mut first = None;
     let mut presumes_the_next = false;
     for (at, &word) in words.iter().enumerate() {
         let presumed = presumes_the_next;
         let dashed = word.starts_with(b"-");
         presumes_the_next = dashed && !known.contains(&word);
         if transfer == Transfer::Push && clears_repo(word) {
-            by_repo = false;
+            by_repo = None;
         }
         if presumed {
             continue;
         }
         if word == b"--" {
-            return at + 1 < words.len() || by_repo;
+            return match (first, &words[at + 1..]) {
+                (Some(word), &[]) | (None, &[word]) => Repository::Alone(word),
+                (None, &[]) => by_repo.map_or(Repository::Default, Repository::Alone),
+                _ => Repository::WithRefspec,
+            };
         }
         if !dashed {
-            return true;
-        }
-        let repo = word.starts_with(b"--repo=") || (word == b"--repo" && at + 1 < words.len());
-        if transfer == Transfer::Push && repo {
-            by_repo = true;
+            if first.is_some() {
+                return Repository::WithRefspec;
+            }
+            first = Some(word);
+        } else if transfer == Transfer::Push {
+            if let Some(value) = word.strip_prefix(b"--repo=") {
+                by_repo = Some(value);
+            } else if word == b"--repo"
+                && let Some(&value) = words.get(at + 1)
+            {
+                by_repo = Some(value);
+            }
         }
     }
-    by_repo
+    first
+        .or(by_repo)
+        .map_or(Repository::Default, Repository::Alone)
 }
 
 /// Whether `push` reads `word` as `--no-repo`, or may come to: the word or a prefix of it
@@ -274,15 +305,24 @@ fn first_set<'a>(
 ) -> Option<DefaultRemote<'a>> {
     default_keys(transfer, branch)
         .into_iter()
-        .find_map(|(section, name, variable)| {
-            records
-                .iter()
-                .rev()
-                .find(|&&(key, _)| is(key, section, name, variable))
-                .map(|&(key, value)| DefaultRemote {
-                    key,
-                    value: value.unwrap_or_default(),
-                })
+        .find_map(|(section, name, variable)| last(records, section, name, variable))
+}
+
+/// The last of the configuration's `records` for the key `<section>.<name>.<variable>`,
+/// whose value is the key's, the empty value for a record without one.
+fn last<'a>(
+    records: &[Record<'a>],
+    section: &[u8],
+    name: Option<&[u8]>,
+    variable: &[u8],
+) -> Option<DefaultRemote<'a>> {
+    records
+        .iter()
+        .rev()
+        .find(|&&(key, _)| is(key, section, name, variable))
+        .map(|&(key, value)| DefaultRemote {
+            key,
+            value: value.unwrap_or_default(),
         })
 }
 
@@ -314,6 +354,44 @@ pub fn push_remote<'a>(records: &[Record<'a>], branch: Option<&[u8]>) -> &'a [u8
     first_set(Transfer::Push, records, branch).map_or(b"origin", |found| found.value)
 }
 
+/// Whether `word`, the repository `transfer` is given with no refspec on `branch`, is the
+/// remote Git compares it with before its advice for a branch with no upstream names a
+/// plain command (S13): the value of `branch.<branch>.remote` in the configuration's
+/// `records`, and, for `push` where that key is unset, the one remote the records define,
+/// the word counted as one, when they then define exactly one, and `origin` otherwise,
+/// whatever `branch.<branch>.pushRemote` and `remote.pushDefault` hold. Both compare
+/// bytes, as Git compares a remote's name.
+pub fn is_the_branch_remote(
+    transfer: Transfer,
+    records: &[Record<'_>],
+    branch: &[u8],
+    word: &[u8],
+) -> bool {
+    match last(records, b"branch", Some(branch), b"remote") {
+        Some(found) => found.value == word,
+        None => {
+            transfer == Transfer::Push
+                && (word == b"origin" || records.iter().all(|&(key, _)| !defines(key, word)))
+        }
+    }
+}
+
+/// Whether `key` defines a remote other than `word`. Git defines one for every
+/// `remote.<name>.<variable>` key, whatever the variable and with a value or without,
+/// except where the name begins with `/`, which it warns of and skips; an empty name
+/// defines the remote `.<variable>` (`remote.c`'s `handle_config` and `make_remote`, at
+/// 2.43.0 and 2.56.0).
+fn defines(key: &[u8], word: &[u8]) -> bool {
+    Key::of(key).is_some_and(|key| {
+        key.section.eq_ignore_ascii_case(b"remote")
+            && match key.name {
+                None => false,
+                Some(b"") => word.strip_prefix(b".") != Some(key.variable),
+                Some(name) => !name.starts_with(b"/") && name != word,
+            }
+    })
+}
+
 /// Whether the configuration's `records` give `branch` an upstream: a
 /// `branch.<branch>.merge` reported, with a value or without.
 pub fn has_upstream(records: &[Record<'_>], branch: &[u8]) -> bool {
@@ -330,16 +408,16 @@ pub enum Current<'a> {
     Branch(&'a [u8]),
     /// Detached: no branch key is read.
     Detached,
-    /// Not read, as for a `pull` given a repository, whose runs do not ask where it
-    /// stands (G22).
-    Unread,
+    /// Any branch: for a `pull` given a repository, whether or not `HEAD` was read for
+    /// its tracking hint (`Holds/G18`), and wherever `HEAD` was not read.
+    AnyBranch,
 }
 
 /// Whether the configuration's `records` tell `pull` on `current` how to reconcile
 /// divergent branches: `pull.rebase`, `branch.<name>.rebase` of the branch `HEAD` names,
-/// or `pull.ff` reported, with a value or without, which Git reads as true. Where `HEAD`
-/// was not read, a `branch.<name>.rebase` of any branch counts, so that the hint is
-/// withheld rather than given where that key may decide.
+/// or `pull.ff` reported, with a value or without, which Git reads as true. On any
+/// branch, a `branch.<name>.rebase` of any branch counts, so that the hint is withheld
+/// rather than given where that key may decide.
 pub fn reconciliation_configured(records: &[Record<'_>], current: Current<'_>) -> bool {
     records.iter().any(|&(key, _)| {
         let rebase_of = |branch: Option<&[u8]>| {
@@ -355,7 +433,7 @@ pub fn reconciliation_configured(records: &[Record<'_>], current: Current<'_>) -
             || match current {
                 Current::Branch(branch) => rebase_of(Some(branch)),
                 Current::Detached => false,
-                Current::Unread => rebase_of(None),
+                Current::AnyBranch => rebase_of(None),
             }
     })
 }

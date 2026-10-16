@@ -23,6 +23,16 @@ Every change a user of git-dupe would notice, newest first, in the form of
   aside, as a remote holds it: a commit that only a replace ref grafts under pushed
   history is refused as unpushed, where it was removed with the private repository, and
   pushed history that a replace ref cuts away from its descendants no longer refuses.
+- `git dupe push <remote>` with no refspec, on a branch with no upstream, where
+  `<remote>` is the branch's `branch.<name>.remote`, or, where that is unset, the only
+  remote the private configuration defines, `<remote>` counted among them, and `origin`
+  where it defines several, now ends with the `hint:` naming
+  `git dupe push -u <remote> HEAD` that `git dupe push` already gets, and
+  `git dupe pull <remote>` with no refspec, where `<remote>` is the branch's
+  `branch.<name>.remote`, the hint naming `git dupe pull <remote> <branch>` and
+  `git dupe branch --set-upstream-to`, because Git's own advice there names plain
+  `git push --set-upstream` or `git pull`, which act on the project's repository. Git's
+  output and exit status are unchanged.
 
 ## [0.3.1] - 2026-10-16
 

@@ -5,7 +5,14 @@ use crate::harness::{End, daily_state, private_commit, run_traced, under_each_re
 #[test]
 fn transfer_runs_do_not_follow_remote_or_private_file_counts() {
     under_each_release(|s| {
-        let commands = [&["push", "origin", "main"][..], &["fetch"], &["pull"]];
+        let commands = [
+            &["push", "origin", "main"][..],
+            &["fetch"],
+            &["pull"],
+            &["push", "origin"],
+            &["fetch", "origin"],
+            &["pull", "origin"],
+        ];
         let mut sequences = Vec::new();
         for remotes in [1, 20] {
             for files in [5, 500] {
@@ -66,7 +73,9 @@ fn transfer_runs_do_not_follow_remote_or_private_file_counts() {
                         "{own:?}"
                     );
                     let mut expected = vec!["rev-parse", "config", "worktree", "config"];
-                    if words.len() == 1 {
+                    // `HEAD` is read given no repository, and for the hint of a `push` or
+                    // `pull` given one and no refspec.
+                    if words.len() == 1 || (words.len() == 2 && words[0] != "fetch") {
                         expected.push("symbolic-ref");
                     }
                     expected.extend([words[0], "ls-files", "ls-files", "check-ignore"]);

@@ -4,7 +4,8 @@
 //! after a run that exits 0, after a help request, after `pull` and `fetch`, and after
 //! `git dupe git push` (G19, G20, F9). Where a key or `origin`'s URL chooses the remote,
 //! a failed push on a branch with no upstream gets the hint naming that remote instead,
-//! and a `pull` its own (`transfer_advice`).
+//! and so does one given, with no refspec, the word Git compares with the one remote the
+//! configuration defines, the word counted; a `pull` gets its own (`transfer_advice`).
 
 use std::fs;
 use std::path::Path;
@@ -30,14 +31,15 @@ fn push_hinted(s: &Scenario, root: &Path, words: &[&str]) {
     assert_ne!(ours.end, End::Code(0), "{words:?}: {ours:?}");
 }
 
-/// `git dupe push` from the root `root` ends as Git's own run, which exited 128, then with
-/// the hint naming `git dupe push -u <remote> HEAD` for the remote a key or `origin`'s URL
-/// chooses, and not this file's hint.
-fn upstream_hinted(s: &Scenario, root: &Path, remote: &str) {
+/// `git dupe <words>` from the root `root` ends as Git's own run, which exited 128, then
+/// with the hint naming `git dupe push -u <remote> HEAD` for the remote a key or `origin`'s
+/// URL chooses, or for the word given that Git compares with the one remote, and not this
+/// file's hint.
+fn upstream_hinted(s: &Scenario, root: &Path, words: &[&str], remote: &str) {
     let named = format!("'git dupe push -u {remote} HEAD'");
-    let ours = hinted(s, root, &["push"], &[named.as_bytes()]);
-    assert_eq!(ours.end, End::Code(128), "{ours:?}");
-    assert!(!holds(&ours.stderr, HINT), "{ours:?}");
+    let ours = hinted(s, root, words, &[named.as_bytes()]);
+    assert_eq!(ours.end, End::Code(128), "{words:?}: {ours:?}");
+    assert!(!holds(&ours.stderr, HINT), "{words:?}: {ours:?}");
 }
 
 /// The command word of each run git-dupe started itself, in order.
@@ -70,12 +72,15 @@ fn a_failed_push_with_no_remote_chosen_ends_with_one_hint() {
         before.unchanged();
         config(s, &t, &["alias.p", "push"]);
         push_hinted(s, root, &["p"]);
-        // A repository given, a help request, or a `-h` or `--help` Git takes as a value
-        // of `-o` before it pushes: Git's own output alone.
+        // A word given with no refspec, no remote defined but it: the one Git compares it
+        // with, so the hint names it.
+        for words in [&["push", "nosuch"][..], &["push", "--repo=nosuch"]] {
+            upstream_hinted(s, root, words, "nosuch");
+        }
+        // A help request, or a `-h` or `--help` Git takes as a value of `-o` before it
+        // pushes: Git's own output alone.
         for words in [
-            &["push", "nosuch"][..],
-            &["push", "--repo=nosuch"],
-            &["push", "-h"],
+            &["push", "-h"][..],
             &["push", "-o", "--", "-h"],
             &["push", "-o", "-h"],
             &["push", "-o", "--help"],
@@ -126,6 +131,10 @@ fn the_hint_follows_whichever_remote_git_takes_and_no_chosen_one() {
             .succeeds();
         // Git takes `backup`, the only remote, and fails for want of an upstream.
         push_hinted(s, root, &["push"]);
+        // Given with no refspec, it is the remote Git compares the word with, and `origin`
+        // is where the word makes a second.
+        upstream_hinted(s, root, &["push", "backup"], "backup");
+        upstream_hinted(s, root, &["push", "origin"], "origin");
         config(s, &t, &["push.default", "nothing"]);
         let trace = s.dir().join("trace");
         let words = ["dupe", "push"];
@@ -139,7 +148,7 @@ fn the_hint_follows_whichever_remote_git_takes_and_no_chosen_one() {
             "branch.main.remote",
         ] {
             config(s, &t, &[key, "backup"]);
-            upstream_hinted(s, root, "backup");
+            upstream_hinted(s, root, &["push"], "backup");
             if key == "branch.main.pushRemote" {
                 // The runs of a push owed the hint are those of one owed none, the
                 // sequence of a transfer command given no repository (G22).
@@ -165,10 +174,10 @@ fn the_hint_follows_whichever_remote_git_takes_and_no_chosen_one() {
         s.git(["dupe", "remote", "add", "origin", backup])
             .from(root)
             .succeeds();
-        upstream_hinted(s, root, "origin");
+        upstream_hinted(s, root, &["push"], "origin");
         config(s, &t, &["--unset", "remote.origin.url"]);
         config(s, &t, &["remote.origin.pushurl", backup]);
-        upstream_hinted(s, root, "origin");
+        upstream_hinted(s, root, &["push"], "origin");
         s.git(["dupe", "remote", "remove", "origin"])
             .from(root)
             .succeeds();
