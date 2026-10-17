@@ -8,6 +8,26 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Added
+
+- After a private `merge` or `rebase` whose autostash, asked for by `--autostash`,
+  `merge.autoStash`, or `rebase.autoStash`, came back with conflicts, which Git ends
+  with status 0 and keeps as a stash entry, `git dupe` now ends with a `hint:` naming
+  `git dupe add <path>` and `git dupe stash drop` to keep the changes, or
+  `git dupe reset --hard` and later `git dupe stash pop` to set them aside, because
+  Git's own advice there names plain `git stash drop` and `git stash pop`, and in recent
+  releases `git reset --hard`, which act on the project's repository. Git's output and
+  exit status are unchanged, and the manual page says so under PLAIN GIT.
+- After a private `commit --amend` that refuses, as one that would leave the commit
+  empty does, `git dupe` now ends with a `hint:` naming
+  `git dupe commit --amend --allow-empty` and `git dupe reset HEAD^`, and after a
+  private `commit` that refuses while a `cherry-pick` or `revert` is stopped, as one
+  does once the pick has become empty, with the hint of that stopped command, naming
+  `git dupe commit --allow-empty` and its `--skip`, because Git's own advice after the
+  amend names plain `git reset HEAD^`, and after a commit during an empty `cherry-pick`
+  plain `git commit --allow-empty`, which act on the project's repository. Git's output
+  and exit status are unchanged.
+
 ### Fixed
 
 - `git dupe clean` given a pathspec that is not a literal path, one holding `*`, `?`,

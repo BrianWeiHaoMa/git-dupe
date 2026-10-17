@@ -1,8 +1,10 @@
 //! The hint after a word passed through whose outcome Git's advice names a plain `git`
-//! command for (`Holds/G19`, G25): `rebase` and `am` stopped, `cherry-pick` and `revert`
-//! stopped, `checkout` and `switch` leaving a branch for a detached `HEAD`, and `branch
-//! -d` refusing. Copied under `git dupe`, Git's command would act on the project's
-//! repository; the hint names the `git dupe` form.
+//! command for (`Holds/G19`, G25): `rebase` and `am` stopped, `rebase` and `merge` whose
+//! autostash came back with conflicts, `cherry-pick` and `revert` stopped, `commit
+//! --amend` refusing and `commit` refusing while a pick stands, `checkout` and `switch`
+//! leaving a branch for a detached `HEAD`, and `branch -d` refusing. Copied under `git
+//! dupe`, Git's command would act on the project's repository; the hint names the `git
+//! dupe` form.
 //!
 //! What the code below cannot show:
 //!
@@ -15,9 +17,11 @@
 //!   to their first `--`, after which a word is an operand. The words that keep the
 //!   `checkout` and `switch` hint away are matched exactly: a bundle or an abbreviation of
 //!   `--detach` or `-q` is not read, so a hint may follow where Git printed no advice,
-//!   never one the state makes false. `cherry-pick`'s and `revert`'s `-n` is read in a
-//!   bundle too (`reads_as_no_commit`), because the line's `--continue` would commit what
-//!   it was given to leave uncommitted. `branch`'s `--delete` is read in every spelling Git
+//!   never one the state makes false. So are `commit`'s `--amend` and `--allow-empty`, of
+//!   which `--allow-empty-message` is no spelling, and the `--quit` of `merge` and
+//!   `rebase`. `cherry-pick`'s and `revert`'s `-n` is read in a bundle too
+//!   (`reads_as_no_commit`), because the line's `--continue` would commit what it was
+//!   given to leave uncommitted. `branch`'s `--delete` is read in every spelling Git
 //!   reads as it (`reads_as_delete`), so a bundle that holds `d` as another option's value
 //!   draws the hint where Git printed no advice; the line is true either way. None follows
 //!   a run with `-h` or `--help` before the first `--` of the words read, which an
@@ -30,18 +34,36 @@
 //!   stopped in `rebase-merge`, its line would name commands that fail. "Did not exit 0"
 //!   is any end but exit 0, a signal included. An end named by its number, 0 or 1, is
 //!   never a signal's.
-//! - The runs a family adds are fixed for its words (G22, R4): `checkout` and `switch` ask
+//! - Where a word has several entries, the first whose words, end, and state hold decides,
+//!   in the table's order: a `rebase` stopped is decided by its directory before the
+//!   autostash is asked about, and a `commit` asks about a stopped cherry-pick before a
+//!   stopped revert. An entry's question is put only once the entries before it have not
+//!   held, and a question that answers with any status but its two ends the decision with
+//!   no hint, the command's status as it was.
+//! - The runs an entry adds are fixed for its words (G22, R4): `checkout` and `switch` ask
 //!   the private `symbolic-ref -q HEAD` before the run and, after one that exited 0, again,
 //!   both only where the words admit the hint; `cherry-pick` and `revert` ask `rev-parse
-//!   -q --verify` of their pseudo-reference after a run that did not exit 0; `rebase`,
-//!   `am`, and `branch` add none. A question that answers with any status but its two
-//!   gives no hint and leaves the command's status as it was. The `symbolic-ref` before the
-//!   run decides nothing about the run (N8).
+//!   -q --verify` of their pseudo-reference after a run that did not exit 0, and `commit`
+//!   without `--amend` asks it of `CHERRY_PICK_HEAD`, then of `REVERT_HEAD`, after a run
+//!   that exited 1; `merge`, and `rebase` where it left no stop, ask one `ls-files -u -z`
+//!   after a run that exited 0, from the root, because `ls-files` lists only what lies
+//!   below its directory; `am`, `branch`, and `commit --amend` add none. The
+//!   `symbolic-ref` before the run decides nothing about the run (N8).
+//! - An index entry left unmerged by a `rebase` or `merge` that exited 0 has one cause, an
+//!   autostash that came back with conflicts and stays a stash entry (S12), whether
+//!   `--autostash` or the configuration asked for it, so the index is asked and not the
+//!   words; but for `--quit`, which ends the operation leaving its conflicts in the index
+//!   and an autostash, where there is one, unapplied in the stash, so that the line and its
+//!   `stash drop` would be false there. `merge` keeps no stop of its own, so its entry reads
+//!   no directory.
 //! - `CHERRY_PICK_HEAD` and `REVERT_HEAD` are asked of Git, because they live in the
 //!   reference store, which may hold no file for them (S15); `rebase-merge` and
 //!   `rebase-apply` are directories in every store, read by `lstat` (S12).
 //! - The `branch -d` hint follows exit 1 alone, so a branch that does not exist draws it
-//!   too; it says what deletes a branch `-d` keeps, which is true either way.
+//!   too; it says what deletes a branch `-d` keeps, which is true either way. So does the
+//!   `commit --amend` hint, a hook's or an editor's refusal included, and its line says
+//!   what its commands do where the amend would have left the commit empty; it names
+//!   `reset HEAD^` for a commit with a parent, because a root commit has none.
 
 use std::ffi::OsString;
 use std::fs;
@@ -87,14 +109,43 @@ const UNMERGED: &[u8] = b"'git dupe branch -D <branch>' deletes a private branch
     'git dupe branch -d' keeps because it is not fully merged; plain 'git branch -D' acts on \
     the project's repository";
 
-/// The families, one per command word.
-const FAMILIES: [Family; 7] = [
+/// The line after a run whose autostash came back with conflicts: its one text.
+pub(super) const AUTOSTASH: &[u8] = b"the private changes Git stashed before merging or \
+    rebasing came back with conflicts, and the stash entry still holds them: once \
+    'git dupe add <path>' has marked each conflict resolved, 'git dupe stash drop' drops \
+    the entry; or 'git dupe reset --hard' throws away the changes that came back, \
+    conflicts and all, and 'git dupe stash pop' applies the entry again later; plain \
+    'git add', 'git stash', and 'git reset' act on the project's repository";
+
+// Conditioned: exit 1 alone does not prove the amend empty. A root commit has no `HEAD^`.
+const EMPTY_AMEND: &[u8] = b"where the private amend would have left the commit empty, \
+    'git dupe commit --amend --allow-empty' amends it all the same, and, on a commit with a \
+    parent, 'git dupe reset HEAD^' removes the commit, leaving the files as they are; \
+    plain 'git commit' and 'git reset' act on the project's repository";
+
+/// The entries of the table, in its order: where a word has several, the first whose
+/// words, end, and state hold decides.
+const FAMILIES: [Family; 12] = [
     Family {
         word: b"rebase",
         excluding: None,
         requiring: None,
         trigger: Trigger::Stopped(&["rebase-merge", "rebase-apply"]),
         line: REBASE,
+    },
+    Family {
+        word: b"rebase",
+        excluding: Some(quits),
+        requiring: None,
+        trigger: Trigger::Unmerged,
+        line: AUTOSTASH,
+    },
+    Family {
+        word: b"merge",
+        excluding: Some(quits),
+        requiring: None,
+        trigger: Trigger::Unmerged,
+        line: AUTOSTASH,
     },
     Family {
         word: b"am",
@@ -115,6 +166,27 @@ const FAMILIES: [Family; 7] = [
         excluding: Some(reads_as_no_commit),
         requiring: None,
         trigger: Trigger::Picking("REVERT_HEAD"),
+        line: REVERT,
+    },
+    Family {
+        word: b"commit",
+        excluding: Some(|word| word == b"--allow-empty"),
+        requiring: Some(|word| word == b"--amend"),
+        trigger: Trigger::ExitedOne,
+        line: EMPTY_AMEND,
+    },
+    Family {
+        word: b"commit",
+        excluding: Some(|word| word == b"--amend"),
+        requiring: None,
+        trigger: Trigger::ExitedOneWhile("CHERRY_PICK_HEAD"),
+        line: CHERRY_PICK,
+    },
+    Family {
+        word: b"commit",
+        excluding: Some(|word| word == b"--amend"),
+        requiring: None,
+        trigger: Trigger::ExitedOneWhile("REVERT_HEAD"),
         line: REVERT,
     },
     Family {
@@ -140,7 +212,8 @@ const FAMILIES: [Family; 7] = [
     },
 ];
 
-/// A command word whose run Git's advice may follow, and when the hint follows it.
+/// A command word whose run Git's advice may follow, and when the hint follows it: one
+/// entry of the table.
 struct Family {
     word: &'static [u8],
     /// What no word before the first `--` may spell, when anything: Git prints no such
@@ -159,6 +232,10 @@ enum Trigger {
     Stopped(&'static [&'static str]),
     /// A run that did not exit 0, while `rev-parse -q --verify` of this name exits 0.
     Picking(&'static str),
+    /// A run that exited 1, while `rev-parse -q --verify` of this name exits 0.
+    ExitedOneWhile(&'static str),
+    /// A run that exited 0, while `ls-files -u -z` lists an unmerged entry.
+    Unmerged,
     /// A run that exited 0 and left a branch for a detached `HEAD`: `symbolic-ref -q HEAD`
     /// exited 0 before it and exits 1 after it.
     Detached,
@@ -175,73 +252,82 @@ enum Question {
     Verifies(&'static str),
     /// Whether `symbolic-ref -q HEAD` finds `HEAD` on a branch, or detached.
     OnABranch,
+    /// Whether `ls-files -u -z` lists an unmerged entry.
+    Unmerged,
 }
 
-/// A question's answer: exit 0, exit 1, or anything else, which answers nothing.
+/// A question's answer: yes, no, or a run that answered neither, which answers nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Answer {
+pub(super) enum Answer {
     Yes,
     No,
     Unanswered,
 }
 
 /// What may follow a run, decided from its words, and for a detached `HEAD` from the
-/// state, before it starts.
-pub struct Then(Option<&'static Family>);
+/// state, before it starts: the entries the words admit, in the table's order.
+pub struct Then(Vec<&'static Family>);
 
 /// What may follow the run of `words`, the command word first, against the repository
 /// `against` names.
 pub fn before(words: &[OsString], against: Against) -> Then {
     if against.private_repository().is_none() {
-        return Then(None);
+        return Then(Vec::new());
     }
     Then(before_asking(words, |question| asked(question, against)))
 }
 
-/// Writes the hint, after a run that ended as `ended`, when its family's end and state
-/// hold.
+/// Writes the hint, after a run that ended as `ended`, of the first entry whose end and
+/// state hold.
 pub fn after(then: Then, ended: &Outcome, against: Against) {
-    let (Then(Some(family)), Outcome::Git(end)) = (then, ended) else {
+    let Outcome::Git(end) = ended else {
         return;
     };
-    if follows(family.trigger, end, |question| asked(question, against)) {
-        lines::write(Level::Hint, family.line);
+    if let Some(line) = decided(&then.0, end, |question| asked(question, against)) {
+        lines::write(Level::Hint, line);
     }
 }
 
-/// The family of `words` when they admit its hint and, for a detached `HEAD`, `ask` finds
-/// `HEAD` on a branch before the run.
-fn before_asking(
-    words: &[OsString],
-    ask: impl FnOnce(Question) -> Answer,
-) -> Option<&'static Family> {
-    let family = admitted(words)?;
-    match family.trigger {
-        Trigger::Detached => (ask(Question::OnABranch) == Answer::Yes).then_some(family),
-        _ => Some(family),
+/// The entries `words` admit, those for a detached `HEAD` only where `ask` finds `HEAD` on
+/// a branch before the run.
+fn before_asking(words: &[OsString], ask: impl FnOnce(Question) -> Answer) -> Vec<&'static Family> {
+    let mut families = admitted(words);
+    let detached = |family: &&Family| family.trigger == Trigger::Detached;
+    if families.iter().any(detached) && ask(Question::OnABranch) != Answer::Yes {
+        families.retain(|family| !detached(family));
     }
+    families
 }
 
-/// The family whose word begins `words` when the rest admit its hint: before the first
-/// `--`, no help request and no excluding word, and a word that spells what the family
-/// requires.
-fn admitted(words: &[OsString]) -> Option<&'static Family> {
-    let (command, rest) = words.split_first()?;
-    let family = FAMILIES
-        .iter()
-        .find(|family| family.word == command.as_bytes())?;
+/// The entries whose word begins `words` and whose hint the rest admit, in the table's
+/// order: before the first `--`, no help request, no word an entry excludes, and a word
+/// that spells what it requires.
+fn admitted(words: &[OsString]) -> Vec<&'static Family> {
+    let Some((command, rest)) = words.split_first() else {
+        return Vec::new();
+    };
     let before_the_end: Vec<&[u8]> = rest
         .iter()
         .map(|word| word.as_bytes())
         .take_while(|word| *word != b"--")
         .collect();
-    let kept_away = before_the_end.iter().any(|word| {
-        matches!(*word, b"-h" | b"--help") || family.excluding.is_some_and(|spells| spells(word))
-    });
-    let required = family
-        .requiring
-        .is_none_or(|spells| before_the_end.iter().any(|word| spells(word)));
-    (!kept_away && required).then_some(family)
+    let spelled = |spells: fn(&[u8]) -> bool| before_the_end.iter().any(|word| spells(word));
+    if spelled(|word| matches!(word, b"-h" | b"--help")) {
+        return Vec::new();
+    }
+    FAMILIES
+        .iter()
+        .filter(|family| family.word == command.as_bytes())
+        .filter(|family| !family.excluding.is_some_and(spelled))
+        .filter(|family| family.requiring.is_none_or(spelled))
+        .collect()
+}
+
+/// Whether `merge` or `rebase` reads `word` as `--quit`, which exits 0 with the conflicts
+/// it leaves unmerged and no autostash applied; an abbreviation is ambiguous with
+/// `--quiet`, which Git refuses, exit 129.
+fn quits(word: &[u8]) -> bool {
+    word == b"--quit"
 }
 
 /// Whether `cherry-pick` or `revert` reads `word` as `--no-commit`: the word itself, or
@@ -271,15 +357,43 @@ fn reads_as_delete(word: &[u8]) -> bool {
     }
 }
 
+/// The line of the first of `families` whose end and state hold after a run that ended as
+/// `end`: each entry's question is put to `ask` in turn, and one that answers nothing ends
+/// the decision with none.
+fn decided(
+    families: &[&'static Family],
+    end: &End,
+    mut ask: impl FnMut(Question) -> Answer,
+) -> Option<&'static [u8]> {
+    for family in families {
+        let mut unanswered = false;
+        let holds = follows(family.trigger, end, |question| {
+            let answer = ask(question);
+            unanswered = answer == Answer::Unanswered;
+            answer
+        });
+        if holds {
+            return Some(family.line);
+        }
+        if unanswered {
+            return None;
+        }
+    }
+    None
+}
+
 /// Whether the hint follows a run that ended as `end`: `ask` is put a question only once
 /// the end holds.
 fn follows(trigger: Trigger, end: &End, ask: impl FnOnce(Question) -> Answer) -> bool {
     let exited_0 = *end == End::Code(0);
+    let exited_1 = *end == End::Code(1);
     match trigger {
         Trigger::Stopped(directories) => ask(Question::Stopped(directories)) == Answer::Yes,
         Trigger::Picking(name) => !exited_0 && ask(Question::Verifies(name)) == Answer::Yes,
+        Trigger::ExitedOneWhile(name) => exited_1 && ask(Question::Verifies(name)) == Answer::Yes,
+        Trigger::Unmerged => exited_0 && ask(Question::Unmerged) == Answer::Yes,
         Trigger::Detached => exited_0 && ask(Question::OnABranch) == Answer::No,
-        Trigger::ExitedOne => *end == End::Code(1),
+        Trigger::ExitedOne => exited_1,
     }
 }
 
@@ -287,12 +401,36 @@ fn follows(trigger: Trigger, end: &End, ask: impl FnOnce(Question) -> Answer) ->
 fn asked(question: Question, against: Against) -> Answer {
     let words = match question {
         Question::Stopped(directories) => return stopped(against, directories),
+        Question::Unmerged => return unmerged(against),
         Question::Verifies(name) => ["rev-parse", "-q", "--verify", name].to_vec(),
         Question::OnABranch => ["symbolic-ref", "-q", "HEAD"].to_vec(),
     };
     match Run::against(against, words).capture_output().start() {
         Ok(finished) if finished.end == End::Code(0) => Answer::Yes,
         Ok(finished) if finished.end == End::Code(1) => Answer::No,
+        _ => Answer::Unanswered,
+    }
+}
+
+/// Whether the index of the private repository `against` names holds an unmerged entry:
+/// one `ls-files -u -z` from the root, answering by whether it lists anything once it has
+/// exited 0. The one reader of unmerged entries.
+pub(super) fn unmerged(against: Against) -> Answer {
+    let Against::Private { root, .. } = against else {
+        return Answer::Unanswered;
+    };
+    match Run::against(against, ["ls-files", "-u", "-z"])
+        .from(root)
+        .capture_output()
+        .start()
+    {
+        Ok(finished) if finished.end == End::Code(0) => {
+            if finished.stdout.is_empty() {
+                Answer::No
+            } else {
+                Answer::Yes
+            }
+        }
         _ => Answer::Unanswered,
     }
 }

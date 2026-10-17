@@ -34,7 +34,8 @@ mod watched_runs;
 mod worktrees;
 
 pub use advice::{
-    IGNORED_HINT, STOPPED_REBASE_HINT, gits_then_one_hint, hinted, unhinted, without_maintenance,
+    IGNORED_HINT, STOPPED_REBASE_HINT, asked_after, gits_then_one_hint, hinted, unhinted,
+    without_maintenance,
 };
 pub use aliases::{global_alias, private_alias};
 pub use attached::{

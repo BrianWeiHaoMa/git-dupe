@@ -5,12 +5,33 @@ fn words(words: &[&str]) -> Vec<OsString> {
 }
 
 fn word_of(words: &[&str]) -> Option<&'static [u8]> {
-    admitted(&self::words(words)).map(|family| family.word)
+    admitted(&self::words(words))
+        .first()
+        .map(|family| family.word)
 }
 
 /// An `ask` for a decision that must put no question.
 fn unasked(question: Question) -> Answer {
     panic!("asked {question:?}")
+}
+
+/// The line `decided` gives for the entries `typed` admits after a run that ended as `end`,
+/// each question answered as `answers` says, and the questions it put, in order.
+fn decision(
+    typed: &[&str],
+    end: &End,
+    answers: &[(Question, Answer)],
+) -> (Option<&'static [u8]>, Vec<Question>) {
+    let mut asked = Vec::new();
+    let line = decided(&admitted(&words(typed)), end, |question| {
+        asked.push(question);
+        answers
+            .iter()
+            .find(|(answered, _)| *answered == question)
+            .map(|(_, answer)| *answer)
+            .unwrap_or_else(|| panic!("asked {question:?}"))
+    });
+    (line, asked)
 }
 
 #[test]
@@ -19,8 +40,8 @@ fn a_word_not_in_the_table_admits_no_hint() {
         &["log"][..],
         &["stash", "pop"],
         &["Checkout", "HEAD~1"],
-        &["merge", "side"],
-        &["commit"],
+        &["mergetool"],
+        &["commit-tree", "x"],
         &[],
     ] {
         assert_eq!(word_of(typed), None, "{typed:?}");
@@ -29,9 +50,13 @@ fn a_word_not_in_the_table_admits_no_hint() {
 
 #[test]
 fn the_words_admit_or_keep_away_each_family() {
-    let admitting: [&[&str]; 22] = [
+    let admitting: [&[&str]; 26] = [
         &["rebase", "side"],
         &["rebase", "--continue"],
+        &["merge", "side"],
+        &["merge", "--abort"],
+        &["commit", "-m", "x"],
+        &["commit", "--amend"],
         &["am", "patch"],
         &["cherry-pick", "side"],
         &["revert", "HEAD~1"],
@@ -58,7 +83,12 @@ fn the_words_admit_or_keep_away_each_family() {
     for typed in admitting {
         assert_eq!(word_of(typed), Some(typed[0].as_bytes()), "{typed:?}");
     }
-    let kept_away: [&[&str]; 28] = [
+    let kept_away: [&[&str]; 31] = [
+        &["merge", "-h"],
+        &["commit", "--amend", "-h"],
+        // An amend Git was told may be empty refuses for another cause; with no `--amend`
+        // the words do not keep a stopped pick's hint away.
+        &["commit", "--amend", "--allow-empty"],
         &["checkout", "--detach", "main"],
         &["checkout", "-q", "HEAD~1"],
         &["checkout", "--quiet", "HEAD~1"],
@@ -212,7 +242,7 @@ fn a_detached_head_is_asked_about_before_the_run_only_where_the_words_admit_it()
             asked.push(question);
             before
         });
-        assert_eq!(found.is_some(), admitted, "{before:?}");
+        assert_eq!(!found.is_empty(), admitted, "{before:?}");
         assert_eq!(asked, [Question::OnABranch]);
     }
     // Words that keep the hint away, and every other family, put no question first.
@@ -225,7 +255,7 @@ fn a_detached_head_is_asked_about_before_the_run_only_where_the_words_admit_it()
         (&["branch", "-d", "side"], true),
     ] {
         let found = before_asking(&words(typed), unasked);
-        assert_eq!(found.is_some(), admitted, "{typed:?}");
+        assert_eq!(!found.is_empty(), admitted, "{typed:?}");
     }
 }
 
@@ -282,6 +312,206 @@ fn each_trigger_follows_its_end_and_state() {
     for end in [End::Code(0), End::Code(128), End::Signal(1), End::Signal(9)] {
         assert!(!follows(Trigger::ExitedOne, &end, unasked), "{end:?}");
     }
+    // A commit during a stopped pick exits 1; an autostash that came back with conflicts
+    // leaves its run exiting 0.
+    let while_picking = Trigger::ExitedOneWhile("REVERT_HEAD");
+    for (trigger, end, question) in [
+        (
+            while_picking,
+            End::Code(1),
+            Question::Verifies("REVERT_HEAD"),
+        ),
+        (Trigger::Unmerged, End::Code(0), Question::Unmerged),
+    ] {
+        for (answer, hinted) in [
+            (Answer::Yes, true),
+            (Answer::No, false),
+            (Answer::Unanswered, false),
+        ] {
+            let follow = follows(trigger, &end, |asked| {
+                assert_eq!(asked, question);
+                answer
+            });
+            assert_eq!(follow, hinted, "{trigger:?} {answer:?}");
+        }
+    }
+    for end in [End::Code(0), End::Code(128), End::Signal(1), End::Signal(9)] {
+        assert!(!follows(while_picking, &end, unasked), "{end:?}");
+    }
+    for end in [
+        End::Code(1),
+        End::Code(128),
+        End::Signal(9),
+        End::Signal(15),
+    ] {
+        assert!(!follows(Trigger::Unmerged, &end, unasked), "{end:?}");
+    }
+}
+
+#[test]
+fn a_rebase_is_asked_about_its_autostash_only_where_it_exited_0_and_left_no_stop() {
+    let stopped = Question::Stopped(&["rebase-merge", "rebase-apply"]);
+    let unmerged = Question::Unmerged;
+    let rebase = &["rebase", "side"][..];
+    // Stopped, the stop's line decides and nothing is asked after it.
+    assert_eq!(
+        decision(rebase, &End::Code(0), &[(stopped, Answer::Yes)]),
+        (Some(REBASE), vec![stopped])
+    );
+    assert_eq!(
+        decision(
+            rebase,
+            &End::Code(0),
+            &[(stopped, Answer::No), (unmerged, Answer::Yes)]
+        ),
+        (Some(AUTOSTASH), vec![stopped, unmerged])
+    );
+    for answer in [Answer::No, Answer::Unanswered] {
+        assert_eq!(
+            decision(
+                rebase,
+                &End::Code(0),
+                &[(stopped, Answer::No), (unmerged, answer)]
+            ),
+            (None, vec![stopped, unmerged]),
+            "{answer:?}"
+        );
+    }
+    // A question that answers nothing ends the decision.
+    assert_eq!(
+        decision(rebase, &End::Code(0), &[(stopped, Answer::Unanswered)]),
+        (None, vec![stopped])
+    );
+    // `--quit` leaves its conflicts unmerged with no autostash applied: not asked.
+    assert_eq!(
+        decision(
+            &["rebase", "--quit"],
+            &End::Code(0),
+            &[(stopped, Answer::No)]
+        ),
+        (None, vec![stopped])
+    );
+    for end in [End::Code(1), End::Code(128), End::Signal(9)] {
+        assert_eq!(
+            decision(rebase, &end, &[(stopped, Answer::No)]),
+            (None, vec![stopped]),
+            "{end:?}"
+        );
+    }
+}
+
+#[test]
+fn a_merge_is_asked_about_its_autostash_only_after_exit_0() {
+    let merge = &["merge", "--no-edit", "side"][..];
+    for (answer, line) in [
+        (Answer::Yes, Some(AUTOSTASH)),
+        (Answer::No, None),
+        (Answer::Unanswered, None),
+    ] {
+        assert_eq!(
+            decision(merge, &End::Code(0), &[(Question::Unmerged, answer)]),
+            (line, vec![Question::Unmerged]),
+            "{answer:?}"
+        );
+    }
+    // A merge that stops on its own conflicts exits 1 with unmerged entries: no question.
+    for end in [End::Code(1), End::Code(128), End::Signal(9)] {
+        assert_eq!(decision(merge, &end, &[]), (None, vec![]), "{end:?}");
+    }
+    for typed in [&["merge", "--quit"][..], &["merge", "-q", "--quit"]] {
+        assert_eq!(
+            decision(typed, &End::Code(0), &[]),
+            (None, vec![]),
+            "{typed:?}"
+        );
+    }
+    // An abbreviation of `--quit` is refused as ambiguous, and `--` ends the words read.
+    for typed in [&["merge", "--qui"][..], &["merge", "x", "--", "--quit"]] {
+        assert_eq!(
+            decision(typed, &End::Code(0), &[(Question::Unmerged, Answer::Yes)]),
+            (Some(AUTOSTASH), vec![Question::Unmerged]),
+            "{typed:?}"
+        );
+    }
+}
+
+#[test]
+fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick() {
+    let pick = Question::Verifies("CHERRY_PICK_HEAD");
+    let revert = Question::Verifies("REVERT_HEAD");
+    // `--amend` and `--allow-empty` are read exactly, before the first `--`.
+    for typed in [
+        &["commit", "--amend"][..],
+        &["commit", "--amend", "--no-edit"],
+        &["commit", "--allow-empty-message", "--amend"],
+        &["commit", "--amend", "--", "--allow-empty"],
+    ] {
+        assert_eq!(
+            decision(typed, &End::Code(1), &[]),
+            (Some(EMPTY_AMEND), vec![]),
+            "{typed:?}"
+        );
+        for end in [End::Code(0), End::Code(128), End::Signal(9)] {
+            assert_eq!(
+                decision(typed, &end, &[]),
+                (None, vec![]),
+                "{typed:?} {end:?}"
+            );
+        }
+    }
+    for typed in [
+        &["commit", "--amend", "--allow-empty"][..],
+        &["commit", "--allow-empty", "-m", "x", "--amend"],
+    ] {
+        assert_eq!(
+            decision(typed, &End::Code(1), &[]),
+            (None, vec![]),
+            "{typed:?}"
+        );
+    }
+    // Without `--amend`, a stopped cherry-pick is asked about first, a stopped revert only
+    // where there is none.
+    for typed in [
+        &["commit", "-m", "x"][..],
+        &["commit"],
+        &["commit", "--allow-empty"],
+        &["commit", "--amen"],
+        &["commit", "--", "--amend"],
+    ] {
+        assert_eq!(
+            decision(typed, &End::Code(1), &[(pick, Answer::Yes)]),
+            (Some(CHERRY_PICK), vec![pick]),
+            "{typed:?}"
+        );
+        assert_eq!(
+            decision(
+                typed,
+                &End::Code(1),
+                &[(pick, Answer::No), (revert, Answer::Yes)]
+            ),
+            (Some(REVERT), vec![pick, revert]),
+            "{typed:?}"
+        );
+    }
+    let typed = &["commit", "-m", "x"][..];
+    for answer in [Answer::No, Answer::Unanswered] {
+        assert_eq!(
+            decision(
+                typed,
+                &End::Code(1),
+                &[(pick, Answer::No), (revert, answer)]
+            ),
+            (None, vec![pick, revert]),
+            "{answer:?}"
+        );
+    }
+    assert_eq!(
+        decision(typed, &End::Code(1), &[(pick, Answer::Unanswered)]),
+        (None, vec![pick])
+    );
+    for end in [End::Code(0), End::Code(128), End::Signal(1), End::Signal(9)] {
+        assert_eq!(decision(typed, &end, &[]), (None, vec![]), "{end:?}");
+    }
 }
 
 #[test]
@@ -315,7 +545,7 @@ fn a_detached_head_follows_a_run_that_exited_0_and_symbolic_ref_answering_1() {
 
 #[test]
 fn each_hint_names_the_git_dupe_commands_and_the_plain_ones_project() {
-    let named: [(&[u8], &[&str]); 6] = [
+    let named: [(&[u8], &[&str]); 8] = [
         (
             REBASE,
             &[
@@ -364,6 +594,22 @@ fn each_hint_names_the_git_dupe_commands_and_the_plain_ones_project() {
             ],
         ),
         (UNMERGED, &["'git dupe branch -D <branch>'"]),
+        (
+            AUTOSTASH,
+            &[
+                "'git dupe add <path>'",
+                "'git dupe stash drop'",
+                "'git dupe reset --hard'",
+                "'git dupe stash pop'",
+            ],
+        ),
+        (
+            EMPTY_AMEND,
+            &[
+                "'git dupe commit --amend --allow-empty'",
+                "'git dupe reset HEAD^'",
+            ],
+        ),
     ];
     for (line, commands) in named {
         let line = String::from_utf8(line.to_vec()).unwrap();

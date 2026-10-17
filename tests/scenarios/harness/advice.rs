@@ -6,11 +6,13 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::files::copy;
 use super::fresh::FreshDirectory;
 use super::output::{End, Output, names};
-use super::scenario::Scenario;
+use super::scenario::{Git, Scenario};
+use super::trace::{run_traced, run_words};
 use super::tree::Tree;
 
 /// The commands the hint after an add of a path the private repository ignores names.
@@ -85,6 +87,8 @@ pub fn without_maintenance(s: &Scenario) {
 /// `git dupe git <words>`, guarded by nothing, ends as Git's own run (G20). The words may
 /// change only what lies below the root; the scenario goes on from the state `git dupe`
 /// left. Automatic maintenance must be off in both repositories (`without_maintenance`).
+/// The three runs date the commits they make at one moment, so that a commit Git names by
+/// its hash, as the stash entry of an autostash, is the same commit in each.
 fn ours_and_gits(s: &Scenario, root: &Path, words: &[&str]) -> (Output, Output) {
     // Required rather than set here, so that a scenario missing it fails every time
     // instead of only when Git's background maintenance races the reading, in either
@@ -101,26 +105,32 @@ fn ours_and_gits(s: &Scenario, root: &Path, words: &[&str]) -> (Output, Output) 
         );
     }
     let saved = Saved::of(root);
-    let mut gits = s
-        .private(root)
-        .git(
+    let since_the_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let moment = format!("@{} +0000", since_the_epoch.as_secs());
+    let at_the_moment = |git: Git<'_>| {
+        git.variable("GIT_AUTHOR_DATE", &moment)
+            .variable("GIT_COMMITTER_DATE", &moment)
+            .run()
+    };
+    let mut gits = at_the_moment(
+        s.private(root).git(
             ["-c", "help.autocorrect=0"]
                 .into_iter()
                 .chain(words.iter().copied()),
-        )
-        .run();
+        ),
+    );
     gits.end = as_git_dupe_ends(gits.end);
     saved.put_back();
-    let unguarded = s
-        .git(["dupe", "git"].into_iter().chain(words.iter().copied()))
-        .from(root)
-        .run();
+    let unguarded = at_the_moment(
+        s.git(["dupe", "git"].into_iter().chain(words.iter().copied()))
+            .from(root),
+    );
     assert_eq!(unguarded, gits, "git dupe git {words:?}");
     saved.put_back();
-    let ours = s
-        .git(["dupe"].into_iter().chain(words.iter().copied()))
-        .from(root)
-        .run();
+    let ours = at_the_moment(
+        s.git(["dupe"].into_iter().chain(words.iter().copied()))
+            .from(root),
+    );
     (ours, gits)
 }
 
@@ -155,4 +165,25 @@ pub fn unhinted(s: &Scenario, root: &Path, words: &[&str]) -> Output {
     let (ours, gits) = ours_and_gits(s, root, words);
     assert_eq!(ours, gits, "{words:?}");
     ours
+}
+
+/// `git dupe <words>` from the root of the workspace at `root`, `words` beginning with a
+/// command word passed through, ends as `ended`, and the Git runs it started itself are, in
+/// order, the locate, the alias lookup of that word, the run of the words, `questions`,
+/// each with exactly its words, and settle's three: the questions its hint put to the
+/// private repository, fixed for the words and the end (G22).
+pub fn asked_after(s: &Scenario, root: &Path, words: &[&str], ended: End, questions: &[&[&str]]) {
+    let (output, runs) = run_traced(
+        s.git(["dupe"].iter().chain(words)).from(root),
+        &s.dir().join("trace"),
+    );
+    assert_eq!(output.end, ended, "{words:?}: {output:?}");
+    let runs = runs.own();
+    let mut commands = vec![&b"rev-parse"[..], b"config", words[0].as_bytes()];
+    commands.extend(questions.iter().map(|question| question[0].as_bytes()));
+    commands.extend([&b"ls-files"[..], b"ls-files", b"check-ignore"]);
+    assert_eq!(runs.commands(), commands, "{words:?}");
+    for (at, question) in questions.iter().enumerate() {
+        assert_eq!(runs.words()[3 + at], run_words(question), "{words:?}");
+    }
 }
