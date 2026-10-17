@@ -11,15 +11,15 @@ Every change a user of git-dupe would notice, newest first, in the form of
 ### Added
 
 - After a private `merge`, `rebase`, or `pull` whose autostash, asked for by
-  `--autostash`, `merge.autoStash`, or `rebase.autoStash`, came back with conflicts,
-  which Git ends with status 0 and keeps as a stash entry, `git dupe` now ends with a
-  `hint:` naming `git dupe add <path>` and `git dupe stash drop` to keep the changes, or
-  `git dupe reset --hard` and later `git dupe stash pop` to set them aside, because
-  Git's own advice there names plain `git stash drop` and `git stash pop`, and in recent
-  releases `git reset --hard`, which act on the project's repository. Git's output and
-  exit status are unchanged, and the manual page says so under PLAIN GIT.
-- After a private `commit --amend` that refuses, as one that would leave the commit
-  empty does, `git dupe` now ends with a `hint:` naming
+  `--autostash` or an `autoStash` setting such as `merge.autoStash`, came back with
+  conflicts, which Git ends with status 0 and keeps as a stash entry, `git dupe` now
+  ends with a `hint:` naming `git dupe add <path>` and `git dupe stash drop` to keep the
+  changes, or `git dupe reset --hard` and later `git dupe stash pop` to set them aside,
+  because Git's own advice there names plain `git stash drop` and `git stash pop`, and in
+  recent releases `git reset --hard`, which act on the project's repository. Git's
+  output and exit status are unchanged, and the manual page says so under PLAIN GIT.
+- After a private `commit --amend` without `--allow-empty` that exits 1, as one that
+  would leave the commit empty does, `git dupe` now ends with a `hint:` naming
   `git dupe commit --amend --allow-empty` and `git dupe reset HEAD^`, and after a
   private `commit` that refuses while a `cherry-pick` or `revert` is stopped, as one
   does once the pick has become empty, with the hint of that stopped command, naming
@@ -74,15 +74,20 @@ Every change a user of git-dupe would notice, newest first, in the form of
   `git dupe pull <remote>` with no refspec, where `<remote>` is the branch's
   `branch.<name>.remote`, with the hint naming `git dupe pull <remote> <branch>` and
   `git dupe branch --set-upstream-to`, because Git's own advice there names plain
-  `git push --set-upstream` or `git pull`, which act on the project's repository. Git's
-  output and exit status are unchanged.
+  `git push --set-upstream` or `git pull`, which act on the project's repository. On a
+  branch with no commit yet, the hint naming `git dupe push -u <remote> HEAD` now names
+  `git dupe commit` first, because that push has nothing to push before it, and it now
+  also follows on a branch with `branch.<name>.merge` set and no
+  `branch.<name>.remote`, which Git's push counts as having no upstream. Git's output
+  and exit status are unchanged.
 - A private `rebase -i` that stops at an `edit` or a `break`, which Git ends with status
   0, now ends with the `hint:` a stopped rebase gets, and that hint now also names
   `git dupe commit --amend` and `git dupe rebase --edit-todo`, because Git's own advice
   at an `edit` stop, a reword whose editor failed, or a todo list Git cannot read names
   plain `git commit --amend` or `git rebase --edit-todo`, which act on the project's
   repository. A private `am` run while a rebase, and no `am`, is stopped no longer ends
-  with the hint of a stopped `am`, whose commands fail there. Git's output and exit
+  with the hint of a stopped `am`, whose commands fail there, unless the rebase runs
+  under `--apply`, which keeps the state a stopped `am` keeps. Git's output and exit
   status are unchanged.
 - A `git dupe revert` given `-n`, alone or in a bundle of short options such as `-sn`,
   or `--no-commit`, that stops on a conflict no longer ends with the `hint:` naming
@@ -93,11 +98,7 @@ Every change a user of git-dupe would notice, newest first, in the form of
 - The `hint:` after a rejected `git dupe push` given a repository now names that
   repository, as `git dupe pull <remote> <branch>` and `git dupe fetch <remote>`, where
   it named the plain `git dupe pull` and `git dupe fetch`, which take the branch's
-  upstream; on a branch with no commit yet, the hint naming
-  `git dupe push -u <remote> HEAD` now names `git dupe commit` first, because that push
-  has nothing to push before it; and that hint now also follows on a branch with
-  `branch.<name>.merge` set and no `branch.<name>.remote`, which Git's push counts as
-  having no upstream. A word holding `=`, as `--recurse-submodules=check`, is no longer
+  upstream. A word holding `=`, as `--recurse-submodules=check`, is no longer
   read as taking the next word as its value, so that
   `git dupe push --recurse-submodules=check origin main` is read as Git reads it, given
   the repository `origin`.
