@@ -359,10 +359,18 @@ fn a_pull_given_the_branchs_remote_and_no_refspec_names_pull_and_set_upstream_to
             let ours = hinted(s, root, words, &NOT_TRACKING);
             assert_eq!(ours.end, End::Code(1), "{words:?}: {ours:?}");
         }
-        // Another remote, a refspec: Git's output alone.
-        for words in [&["pull", "backup"][..], &["pull", "origin", "main"]] {
+        // Another remote, a refspec: Git's output alone. A negated option takes no value,
+        // so the word after it is the repository Git pulls from.
+        for words in [
+            &["pull", "backup"][..],
+            &["pull", "origin", "main"],
+            &["pull", "--no-rebase", "backup"],
+            &["pull", "--no-recurse-submodules", "backup"],
+        ] {
             assert_ne!(unhinted(s, root, words).end, End::Code(0), "{words:?}");
         }
+        let ours = hinted(s, root, &["pull", "--no-rebase", "origin"], &NOT_TRACKING);
+        assert_eq!(ours.end, End::Code(1), "{ours:?}");
         // A help request, or a `--help` Git takes as the value of `-o` before it fails.
         for words in [
             &["pull", "origin", "--help"][..],

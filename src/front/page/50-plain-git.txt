@@ -32,12 +32,13 @@ status are unchanged:
   a rebase or am that ends with one stopped
   a merge, rebase, or pull whose autostash comes back with conflicts
   a cherry-pick or revert without -n that fails, leaving one stopped
-  a commit that refuses while a cherry-pick or revert is stopped
+  a commit that exits 1 while a cherry-pick is stopped
   a commit --amend without --allow-empty that exits 1, as empty ones do
   a checkout or switch without --detach or -q that detaches HEAD
   a branch -d, in any spelling, that exits 1
   a failed push that names no remote while the configuration chooses none
-  a push or pull on a branch with no upstream, even one with no commit
+  a push on a branch with no upstream, even one with no commit
+  a pull on a branch with no branch.<name>.merge, even one with no commit
   a push to an upstream of another name than the branch's
   a push or pull from a detached HEAD
   a push that exits 1, as a rejected one does
@@ -45,7 +46,8 @@ status are unchanged:
   a pull told to fast-forward only that refuses
   an add of a path the private repository ignores
 
-A push or pull on a branch with no upstream, or to an upstream of another
-name, gets its hint where Git refuses it given no refspec, and no remote or
-the one Git takes for the branch; one from a detached HEAD, where it fails
-given no refspec.
+A push or pull on such a branch, or a push to an upstream of another name,
+gets its hint where Git refuses it given no refspec and either no remote or
+the branch's own: its branch.<name>.remote, or, for a push where that is
+unset, the only remote configured, else origin. One from a detached HEAD gets
+its hint where it fails given no refspec.

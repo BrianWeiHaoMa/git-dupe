@@ -1,10 +1,10 @@
 //! The hint after a word passed through whose outcome Git's advice names a plain `git`
 //! command for (`Holds/G19`, G25): `rebase` and `am` stopped, `rebase` and `merge` whose
 //! autostash came back with conflicts, `cherry-pick` and `revert` stopped, `commit
-//! --amend` refusing and `commit` refusing while a pick stands, `checkout` and `switch`
-//! leaving a branch for a detached `HEAD`, and `branch -d` refusing. Copied under `git
-//! dupe`, Git's command would act on the project's repository; the hint names the `git
-//! dupe` form.
+//! --amend` refusing and `commit` refusing while a cherry-pick stands, `checkout` and
+//! `switch` leaving a branch for a detached `HEAD`, and `branch -d` refusing. Copied under
+//! `git dupe`, Git's command would act on the project's repository; the hint names the
+//! `git dupe` form.
 //!
 //! What the code below cannot show:
 //!
@@ -36,19 +36,19 @@
 //!   never a signal's.
 //! - Where a word has several entries, the first whose words, end, and state hold decides,
 //!   in the table's order: a `rebase` stopped is decided by its directory before the
-//!   autostash is asked about, and a `commit` asks about a stopped cherry-pick before a
-//!   stopped revert. An entry's question is put only once the entries before it have not
-//!   held, and a question that answers with any status but its two ends the decision with
-//!   no hint, the command's status as it was.
+//!   autostash is asked about, and a `commit` by its `--amend` before a stopped
+//!   cherry-pick is asked about. An entry's question is put only once the entries before
+//!   it have not held, and a question that answers with any status but its two ends the
+//!   decision with no hint, the command's status as it was.
 //! - The runs an entry adds are fixed for its words (G22, R4): `checkout` and `switch` ask
 //!   the private `symbolic-ref -q HEAD` before the run and, after one that exited 0, again,
 //!   both only where the words admit the hint; `cherry-pick` and `revert` ask `rev-parse
 //!   -q --verify` of their pseudo-reference after a run that did not exit 0, and `commit`
-//!   without `--amend` asks it of `CHERRY_PICK_HEAD`, then of `REVERT_HEAD`, after a run
-//!   that exited 1; `merge`, and `rebase` where it left no stop, ask one `ls-files -u -z`
-//!   after a run that exited 0, from the root, because `ls-files` lists only what lies
-//!   below its directory; `am`, `branch`, and `commit --amend` add none. The
-//!   `symbolic-ref` before the run decides nothing about the run (N8).
+//!   without `--amend` asks it of `CHERRY_PICK_HEAD` alone after a run that exited 1;
+//!   `merge`, and `rebase` where it left no stop, ask one `ls-files -u -z` after a run
+//!   that exited 0, from the root, because `ls-files` lists only what lies below its
+//!   directory; `am`, `branch`, and `commit --amend` add none. The `symbolic-ref` before
+//!   the run decides nothing about the run (N8).
 //! - An index entry left unmerged by a `rebase` or `merge` that exited 0 has one cause, an
 //!   autostash that came back with conflicts and stays a stash entry (S12), whether
 //!   `--autostash` or the configuration asked for it, so the index is asked and not the
@@ -59,6 +59,9 @@
 //! - `CHERRY_PICK_HEAD` and `REVERT_HEAD` are asked of Git, because they live in the
 //!   reference store, which may hold no file for them (S15); `rebase-merge` and
 //!   `rebase-apply` are directories in every store, read by `lstat` (S12).
+//! - A `commit` during a stopped revert gets no hint: Git's advice there names only the
+//!   revert's own commands, which fail in the project's repository, and none of its
+//!   own (S12).
 //! - The `branch -d` hint follows exit 1 alone, so a branch that does not exist draws it
 //!   too; it says what deletes a branch `-d` keeps, which is true either way. So does the
 //!   `commit --amend` hint, a hook's or an editor's refusal included, and its line says
@@ -101,9 +104,11 @@ const REVERT: &[u8] = b"a private revert that stopped goes on with 'git dupe rev
     'git dupe revert --skip', or ends with 'git dupe revert --abort'; plain 'git add', \
     'git commit', and 'git revert' act on the project's repository";
 
+// Conditioned: a branch left with no commit yet is none `switch -` can go back to.
 const DETACHED: &[u8] = b"HEAD is now detached in the private repository: \
     'git dupe switch -c <new-branch-name>' keeps commits made here on a new branch, and \
-    'git dupe switch -' goes back; plain 'git switch' acts on the project's repository";
+    'git dupe switch -' goes back to the branch left, where that branch has a commit; plain \
+    'git switch' acts on the project's repository";
 
 const UNMERGED: &[u8] = b"'git dupe branch -D <branch>' deletes a private branch that \
     'git dupe branch -d' keeps because it is not fully merged; plain 'git branch -D' acts on \
@@ -125,7 +130,7 @@ const EMPTY_AMEND: &[u8] = b"where the private amend would have left the commit 
 
 /// The entries of the table, in its order: where a word has several, the first whose
 /// words, end, and state hold decides.
-const FAMILIES: [Family; 12] = [
+const FAMILIES: [Family; 11] = [
     Family {
         word: b"rebase",
         excluding: None,
@@ -181,13 +186,6 @@ const FAMILIES: [Family; 12] = [
         requiring: None,
         trigger: Trigger::ExitedOneWhile("CHERRY_PICK_HEAD"),
         line: CHERRY_PICK,
-    },
-    Family {
-        word: b"commit",
-        excluding: Some(|word| word == b"--amend"),
-        requiring: None,
-        trigger: Trigger::ExitedOneWhile("REVERT_HEAD"),
-        line: REVERT,
     },
     Family {
         word: b"checkout",

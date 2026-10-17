@@ -2,9 +2,10 @@
 //! not `--allow-empty`, one `hint:` naming `git dupe commit --amend --allow-empty` and
 //! `git dupe reset HEAD^`, in words conditioned on the amend that would have left the
 //! commit empty, which exit 1 alone does not prove, so that a hook's refusal draws it too;
-//! without `--amend`, while a cherry-pick or a revert stands stopped, that command's line.
-//! The amend's hint asks nothing; the other asks `CHERRY_PICK_HEAD`, then `REVERT_HEAD`
-//! only where there is no stopped cherry-pick, and only after exit 1 (G22).
+//! without `--amend`, while a cherry-pick stands stopped, the cherry-pick's line. A commit
+//! during a stopped revert gets none: Git's advice there names only the revert's own
+//! commands, which fail in the project's repository. The amend's hint asks nothing; the
+//! other asks `CHERRY_PICK_HEAD`, and only after exit 1 (G22).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,17 +28,8 @@ const CHERRY_PICK: [&[u8]; 5] = [
     b"'git dupe cherry-pick --abort'",
 ];
 
-/// The questions of a stopped cherry-pick and of a stopped revert.
+/// The question of a stopped cherry-pick.
 const PICK: &[&str] = &["rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"];
-const REVERTING: &[&str] = &["rev-parse", "-q", "--verify", "REVERT_HEAD"];
-
-const REVERT: [&[u8]; 5] = [
-    b"'git dupe add <path>'",
-    b"'git dupe commit --allow-empty'",
-    b"'git dupe revert --continue'",
-    b"'git dupe revert --skip'",
-    b"'git dupe revert --abort'",
-];
 
 /// An attached workspace whose private `main`, checked out and tagged `start`, holds three
 /// commits of `notes.txt`, reading `one`, `two`, and `three`, `.gitdupe` committed in the
@@ -161,7 +153,7 @@ fn an_amend_that_refuses_ends_with_one_hint() {
 }
 
 #[test]
-fn a_commit_while_a_pick_stands_stopped_ends_with_the_picks_hint() {
+fn a_commit_ends_with_the_hint_of_a_stopped_cherry_pick_alone() {
     under_each_release(|s| {
         let root = fixture(s);
         // A pick of what `HEAD` already holds stops as empty; a commit then refuses.
@@ -189,23 +181,19 @@ fn a_commit_while_a_pick_stands_stopped_ends_with_the_picks_hint() {
         asked_after(s, &root, &unresolved, End::Code(128), &[]);
         write(&root, "notes.txt", b"three\n");
         private_add(s, &root, "notes.txt");
-        let refused = hinted(s, &root, &["commit", "-m", "x"], &REVERT);
+        // Resolved, the commit exits 1 while the revert stands: Git's advice names only the
+        // revert's own commands, so no hint follows, and only the cherry-pick is asked.
+        let refused = unhinted(s, &root, &["commit", "-m", "x"]);
         assert_eq!(refused.end, End::Code(1), "{refused:?}");
-        asked_after(
-            s,
-            &root,
-            &["commit", "-m", "x"],
-            End::Code(1),
-            &[PICK, REVERTING],
-        );
+        asked_after(s, &root, &["commit", "-m", "x"], End::Code(1), &[PICK]);
         let skipped = unhinted(s, &root, &["revert", "--skip"]);
         assert_eq!(skipped.end, End::Code(0), "{skipped:?}");
 
-        // Nothing stopped: nothing to commit exits 1 with no hint, both asked.
+        // Nothing stopped: nothing to commit exits 1 with no hint, the cherry-pick asked.
         let nothing = ["commit", "-m", "nothing"];
         let unstopped = unhinted(s, &root, &nothing);
         assert_eq!(unstopped.end, End::Code(1), "{unstopped:?}");
-        asked_after(s, &root, &nothing, End::Code(1), &[PICK, REVERTING]);
+        asked_after(s, &root, &nothing, End::Code(1), &[PICK]);
         // After exit 0, nothing is asked.
         write(&root, "notes.txt", b"staged\n");
         private_add(s, &root, "notes.txt");

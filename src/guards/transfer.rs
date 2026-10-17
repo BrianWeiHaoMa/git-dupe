@@ -14,16 +14,28 @@
 //!
 //! - **Given no repository** is read from the words left to right, up to the first `--`
 //!   that is not presumed a value. A word that follows a dashed word other than one
-//!   `known` lists for the command, and other than one holding `=`, is presumed that
-//!   word's value and is read as nothing else, a `--` and a `--repo` among them, because
-//!   Git gives an option that requires a value the next word whatever it is, and none to
-//!   a word whose value is attached after its `=` (S13). Whether a word is presumed a
+//!   `known` lists for the command, other than one holding `=`, and other than one
+//!   beginning `--no-`, is presumed that word's value and is read as nothing else, a `--`
+//!   and a `--repo` among them, because Git gives an option that requires a value the next
+//!   word whatever it is, none to a word whose value is attached after its `=`, and none
+//!   to an option negated, whatever it takes affirmed (S13). Whether a word is presumed a
 //!   value is decided by the word before it alone: a dashed word that is itself presumed
-//!   a value presumes the next one too, unless it holds `=`. A known word is the word
-//!   exactly as written: a letter in a bundle, an abbreviation, and a word of another
-//!   command's list are not known, so that the word after each is presumed its value, as
-//!   it is after a word a later Git adds. The default remote is then compared where Git
-//!   would not consult it: over-inclusive, which refuses and sends nothing.
+//!   a value presumes the next one too, unless it holds `=` or begins `--no-`. A known
+//!   word is the word exactly as written: a letter in a bundle, an abbreviation, and a
+//!   word of another command's list are not known, so that the word after each is
+//!   presumed its value, as it is after a word a later Git adds. The default remote is
+//!   then compared where Git would not consult it: over-inclusive, which refuses and sends
+//!   nothing.
+//! - `pull` hands an unattached `-j` or `--jobs` to `fetch` ahead of its own repository
+//!   word, wherever it stands among the words and whatever `pull` keeps for itself between
+//!   them, so that `fetch` takes that word as its value, and as its repository the next
+//!   word that would give one, or else the default remote (S13): given such a word, the
+//!   first word that would give `pull` a repository gives it none, and the word itself
+//!   presumes nothing. A word that may be such a `-j` is read as one, as a value of
+//!   another option too: over-inclusive, which compares the default remote where Git may
+//!   not take it. `pull` also hands the words after its `--` to `fetch` with no `--`, so
+//!   that `fetch` reads a dashed one as its own option, `--jobs` and `--stdin` among them:
+//!   given one, `pull` is read as given no repository.
 //! - A repository is given by a word after that `--`; by a word before it that is not
 //!   dashed and not presumed a value; or, for `push`, by a `--repo` with a value,
 //!   attached or as the next word, that is not itself presumed a value, unless a later
@@ -137,10 +149,7 @@ const FETCH: [&[u8]; 43] = [
     b"--stdin",
 ];
 
-/// `pull` without `-j` and `--jobs`: it gives them no word of its own, but hands `--jobs`
-/// to `fetch` ahead of the repository, and `fetch` takes the next word as its value, the
-/// repository itself when nothing else `pull` passes on comes between, and then the
-/// default remote; so the word after either is presumed a value, as for `fetch`.
+/// `pull` without `-j` and `--jobs`, which it hands to `fetch` (`hands_on_jobs`).
 const PULL: [&[u8]; 43] = [
     b"-v",
     b"--verbose",
@@ -222,13 +231,20 @@ impl<'a> Repository<'a> {
 /// What `words`, those after the command, give `transfer` in place of the default remote.
 pub fn repository<'a>(transfer: Transfer, words: &[&'a [u8]]) -> Repository<'a> {
     let known = transfer.known();
+    let jobs = |word: &[u8]| transfer == Transfer::Pull && hands_on_jobs(word);
+    // The first word that would give a repository is `fetch`'s `--jobs` value instead.
+    let mut taken_by_jobs = words.iter().any(|word| jobs(word));
     let mut by_repo = None;
     let mut first = None;
     let mut presumes_the_next = false;
     for (at, &word) in words.iter().enumerate() {
         let presumed = presumes_the_next;
         let dashed = word.starts_with(b"-");
-        presumes_the_next = dashed && !word.contains(&b'=') && !known.contains(&word);
+        presumes_the_next = dashed
+            && !word.contains(&b'=')
+            && !word.starts_with(b"--no-")
+            && !jobs(word)
+            && !known.contains(&word);
         if transfer == Transfer::Push && clears_repo(word) {
             by_repo = None;
         }
@@ -236,13 +252,24 @@ pub fn repository<'a>(transfer: Transfer, words: &[&'a [u8]]) -> Repository<'a> 
             continue;
         }
         if word == b"--" {
-            return match (first, &words[at + 1..]) {
+            let mut after = &words[at + 1..];
+            if transfer == Transfer::Pull && after.iter().any(|word| word.starts_with(b"-")) {
+                return Repository::Default;
+            }
+            if taken_by_jobs && first.is_none() {
+                after = after.get(1..).unwrap_or_default();
+            }
+            return match (first, after) {
                 (Some(word), &[]) | (None, &[word]) => Repository::Alone(word),
                 (None, &[]) => by_repo.map_or(Repository::Default, Repository::Alone),
                 (Some(word), _) | (None, &[word, ..]) => Repository::WithRefspec(word),
             };
         }
         if !dashed {
+            if taken_by_jobs {
+                taken_by_jobs = false;
+                continue;
+            }
             if let Some(first) = first {
                 return Repository::WithRefspec(first);
             }
@@ -260,6 +287,15 @@ pub fn repository<'a>(transfer: Transfer, words: &[&'a [u8]]) -> Repository<'a> 
     first
         .or(by_repo)
         .map_or(Repository::Default, Repository::Alone)
+}
+
+/// Whether `pull` may read `word` as `-j` or `--jobs` with no value attached: the long
+/// option or a prefix of it, or a word of short options ending in `j`.
+fn hands_on_jobs(word: &[u8]) -> bool {
+    match word.strip_prefix(b"--") {
+        Some(long) => !long.is_empty() && b"jobs".starts_with(long),
+        None => word.len() > 1 && word.starts_with(b"-") && word.ends_with(b"j"),
+    }
 }
 
 /// Whether `push` reads `word` as `--no-repo`, or may come to: the word or a prefix of it

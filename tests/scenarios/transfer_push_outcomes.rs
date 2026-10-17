@@ -329,6 +329,17 @@ fn a_rejected_push_given_a_repository_names_its_pull_and_fetch() {
         ];
         let ours = hinted(s, root, &["push", "backup", "HEAD:dest"], &named);
         assert_eq!(ours.end, End::Code(1), "{ours:?}");
+        // Given as a path, the remote has no remote-tracking branch for a fetch to update: the
+        // fetch and merge are claimed only where the fetch updates one.
+        let path = text(&t.private_remote);
+        let by_path = [
+            format!("'git dupe pull {path} <branch>'"),
+            format!("'git dupe fetch {path}'"),
+            format!("where that fetch updates {path}/<branch>"),
+        ];
+        let by_path: Vec<&[u8]> = by_path.iter().map(|part| part.as_bytes()).collect();
+        let ours = hinted(s, root, &["push", path, "main"], &by_path);
+        assert_eq!(ours.end, End::Code(1), "{ours:?}");
         // A remote's name a shell reads back only quoted.
         dupe_succeeds(s, root, &["remote", "add", "it's", text(&t.private_remote)]);
         let quoted = [

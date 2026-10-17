@@ -316,6 +316,15 @@ fn leaving_a_branch_for_a_detached_head_ends_with_one_hint() {
             .git(["config", "advice.detachedHead", "false"])
             .succeeds();
         hinted(s, &root, &["checkout", "HEAD~1"], &DETACHED);
+
+        // Left from a branch with no commit yet, which `switch -` cannot go back to: the line
+        // says where it can.
+        back_on_main(s, &root);
+        s.private(&root)
+            .git(["checkout", "-q", "--orphan", "fresh"])
+            .succeeds();
+        let unborn = [DETACHED[0], DETACHED[1], b"where that branch has a commit"];
+        hinted(s, &root, &["checkout", "main~0"], &unborn);
     });
 }
 

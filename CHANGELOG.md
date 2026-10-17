@@ -21,12 +21,12 @@ Every change a user of git-dupe would notice, newest first, in the form of
 - After a private `commit --amend` without `--allow-empty` that exits 1, as one that
   would leave the commit empty does, `git dupe` now ends with a `hint:` naming
   `git dupe commit --amend --allow-empty` and `git dupe reset HEAD^`, and after a
-  private `commit` that refuses while a `cherry-pick` or `revert` is stopped, as one
-  does once the pick has become empty, with the hint of that stopped command, naming
-  `git dupe commit --allow-empty` and its `--skip`, because Git's own advice after the
-  amend names plain `git reset HEAD^`, and after a commit during an empty `cherry-pick`
-  plain `git commit --allow-empty`, which act on the project's repository. Git's output
-  and exit status are unchanged.
+  private `commit` that exits 1 while a `cherry-pick` is stopped, as one does once the
+  pick has become empty, with the hint of the stopped `cherry-pick`, naming
+  `git dupe commit --allow-empty` and `git dupe cherry-pick --skip`, because Git's own
+  advice after the amend names plain `git reset HEAD^`, and after a commit during an
+  empty `cherry-pick` plain `git commit --allow-empty`, which act on the project's
+  repository. Git's output and exit status are unchanged.
 - After a private `push` that Git refuses on a branch whose upstream has another name
   than the branch, under `push.default` unset or `simple`, `git dupe` now ends with a
   `hint:` naming `git dupe push <remote> HEAD:<upstream>` and
@@ -38,11 +38,11 @@ Every change a user of git-dupe would notice, newest first, in the form of
   now ends with a `hint:` naming `git dupe pull <remote> <branch>`, and after one told
   to fast-forward only, by `--ff-only` or `pull.ff=only`, that Git refuses, as it does
   where the branches have diverged, with a hint naming
-  `git dupe merge --no-ff FETCH_HEAD`, which merges what the pull fetched, and
-  `git dupe rebase FETCH_HEAD`, which rebases onto it where the pull fetched one branch
-  from one remote, because Git's own advice there names plain `git pull`, or
-  `git merge --no-ff` and `git rebase`, which act on the project's repository. Git's
-  output and exit status are unchanged.
+  `git dupe merge --no-ff FETCH_HEAD`, which merges what the pull fetched where it was
+  given no `--append`, and `git dupe rebase FETCH_HEAD`, which rebases onto it where the
+  pull also fetched one branch from one remote alone, because Git's own advice there
+  names plain `git pull`, or `git merge --no-ff` and `git rebase`, which act on the
+  project's repository. Git's output and exit status are unchanged.
 
 ### Fixed
 
@@ -66,6 +66,12 @@ Every change a user of git-dupe would notice, newest first, in the form of
   words name, the refusal naming the key and `git dupe config --unset remotes.<group>`:
   `git dupe fetch <group>` and `pull <group>` with two or more members, and from Git
   2.55.0 `git dupe push <group>`, ran against each member unguarded.
+- `git dupe pull` given `-j` or `--jobs` with no value attached, which Git hands to
+  `fetch` ahead of the repository word, so that `fetch` takes that word as its number of
+  jobs and fetches from the default remote, as for `git dupe pull --jobs --ff 4`, is now
+  refused, fetching nothing, where that default remote names the project's repository
+  or a remote of it; it ran unguarded where `pull` kept a word of its own between the
+  two.
 - On a branch with no upstream, a `git dupe push <remote>` with no refspec that Git
   refuses, where `<remote>` is the branch's `branch.<name>.remote`, or, where that is
   unset, the only remote the private configuration defines, `<remote>` counted among
@@ -98,10 +104,14 @@ Every change a user of git-dupe would notice, newest first, in the form of
 - The `hint:` after a rejected `git dupe push` given a repository now names that
   repository, as `git dupe pull <remote> <branch>` and `git dupe fetch <remote>`, where
   it named the plain `git dupe pull` and `git dupe fetch`, which take the branch's
-  upstream. A word holding `=`, as `--recurse-submodules=check`, is no longer
-  read as taking the next word as its value, so that
-  `git dupe push --recurse-submodules=check origin main` is read as Git reads it, given
-  the repository `origin`.
+  upstream. A word holding `=`, as `--recurse-submodules=check`, and a negated option,
+  as `--no-rebase`, are no longer read as taking the next word as their value, so that
+  `git dupe push --recurse-submodules=check origin main` and
+  `git dupe pull --no-rebase origin main` are read as Git reads them, given the
+  repository `origin`.
+- The `hint:` after a `git dupe checkout` or `switch` that leaves a branch for a detached
+  `HEAD` now says that `git dupe switch -` goes back to the branch left only where that
+  branch has a commit: from a branch with none yet, it has nothing to go back to.
 - The `hint:` naming `git dupe branch -D` after a `git dupe branch -d` that refuses now
   also follows `--delete` abbreviated, as `--del`, and `d` in a bundle of short options,
   as `-vd`, where Git's own advice names plain `git branch -D`, which acts on the

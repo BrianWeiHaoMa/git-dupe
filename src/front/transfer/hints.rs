@@ -47,14 +47,16 @@ pub const DETACHED_PULL: &[u8] = b"where a private pull fails because HEAD is de
 /// merge refuses. Both commands name `FETCH_HEAD`, what the pull fetched, whatever the words
 /// gave it: the bare forms Git's advice writes reach only the branch's upstream, and fail on
 /// a detached `HEAD`. `merge` takes the entries `FETCH_HEAD` marks for merging, and `rebase`
-/// its first line, which is that entry only where one fetch found one branch to merge: a
-/// remote group, or `--all`, writes another remote's entries first.
-pub const FAST_FORWARD_ONLY: &[u8] = b"where a private pull told to fast-forward only cannot, \
-    because HEAD and what the pull fetched have diverged from a common commit, \
-    'git dupe merge --no-ff FETCH_HEAD' merges what it fetched to merge, and, where it \
-    fetched one branch to merge from one remote, 'git dupe rebase FETCH_HEAD' replays the \
-    commits HEAD has of its own onto that branch; plain 'git merge' and 'git rebase' act on \
-    the project's repository";
+/// its first line, which is that entry only where one fetch found one branch to merge:
+/// `--append` keeps an earlier fetch's entries before the pull's, which `merge` would take
+/// too, and a remote group, or `--all`, writes another remote's entries first.
+pub const FAST_FORWARD_ONLY: &[u8] = b"where a private pull told to fast-forward only, and given \
+    neither --append nor -a, cannot, because HEAD and what the pull fetched have diverged \
+    from a common commit, 'git dupe merge --no-ff FETCH_HEAD' merges what it fetched to \
+    merge, and, where it fetched from one remote alone, not from all or a group, and found \
+    one branch to merge there, 'git dupe rebase FETCH_HEAD' replays the commits HEAD has of \
+    its own onto that branch; plain 'git merge' and 'git rebase' act on the project's \
+    repository";
 
 /// The hint after a `pull` that exited 128 with no way to reconcile chosen.
 pub const UNRECONCILED: &[u8] = b"where a private pull finds divergent branches, \
@@ -129,7 +131,9 @@ pub fn detached(remote: &[u8]) -> Vec<u8> {
 /// The hint after a rejected `push`, naming the repository word `given`, the destination
 /// that rejected it, and `REJECTED` given none. Its condition holds where `fetch` of the
 /// word reaches that one destination: not for a remote with a push URL alone or one other
-/// than its fetch URL, nor for a remote group, whose `pull` refuses a refspec.
+/// than its fetch URL, nor for a remote group, whose `pull` refuses a refspec. The fetch is
+/// followed by a merge only where it updates a remote-tracking branch: given a URL or a
+/// path, it fetches the remote's `HEAD` alone.
 pub fn rejected(given: Option<&[u8]>) -> Vec<u8> {
     let Some(given) = given else {
         return REJECTED.to_vec();
@@ -143,10 +147,11 @@ pub fn rejected(given: Option<&[u8]>) -> Vec<u8> {
         &remote,
         b"' fetches from that remote alone, 'git dupe pull ",
         &remote,
-        b" <branch>', or 'git dupe fetch ",
+        b" <branch>' brings them here before the next push, and, where that fetch updates ",
         &remote,
-        b"' and then a merge or rebase, brings them here before the next push; plain \
-            'git pull' and 'git fetch' act on the project's repository",
+        b"/<branch>, so does it followed by a merge or rebase of ",
+        &remote,
+        b"/<branch>; plain 'git pull' and 'git fetch' act on the project's repository",
     ]
     .concat()
 }
@@ -393,14 +398,28 @@ mod tests {
                 b"and 'git dupe fetch origin' fetches from that remote alone",
                 b"'git dupe pull origin <branch>'",
             ),
+            // A fetch given a URL or a path updates no remote-tracking branch.
+            (
+                rejected(Some(b"origin")),
+                b"where that fetch updates origin/<branch>",
+                b"followed by a merge or rebase of origin/<branch>",
+            ),
             (
                 FAST_FORWARD_ONLY.to_vec(),
                 b"because HEAD and what the pull fetched have diverged from a common commit",
                 b"'git dupe merge --no-ff FETCH_HEAD'",
             ),
+            // `--append` keeps an earlier fetch's entries in `FETCH_HEAD`, before the pull's.
             (
                 FAST_FORWARD_ONLY.to_vec(),
-                b"where it fetched one branch to merge from one remote",
+                b"given neither --append nor -a",
+                b"'git dupe merge --no-ff FETCH_HEAD'",
+            ),
+            // `--all`, or a remote group, writes another remote's entries first.
+            (
+                FAST_FORWARD_ONLY.to_vec(),
+                b"where it fetched from one remote alone, not from all or a group, and found one \
+                    branch to merge there",
                 b"'git dupe rebase FETCH_HEAD'",
             ),
             (

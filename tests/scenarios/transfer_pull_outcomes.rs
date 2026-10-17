@@ -215,6 +215,23 @@ fn a_pull_told_to_fast_forward_only_that_cannot_names_the_merge_and_rebase_of_wh
         assert!(holds_the_remotes_main(s, &t));
         let pulled = s.git(["dupe", "pull", "--ff-only"]).from(root).run();
         succeeded_without_a_hint(&pulled);
+
+        // Under `--append` an earlier fetch's entries stand first in `FETCH_HEAD`, where the
+        // rebase would take them: the line makes no claim given it.
+        let backup = s.dir().join("backup.git");
+        s.bare_repository(&backup);
+        dupe_succeeds(s, root, &["remote", "add", "backup", text(&backup)]);
+        dupe_succeeds(s, root, &["push", "-q", "backup", "main"]);
+        diverged(s, &t, "third");
+        dupe_succeeds(s, root, &["fetch", "-q", "backup"]);
+        let appended = [
+            FAST_FORWARD_ONLY[0],
+            FAST_FORWARD_ONLY[1],
+            b"given neither --append nor -a",
+            b"from one remote alone, not from all or a group",
+        ];
+        let ours = hinted(s, root, &["pull", "--ff-only", "--append"], &appended);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
     });
 }
 

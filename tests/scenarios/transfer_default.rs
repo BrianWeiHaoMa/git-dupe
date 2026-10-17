@@ -152,6 +152,19 @@ fn transfer_default_reads_repository_words_left_to_right() {
             (&["fetch", "--jobs", "origin"], false),
             (&["pull", "--jobs", "origin"], false),
             (&["pull", "-j", "1"], false),
+            // `pull` hands an unattached `--jobs` to `fetch` ahead of its repository word,
+            // whatever `pull` keeps for itself between them: `fetch` takes the word as the
+            // value and the default remote.
+            (&["pull", "--jobs", "--no-rebase", "4"], false),
+            (&["pull", "--jobs", "--ff", "4"], false),
+            (&["pull", "-vj", "--no-autostash", "4"], false),
+            (&["pull", "--jobs", "--no-rebase", "--", "4"], false),
+            (&["pull", "4", "--jobs"], false),
+            (&["pull", "--", "--jobs", "4"], false),
+            (&["pull", "--jobs", "1", "origin"], true),
+            // A negated option takes no value: the word after it is the repository.
+            (&["pull", "--no-rebase", "origin", "main"], true),
+            (&["push", "--no-signed", "origin", "main"], true),
             (&["push", "-o", "ci.skip", "origin"], true),
             (&["push", "-o", "--repo=origin"], false),
             (&["push", "--repo=origin", "--no-repo"], false),

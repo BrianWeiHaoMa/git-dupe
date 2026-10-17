@@ -68,10 +68,8 @@ fn a_word_after_a_dashed_word_not_known_is_its_value_whatever_it_is() {
         "--repo=origin --no-r",
         "--repo origin --no-repo",
         "--repo=origin -o --no-repo",
-        // `--no-repo` is not known, so the `--repo` after it is presumed its value.
-        "--no-repo --repo=origin",
         // A dashed word presumed a value presumes the next.
-        "--no-thin -o origin",
+        "--push-option -o origin",
         "--force-with-lease=main -o origin",
         "-o -o origin",
         // A word not known: an abbreviation, a bundle, a later Git's option, help.
@@ -106,6 +104,54 @@ fn a_word_after_a_dashed_word_not_known_is_its_value_whatever_it_is() {
         assert!(!given(Transfer::Pull, words), "pull {words}");
     }
     assert!(given(Transfer::Pull, "--jobs 1 origin"));
+}
+
+/// `pull` hands an unattached `-j` or `--jobs` to `fetch` ahead of its own repository word,
+/// whatever stands between them or after, so that `fetch` takes that word as its value and
+/// the next word that would give a repository, or else the default remote (S13).
+#[test]
+fn a_pull_handing_on_jobs_gives_fetch_its_first_repository_word_as_the_value() {
+    for words in [
+        "--jobs --no-rebase 4",
+        "--jobs --ff 4",
+        "-j -v 4",
+        "--jobs --rebase 4",
+        "-vj --no-autostash 4",
+        "--jobs --no-rebase -- 4",
+        "4 --jobs",
+        "--jo 4",
+        "--jobs --upload-pack x 4",
+        // `pull` hands what follows its `--` to `fetch` with no `--`, which reads a dashed
+        // word there as its own option.
+        "-- --jobs 4",
+        "-- --stdin",
+        "origin -- -x",
+    ] {
+        assert_eq!(
+            read(Transfer::Pull, words),
+            Repository::Default,
+            "pull {words}"
+        );
+    }
+    for (words, expected) in [
+        ("--jobs --ff 4 origin", Repository::Alone(b"origin")),
+        ("4 origin --jobs", Repository::Alone(b"origin")),
+        ("--jobs 4 origin main", Repository::WithRefspec(b"origin")),
+        ("--jobs -- 4 origin", Repository::Alone(b"origin")),
+        // A value attached after `=` is `fetch`'s, and the repository word stands.
+        ("--jobs=4 origin", Repository::Alone(b"origin")),
+    ] {
+        assert_eq!(read(Transfer::Pull, words), expected, "pull {words}");
+    }
+    // `fetch` reads its own `--jobs`, and `push` has none.
+    assert_eq!(
+        read(Transfer::Fetch, "--jobs 4 origin"),
+        Repository::Alone(b"origin")
+    );
+    assert_eq!(
+        read(Transfer::Push, "-j 4 origin"),
+        Repository::Alone(b"origin")
+    );
 }
 
 #[test]
@@ -201,6 +247,78 @@ fn the_repository_word_stands_alone_until_a_refspec_follows_it() {
         Repository::Default
     );
     assert_eq!(read(Transfer::Pull, "--repo=origin"), Repository::Default);
+}
+
+/// A word beginning `--no-` is an option negated, which Git's option parser gives no value
+/// whatever the option takes affirmed, so the word after it is read on its own (S13).
+#[test]
+fn a_negated_option_takes_no_next_word() {
+    for (transfer, words, expected) in [
+        (
+            Transfer::Pull,
+            "--no-rebase origin main",
+            Repository::WithRefspec(b"origin"),
+        ),
+        (
+            Transfer::Pull,
+            "--no-rebase backup",
+            Repository::Alone(b"backup"),
+        ),
+        (
+            Transfer::Pull,
+            "--no-recurse-submodules origin main",
+            Repository::WithRefspec(b"origin"),
+        ),
+        (
+            Transfer::Push,
+            "--no-signed origin topic",
+            Repository::WithRefspec(b"origin"),
+        ),
+        (
+            Transfer::Push,
+            "--no-verify origin topic",
+            Repository::WithRefspec(b"origin"),
+        ),
+        (
+            Transfer::Fetch,
+            "--no-tags origin",
+            Repository::Alone(b"origin"),
+        ),
+        // A `--no-` word presumed the value of the word before it presumes nothing next.
+        (
+            Transfer::Push,
+            "-o --no-thin origin",
+            Repository::Alone(b"origin"),
+        ),
+        // `--no-repo` clears and takes nothing: a `--repo` after it stands.
+        (
+            Transfer::Push,
+            "--no-repo --repo=origin",
+            Repository::Alone(b"origin"),
+        ),
+        (
+            Transfer::Push,
+            "--no-repo origin",
+            Repository::Alone(b"origin"),
+        ),
+        // After `--`, a `--no-` word is the repository Git takes.
+        (
+            Transfer::Pull,
+            "--no-rebase -- origin",
+            Repository::Alone(b"origin"),
+        ),
+    ] {
+        assert_eq!(read(transfer, words), expected, "{transfer:?} {words}");
+    }
+    // Affirmed, an option not known still takes the next word.
+    assert_eq!(
+        read(Transfer::Pull, "--rebase-merges origin"),
+        Repository::Default
+    );
+    assert_eq!(
+        read(Transfer::Push, "--signed=if-asked origin topic"),
+        Repository::WithRefspec(b"origin")
+    );
 }
 
 #[test]

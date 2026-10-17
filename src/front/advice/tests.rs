@@ -61,7 +61,8 @@ fn the_words_admit_or_keep_away_each_family() {
         &["cherry-pick", "side"],
         &["revert", "HEAD~1"],
         &["checkout", "HEAD~1"],
-        // `-d` is `switch`'s, not `checkout`'s; after `--` a word is a path or a revision.
+        // `-d` keeps the hint away for `switch` alone, as the table writes it, although
+        // `checkout` reads it as `--detach` too; after `--` a word is a path or a revision.
         &["checkout", "-d"],
         &["checkout", "--", "--detach"],
         &["switch", "--", "-q"],
@@ -314,12 +315,12 @@ fn each_trigger_follows_its_end_and_state() {
     }
     // A commit during a stopped pick exits 1; an autostash that came back with conflicts
     // leaves its run exiting 0.
-    let while_picking = Trigger::ExitedOneWhile("REVERT_HEAD");
+    let while_picking = Trigger::ExitedOneWhile("CHERRY_PICK_HEAD");
     for (trigger, end, question) in [
         (
             while_picking,
             End::Code(1),
-            Question::Verifies("REVERT_HEAD"),
+            Question::Verifies("CHERRY_PICK_HEAD"),
         ),
         (Trigger::Unmerged, End::Code(0), Question::Unmerged),
     ] {
@@ -436,9 +437,8 @@ fn a_merge_is_asked_about_its_autostash_only_after_exit_0() {
 }
 
 #[test]
-fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick() {
+fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_cherry_pick() {
     let pick = Question::Verifies("CHERRY_PICK_HEAD");
-    let revert = Question::Verifies("REVERT_HEAD");
     // `--amend` and `--allow-empty` are read exactly, before the first `--`.
     for typed in [
         &["commit", "--amend"][..],
@@ -469,8 +469,8 @@ fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick() {
             "{typed:?}"
         );
     }
-    // Without `--amend`, a stopped cherry-pick is asked about first, a stopped revert only
-    // where there is none.
+    // Without `--amend`, a stopped cherry-pick is asked about, and a stopped revert never:
+    // Git's advice for a commit during one names only the revert's own commands.
     for typed in [
         &["commit", "-m", "x"][..],
         &["commit"],
@@ -483,32 +483,15 @@ fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick() {
             (Some(CHERRY_PICK), vec![pick]),
             "{typed:?}"
         );
-        assert_eq!(
-            decision(
-                typed,
-                &End::Code(1),
-                &[(pick, Answer::No), (revert, Answer::Yes)]
-            ),
-            (Some(REVERT), vec![pick, revert]),
-            "{typed:?}"
-        );
+        for answer in [Answer::No, Answer::Unanswered] {
+            assert_eq!(
+                decision(typed, &End::Code(1), &[(pick, answer)]),
+                (None, vec![pick]),
+                "{typed:?} {answer:?}"
+            );
+        }
     }
     let typed = &["commit", "-m", "x"][..];
-    for answer in [Answer::No, Answer::Unanswered] {
-        assert_eq!(
-            decision(
-                typed,
-                &End::Code(1),
-                &[(pick, Answer::No), (revert, answer)]
-            ),
-            (None, vec![pick, revert]),
-            "{answer:?}"
-        );
-    }
-    assert_eq!(
-        decision(typed, &End::Code(1), &[(pick, Answer::Unanswered)]),
-        (None, vec![pick])
-    );
     for end in [End::Code(0), End::Code(128), End::Signal(1), End::Signal(9)] {
         assert_eq!(decision(typed, &end, &[]), (None, vec![]), "{end:?}");
     }
