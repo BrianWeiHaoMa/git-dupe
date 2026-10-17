@@ -10,10 +10,10 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ### Added
 
-- After a private `merge` or `rebase` whose autostash, asked for by `--autostash`,
-  `merge.autoStash`, or `rebase.autoStash`, came back with conflicts, which Git ends
-  with status 0 and keeps as a stash entry, `git dupe` now ends with a `hint:` naming
-  `git dupe add <path>` and `git dupe stash drop` to keep the changes, or
+- After a private `merge`, `rebase`, or `pull` whose autostash, asked for by
+  `--autostash`, `merge.autoStash`, or `rebase.autoStash`, came back with conflicts,
+  which Git ends with status 0 and keeps as a stash entry, `git dupe` now ends with a
+  `hint:` naming `git dupe add <path>` and `git dupe stash drop` to keep the changes, or
   `git dupe reset --hard` and later `git dupe stash pop` to set them aside, because
   Git's own advice there names plain `git stash drop` and `git stash pop`, and in recent
   releases `git reset --hard`, which act on the project's repository. Git's output and
@@ -34,6 +34,15 @@ Every change a user of git-dupe would notice, newest first, in the form of
   with a hint naming `git dupe push <remote> HEAD:<branch>`, because Git's own advice
   there names plain `git push`, which acts on the project's repository. Git's output and
   exit status are unchanged.
+- After a private `pull` given no refspec that fails on a detached `HEAD`, `git dupe`
+  now ends with a `hint:` naming `git dupe pull <remote> <branch>`, and after one told
+  to fast-forward only, by `--ff-only` or `pull.ff=only`, that Git refuses, as it does
+  where the branches have diverged, with a hint naming
+  `git dupe merge --no-ff FETCH_HEAD`, which merges what the pull fetched, and
+  `git dupe rebase FETCH_HEAD`, which rebases onto it where the pull fetched one branch
+  from one remote, because Git's own advice there names plain `git pull`, or
+  `git merge --no-ff` and `git rebase`, which act on the project's repository. Git's
+  output and exit status are unchanged.
 
 ### Fixed
 

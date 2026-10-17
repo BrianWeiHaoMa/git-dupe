@@ -54,20 +54,32 @@
 //!   the word typed; after any other `push` that exited 1, a rejected update or a hook's
 //!   refusal alike, naming `git dupe pull` and `git dupe fetch`, given with the repository
 //!   word typed, where one is, so that they name the destination that refused it and not
-//!   the branch's upstream; after a `pull` on a branch with no upstream that did not exit
-//!   0, given no repository, or given the branch's `branch.<name>.remote` and no refspec,
-//!   naming `git dupe pull <remote> <branch>` and `git dupe branch --set-upstream-to`; and
-//!   after any other `pull` that exited 128 while neither the configuration nor an exact
-//!   word of the six chooses how to reconcile divergent branches, naming `git dupe config
-//!   pull.rebase` and `pull.ff`. A bundle or an abbreviation of those words is not read,
-//!   so the last may follow where Git chose, never where a key did.
+//!   the branch's upstream; after a `pull` that did not exit 0 on a branch with no
+//!   upstream, given no repository, or given the branch's `branch.<name>.remote` and no
+//!   refspec, naming `git dupe pull <remote> <branch>` and `git dupe branch
+//!   --set-upstream-to`; after one that exited 128 while neither the configuration nor an
+//!   exact word of the six chooses how to reconcile divergent branches, naming `git dupe
+//!   config pull.rebase` and `pull.ff`; after one that did not exit 0 on a detached
+//!   `HEAD`, given no repository, or any repository word and no refspec, naming `git dupe
+//!   pull <remote> <branch>`; after one that exited 128 where `--ff-only` is typed, or
+//!   `pull.ff` is `only` and none of the six is, naming `git dupe merge --no-ff` and `git
+//!   dupe rebase` of `FETCH_HEAD`; and after one that exited 0 whose autostash came back
+//!   with conflicts, `advice`'s line for it. Of the `pull` hints, the first that holds in
+//!   that order follows: on a detached `HEAD`, a pull given a URL or a path has the
+//!   remote's `HEAD` to merge, and Git's advice there is the divergent-branches one. A
+//!   bundle or an abbreviation of the six is not read, so the divergent-branches hint may
+//!   follow where Git chose, never where a key did, and a `--ff-only` is read wherever it
+//!   stands, the value of another option included; the detached and fast-forward lines
+//!   say under which cause their commands do what they say.
 //! - Each hint is decided from the records the guard already read and the run's end,
-//!   never from what Git printed (R5), so it costs no run (G22) but one: the private
-//!   `rev-parse -q --verify HEAD` after a `push` that exited 128 owed the no-upstream
-//!   hint, whose answer alone tells a branch with no commit, exit 1, from one with
-//!   commits, exit 0 (S12); it is `advice`'s question, and an answer of neither gives no
-//!   hint. For a `pull` given a repository, the `branch.<name>.rebase` that keeps the
-//!   last away is any branch's, whether or not `HEAD` was read for the tracking hint.
+//!   never from what Git printed (R5), so it costs no run (G22) but two, each `advice`'s
+//!   question, an answer of neither giving no hint: the private `rev-parse -q --verify
+//!   HEAD` after a `push` that exited 128 owed the no-upstream hint, whose answer alone
+//!   tells a branch with no commit, exit 1, from one with commits, exit 0 (S12); and
+//!   whether the private index holds an unmerged entry, after a `pull` that exited 0,
+//!   which leaves one only where its autostash came back with conflicts (S12). For a `pull` given a
+//!   repository, the `branch.<name>.rebase` that keeps the divergent-branches hint away is
+//!   any branch's, whether or not `HEAD` was read for the tracking hint.
 //!   None follows a run among whose words is `-h` or `--help`, so that a help request's
 //!   output stays Git's alone under every release, nor `fetch`, `remote`, or a run the
 //!   guard did not let start; and none where the configuration was not asked, where
@@ -88,8 +100,8 @@ use crate::runner::locate::Facts;
 use crate::runner::records;
 use crate::runner::{Against, End, Run};
 use hints::{
-    NO_REMOTE_CHOSEN, NOT_TRACKING, UNRECONCILED, detached, no_upstream, other_name, rejected,
-    unborn,
+    DETACHED_PULL, FAST_FORWARD_ONLY, NO_REMOTE_CHOSEN, NOT_TRACKING, UNRECONCILED, detached,
+    no_upstream, other_name, rejected, unborn,
 };
 
 mod hints;
@@ -121,10 +133,37 @@ pub enum Then {
         refused: Option<Refused>,
         given: Option<Vec<u8>>,
     },
-    /// `pull`: after a run that did not exit 0, the hint for a branch with no upstream,
-    /// when `untracked`; otherwise, after a run that exited 128, the hint naming how to
-    /// reconcile, when `unreconciled`.
-    Pull { untracked: bool, unreconciled: bool },
+    /// `pull`: after a run that did not exit 0, or that exited 128, the hint for what left
+    /// Git no branch to merge, where `unnamed` holds that, or for divergent branches, where
+    /// `diverging` holds how Git was told to meet them, the first that holds of a branch
+    /// with no upstream, an unchosen way, a detached `HEAD`, and fast-forward only; after a
+    /// run that exited 0, the hint after an autostash that came back with conflicts, where
+    /// the index then holds an unmerged entry.
+    Pull {
+        unnamed: Option<Unnamed>,
+        diverging: Option<Diverging>,
+    },
+}
+
+/// What leaves a `pull` given no refspec no branch to merge, where Git's advice names plain
+/// `git pull <remote> <branch>` (S13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unnamed {
+    /// A branch with no upstream, given no repository or the branch's remote.
+    NoUpstream,
+    /// A detached `HEAD`, given no repository or any repository word.
+    Detached,
+}
+
+/// How a `pull` was told to meet divergent branches, where Git's advice after a run that
+/// exited 128 names a plain command (S13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Diverging {
+    /// Not told: neither the configuration nor a word of the six chooses.
+    Unchosen,
+    /// Told to fast-forward only: `--ff-only` typed, or `pull.ff` `only` and none of the
+    /// six typed, any of which overrides the key.
+    FastForwardOnly,
 }
 
 /// What Git refuses a `push` given no refspec for, exit 128, naming a plain command
@@ -217,23 +256,8 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
             given: given.word().map(<[u8]>::to_vec),
         },
         (Some(Transfer::Pull), Some(given)) => Then::Pull {
-            untracked: match (given, current) {
-                (Repository::Default, Current::Branch(branch)) => {
-                    !transfer::has_upstream(Transfer::Pull, &records, branch)
-                }
-                (Repository::Alone(word), Current::Branch(branch)) => {
-                    !transfer::has_upstream(Transfer::Pull, &records, branch)
-                        && transfer::is_the_branch_remote(Transfer::Pull, &records, branch, word)
-                }
-                _ => false,
-            },
-            unreconciled: !transfer::reconciliation_configured(
-                &records,
-                match given {
-                    Repository::Default => current,
-                    _ => Current::AnyBranch,
-                },
-            ) && !after.iter().any(|word| reconciling(word)),
+            unnamed: unnamed(&records, given, current),
+            diverging: diverging(&records, given, current, &after),
         },
         _ => Then::Nothing,
     })
@@ -277,25 +301,89 @@ fn refused(records: &[Record<'_>], given: Repository<'_>, current: Current<'_>) 
     })
 }
 
+/// What leaves `pull`, given `given` with `HEAD` at `current`, no branch to merge, where
+/// Git's advice names `git pull <remote> <branch>` and the configuration's `records` hold
+/// what Git read (S13): nothing given a refspec; on a branch, no upstream, given no
+/// repository or the branch's own `branch.<name>.remote`; a detached `HEAD`, whatever
+/// repository word is given, because no branch key names one for it.
+fn unnamed(records: &[Record<'_>], given: Repository<'_>, current: Current<'_>) -> Option<Unnamed> {
+    let branch = match (given, current) {
+        (Repository::WithRefspec(_), _) | (_, Current::AnyBranch) => return None,
+        (_, Current::Detached) => return Some(Unnamed::Detached),
+        (_, Current::Branch(branch)) => branch,
+    };
+    let the_branch_remote = match given {
+        Repository::Alone(word) => {
+            transfer::is_the_branch_remote(Transfer::Pull, records, branch, word)
+        }
+        Repository::Default | Repository::WithRefspec(_) => true,
+    };
+    (the_branch_remote && !transfer::has_upstream(Transfer::Pull, records, branch))
+        .then_some(Unnamed::NoUpstream)
+}
+
+/// How `pull`, given `given` with `HEAD` at `current` and the words `after` its command
+/// word, was told to meet divergent branches, where the configuration's `records` hold
+/// what Git read (S13): a `--ff-only` typed tells it to fast-forward only; otherwise a word
+/// of the six chooses, whatever the configuration says; otherwise `pull.ff` set to `only`
+/// tells it to; otherwise any reconciliation configured chooses, the `branch.<name>.rebase`
+/// of any branch where a repository is given.
+fn diverging(
+    records: &[Record<'_>],
+    given: Repository<'_>,
+    current: Current<'_>,
+    after: &[&[u8]],
+) -> Option<Diverging> {
+    if after.iter().any(|&word| word == b"--ff-only") {
+        return Some(Diverging::FastForwardOnly);
+    }
+    if after.iter().any(|word| reconciling(word)) {
+        return None;
+    }
+    if transfer::pull_ff_is_only(records) {
+        return Some(Diverging::FastForwardOnly);
+    }
+    let current = match given {
+        Repository::Default => current,
+        Repository::Alone(_) | Repository::WithRefspec(_) => Current::AnyBranch,
+    };
+    (!transfer::reconciliation_configured(records, current)).then_some(Diverging::Unchosen)
+}
+
 /// Whether `word` is one of the words of `pull` that choose how to reconcile.
 fn reconciling(word: &[u8]) -> bool {
     RECONCILING.contains(&word) || word.starts_with(b"--rebase=")
 }
 
+/// A question of the private repository's state that a hint puts after the run, at most
+/// one per run (G22).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Question {
+    /// Whether `HEAD` names a commit.
+    HeadVerifies,
+    /// Whether the index holds an unmerged entry.
+    Unmerged,
+}
+
 /// Writes what follows a run that ended as `ended` against the repository `against`
 /// names, the guard having decided `then`.
 pub fn after(then: Then, ended: &Outcome, against: Against) {
-    if let Some(hint) = hint(&then, ended, || advice::verifies("HEAD", against)) {
+    let ask = |question| match question {
+        Question::HeadVerifies => advice::verifies("HEAD", against),
+        Question::Unmerged => advice::unmerged(against),
+    };
+    if let Some(hint) = hint(&then, ended, ask) {
         lines::write(Level::Hint, &hint);
     }
 }
 
 /// The hint that follows a run that started and ended as `ended`, the guard having
 /// decided `then`: "did not exit 0" is any end but exit 0, a signal included, and an end
-/// named by its number is never a signal's. A run that did not start is no run.
-/// `head_verifies` is asked whether `HEAD` names a commit only after a `push` that
-/// exited 128 owed the no-upstream hint (G22).
-fn hint(then: &Then, ended: &Outcome, head_verifies: impl FnOnce() -> Answer) -> Option<Vec<u8>> {
+/// named by its number is never a signal's. A run that did not start is no run. `ask`
+/// is put a question only where the hint it decides is due: whether `HEAD` names a commit
+/// after a `push` that exited 128 owed the no-upstream hint, and whether the index holds
+/// an unmerged entry after a `pull` that exited 0 (G22).
+fn hint(then: &Then, ended: &Outcome, ask: impl FnOnce(Question) -> Answer) -> Option<Vec<u8>> {
     let Outcome::Git(end) = ended else {
         return None;
     };
@@ -305,14 +393,28 @@ fn hint(then: &Then, ended: &Outcome, head_verifies: impl FnOnce() -> Answer) ->
         Then::Push {
             refused: Some(refused),
             ..
-        } if *end == End::Code(128) => refusal(refused, head_verifies),
+        } if *end == End::Code(128) => refusal(refused, || ask(Question::HeadVerifies)),
         Then::Push { given, .. } if *end == End::Code(1) => Some(rejected(given.as_deref())),
+        // In the table's order, the first that holds (`Holds/G18`).
         Then::Pull {
-            untracked: true, ..
+            unnamed: Some(Unnamed::NoUpstream),
+            ..
         } if failed => Some(NOT_TRACKING.to_vec()),
         Then::Pull {
-            unreconciled: true, ..
+            diverging: Some(Diverging::Unchosen),
+            ..
         } if *end == End::Code(128) => Some(UNRECONCILED.to_vec()),
+        Then::Pull {
+            unnamed: Some(Unnamed::Detached),
+            ..
+        } if failed => Some(DETACHED_PULL.to_vec()),
+        Then::Pull {
+            diverging: Some(Diverging::FastForwardOnly),
+            ..
+        } if *end == End::Code(128) => Some(FAST_FORWARD_ONLY.to_vec()),
+        Then::Pull { .. } if *end == End::Code(0) => {
+            (ask(Question::Unmerged) == Answer::Yes).then(|| advice::AUTOSTASH.to_vec())
+        }
         _ => None,
     }
 }

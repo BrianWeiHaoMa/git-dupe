@@ -769,3 +769,31 @@ fn a_reconciliation_is_configured_by_pull_rebase_the_branchs_rebase_or_pull_ff()
         }
     }
 }
+
+#[test]
+fn pull_ff_is_only_while_its_last_record_says_only_exactly() {
+    let only = |listing: &[(&str, Option<&str>)]| pull_ff_is_only(&records(listing));
+    for listing in [
+        &[("pull.ff", Some("only"))][..],
+        &[("PULL.FF", Some("only"))],
+        &[("pull.ff", Some("false")), ("pull.ff", Some("only"))],
+        &[("pull.ff", Some("only")), ("pull.rebase", Some("true"))],
+    ] {
+        assert!(only(listing), "{listing:?}");
+    }
+    for listing in [
+        &[][..],
+        &[("pull.ff", Some("false"))],
+        &[("pull.ff", Some("true"))],
+        // A key without a value is true, which is `--ff`.
+        &[("pull.ff", None)],
+        // Git compares the value exactly, and refuses this one.
+        &[("pull.ff", Some("Only"))],
+        &[("pull.ff", Some("only")), ("pull.ff", Some("false"))],
+        &[("merge.ff", Some("only"))],
+        &[("branch.main.ff", Some("only"))],
+        &[("pull.ff.x", Some("only"))],
+    ] {
+        assert!(!only(listing), "{listing:?}");
+    }
+}

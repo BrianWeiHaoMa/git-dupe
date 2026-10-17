@@ -24,6 +24,7 @@ const NOT_TRACKING: [&[u8]; 2] = [
     b"'git dupe branch --set-upstream-to=<remote>/<branch>'",
 ];
 const RECONCILE: [&[u8]; 2] = [b"'git dupe config pull.rebase", b"'git dupe config pull.ff"];
+const FAST_FORWARD_ONLY: &[u8] = b"'git dupe merge --no-ff FETCH_HEAD'";
 
 /// `git dupe <words>` from the root, which must succeed.
 fn dupe(s: &Scenario, root: &Path, words: &[&str]) -> Output {
@@ -387,13 +388,15 @@ fn a_divergent_pull_with_no_way_to_reconcile_names_pull_rebase_and_pull_ff() {
             let ours = hinted(s, root, words, &RECONCILE);
             assert_eq!(ours.end, End::Code(128), "{words:?}: {ours:?}");
         }
-        // A word that chooses, or a key: Git's own refusal to fast-forward, alone.
-        assert_eq!(
-            unhinted(s, root, &["pull", "--ff-only"]).end,
-            End::Code(128)
-        );
+        // A word that chooses, or a key: Git's own refusal to fast-forward, with its own
+        // hint and not this one.
+        let ours = hinted(s, root, &["pull", "--ff-only"], &[FAST_FORWARD_ONLY]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        assert!(!holds(&ours.stderr, RECONCILE[0]), "{ours:?}");
         dupe(s, root, &["config", "pull.ff", "only"]);
-        assert_eq!(unhinted(s, root, &["pull"]).end, End::Code(128));
+        let ours = hinted(s, root, &["pull"], &[FAST_FORWARD_ONLY]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        assert!(!holds(&ours.stderr, RECONCILE[0]), "{ours:?}");
         dupe(s, root, &["config", "--unset", "pull.ff"]);
         // With an unstaged change, Git refuses to rebase before it fetches: a rebase the
         // branch's key, or a `-c` before `dupe`, chooses keeps the hint away.

@@ -111,6 +111,7 @@ mod transfer;
 mod transfer_advice;
 mod transfer_default;
 mod transfer_help;
+mod transfer_pull_outcomes;
 mod transfer_push_hint;
 mod transfer_push_outcomes;
 mod transfer_runs;

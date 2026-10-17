@@ -24,14 +24,15 @@ them name a plain git command to run next: git add and git rebase --continue
 after a rebase stops, git push --set-upstream after a push from a branch with
 no upstream, git config pull.rebase false after a pull that finds divergent
 branches. Typed as written, such a command acts on the project's repository.
-After a rebase or am that stops, a merge or rebase whose autostash comes
-back with conflicts, a cherry-pick or revert without -n that stops, a commit
-that refuses while a cherry-pick or revert is stopped, a commit --amend that
-refuses, as one that would leave the commit empty does, a checkout or switch
-that detaches HEAD, a branch -d that refuses, a push or pull on a branch with
-no upstream, a push to an upstream of another name than the branch's, a push
-from a detached HEAD, a rejected push, a pull that cannot reconcile divergent
-branches, and an add of a path the private repository ignores, git-dupe
+After a rebase or am that stops, a merge, rebase, or pull whose autostash
+comes back with conflicts, a cherry-pick or revert without -n that stops, a
+commit that refuses while a cherry-pick or revert is stopped, a commit --amend
+that refuses, as one that would leave the commit empty does, a checkout or
+switch that detaches HEAD, a branch -d that refuses, a push or pull on a
+branch with no upstream, a push to an upstream of another name than the
+branch's, a push or pull from a detached HEAD, a rejected push, a pull that
+cannot reconcile divergent branches, a pull told to fast-forward only that
+refuses, and an add of a path the private repository ignores, git-dupe
 follows Git's output with a hint that names the git dupe form, such as git
 dupe rebase --continue, git dupe push -u origin HEAD, or git dupe config
 pull.rebase false. Git's output and exit status are unchanged.

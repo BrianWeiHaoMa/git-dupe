@@ -8,7 +8,7 @@
 //! of a remote to Git, which remote it takes, whether a repository given with no refspec
 //! is the one Git's advice names a plain command for, whether a branch has an upstream,
 //! whether that upstream has another name and `push.default` has Git refuse for it, and
-//! whether `pull` is told how to reconcile divergent branches.
+//! whether `pull` is told how to reconcile divergent branches, or to fast-forward only.
 //!
 //! What the code below cannot show:
 //!
@@ -520,6 +520,18 @@ pub fn reconciliation_configured(records: &[Record<'_>], current: Current<'_>) -
                 Current::AnyBranch => rebase_of(None),
             }
     })
+}
+
+/// Whether the configuration's `records` set `pull.ff` to `only`, under which a `pull`
+/// typed none of the six reconciling words refuses, exit 128, to merge branches it cannot
+/// fast-forward (S13): its last record, whose value Git compares exactly; a record without
+/// a value is true, which is `--ff`.
+pub fn pull_ff_is_only(records: &[Record<'_>]) -> bool {
+    records
+        .iter()
+        .rev()
+        .find(|&&(key, _)| is(key, b"pull", None, b"ff"))
+        .is_some_and(|&(_, value)| value == Some(b"only"))
 }
 
 /// The keys that give `transfer`, given no repository, its default remote, in the order

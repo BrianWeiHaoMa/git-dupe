@@ -194,3 +194,37 @@ pub fn asked_after(s: &Scenario, root: &Path, words: &[&str], ended: End, questi
         assert_eq!(runs.words()[3 + at], run_words(question), "{words:?}");
     }
 }
+
+/// `git dupe <words>` from the root of the workspace at `root`, `words` beginning with
+/// `push` or `pull`, ends as `ended`, and the Git runs it started itself are, in order,
+/// the locate, the places and the private configuration its guard reads, `HEAD` where
+/// `reads_head`, the run of the words, `questions`, each with exactly its words, and
+/// settle's three: the questions its hint put to the private repository, fixed for the
+/// words and the end (G22).
+pub fn transfer_asked_after(
+    s: &Scenario,
+    root: &Path,
+    words: &[&str],
+    ended: End,
+    reads_head: bool,
+    questions: &[&[&str]],
+) {
+    let (output, runs) = run_traced(
+        s.git(["dupe"].iter().chain(words)).from(root),
+        &s.dir().join("trace"),
+    );
+    assert_eq!(output.end, ended, "{words:?}: {output:?}");
+    let runs = runs.own();
+    let mut commands = vec![&b"rev-parse"[..], b"config", b"worktree", b"config"];
+    if reads_head {
+        commands.push(b"symbolic-ref");
+    }
+    commands.push(words[0].as_bytes());
+    let asked = commands.len();
+    commands.extend(questions.iter().map(|question| question[0].as_bytes()));
+    commands.extend([&b"ls-files"[..], b"ls-files", b"check-ignore"]);
+    assert_eq!(runs.commands(), commands, "{words:?}");
+    for (at, question) in questions.iter().enumerate() {
+        assert_eq!(runs.words()[asked + at], run_words(question), "{words:?}");
+    }
+}

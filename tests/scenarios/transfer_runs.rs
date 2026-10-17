@@ -1,4 +1,5 @@
-//! Transfer guard and settle run counts do not follow remote or file counts (G22, R4).
+//! Transfer guard, hint, and settle run counts do not follow remote or file counts (G22,
+//! R4).
 
 use crate::harness::{End, daily_state, private_commit, run_traced, under_each_release, write};
 
@@ -78,7 +79,13 @@ fn transfer_runs_do_not_follow_remote_or_private_file_counts() {
                     if words.len() == 1 || (words.len() == 2 && words[0] != "fetch") {
                         expected.push("symbolic-ref");
                     }
-                    expected.extend([words[0], "ls-files", "ls-files", "check-ignore"]);
+                    expected.push(words[0]);
+                    // A `pull` that exited 0 asks whether its autostash came back with
+                    // conflicts.
+                    if words[0] == "pull" {
+                        expected.push("ls-files");
+                    }
+                    expected.extend(["ls-files", "ls-files", "check-ignore"]);
                     let sequence: Vec<Vec<u8>> =
                         own.commands().into_iter().map(<[u8]>::to_vec).collect();
                     assert_eq!(

@@ -13,7 +13,7 @@ use std::path::Path;
 
 use crate::harness::{
     End, Scenario, commit_here, committing, diverged, dupe_succeeds, gits_then_one_hint, hinted,
-    holds, run_traced, run_words, succeeded_without_a_hint, text, under_each_release, unhinted,
+    holds, succeeded_without_a_hint, text, transfer_asked_after, under_each_release, unhinted,
     without_maintenance,
 };
 
@@ -26,32 +26,12 @@ const OTHER_NAME: [&[u8]; 2] = [
 ];
 
 /// `git dupe <words>` from the root ends as `ended`, and the Git runs it started itself are
-/// those of a transfer command: the locate, the places, the private configuration, `HEAD`
-/// where `reads_head`, the run, then, where `asks`, the one question whether `HEAD` names
-/// a commit, then settle's three (G22).
+/// those of a transfer command, `HEAD` read where `reads_head`, and, where `asks`, the one
+/// question whether `HEAD` names a commit after the run (G22).
 fn runs(s: &Scenario, root: &Path, words: &[&str], ended: End, reads_head: bool, asks: bool) {
-    let (output, runs) = run_traced(
-        s.git(["dupe"].iter().chain(words)).from(root),
-        &s.dir().join("trace"),
-    );
-    assert_eq!(output.end, ended, "{words:?}: {output:?}");
-    let own = runs.own();
-    let mut expected = vec!["rev-parse", "config", "worktree", "config"];
-    if reads_head {
-        expected.push("symbolic-ref");
-    }
-    expected.push("push");
-    let question = expected.len();
-    if asks {
-        expected.push("rev-parse");
-    }
-    expected.extend(["ls-files", "ls-files", "check-ignore"]);
-    let commands: Vec<&[u8]> = expected.iter().map(|word| word.as_bytes()).collect();
-    assert_eq!(own.commands(), commands, "{words:?}");
-    if asks {
-        let verify = run_words(&["rev-parse", "-q", "--verify", "HEAD"]);
-        assert_eq!(own.words()[question], verify, "{words:?}");
-    }
+    let verify: &[&str] = &["rev-parse", "-q", "--verify", "HEAD"];
+    let questions = if asks { &[verify][..] } else { &[] };
+    transfer_asked_after(s, root, words, ended, reads_head, questions);
 }
 
 /// The hint's line in `stderr` names `first` before `then`.

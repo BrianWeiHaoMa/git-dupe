@@ -35,7 +35,7 @@ mod worktrees;
 
 pub use advice::{
     IGNORED_HINT, STOPPED_REBASE_HINT, asked_after, gits_then_one_hint, hinted,
-    succeeded_without_a_hint, unhinted, without_maintenance,
+    succeeded_without_a_hint, transfer_asked_after, unhinted, without_maintenance,
 };
 pub use aliases::{global_alias, private_alias};
 pub use attached::{
@@ -73,7 +73,7 @@ pub use release_archive::{install_note, note_commands, release_archive};
 pub use releases::oldest_supported;
 pub use remotes::{
     Everything, MANY_URLS, PROJECT_URL, SecondMachine, Transfer, commit_here, committing, diverged,
-    dupe_clone,
+    dupe_clone, remote_moves_on,
 };
 pub use repository::locate_words;
 pub use scenario::{Scenario, report, under_each_release};

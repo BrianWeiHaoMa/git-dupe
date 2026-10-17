@@ -34,6 +34,28 @@ pub const NOT_TRACKING: &[u8] = b"the current private branch has no upstream to 
     'git dupe branch --set-upstream-to=<remote>/<branch>' makes it the upstream; plain \
     'git pull' and 'git branch' act on the project's repository";
 
+/// The hint after a failed `pull` given no refspec on a detached `HEAD`, where no branch
+/// key names an upstream: both placeholders, as Git's advice writes them. Conditioned on
+/// the cause: given a URL or a path, Git has the remote's `HEAD` to merge, and a pull fails
+/// on a detached `HEAD` for causes the command does not meet, such as unmerged entries.
+pub const DETACHED_PULL: &[u8] = b"where a private pull fails because HEAD is detached, on \
+    no branch, so that no upstream names a branch to pull, 'git dupe pull <remote> <branch>' \
+    pulls a branch into it; plain 'git pull' acts on the project's repository";
+
+/// The hint after a `pull` that exited 128 told to fast-forward only. Conditioned: exit 128
+/// alone does not prove the branches diverged, nor from a common commit, without which the
+/// merge refuses. Both commands name `FETCH_HEAD`, what the pull fetched, whatever the words
+/// gave it: the bare forms Git's advice writes reach only the branch's upstream, and fail on
+/// a detached `HEAD`. `merge` takes the entries `FETCH_HEAD` marks for merging, and `rebase`
+/// its first line, which is that entry only where one fetch found one branch to merge: a
+/// remote group, or `--all`, writes another remote's entries first.
+pub const FAST_FORWARD_ONLY: &[u8] = b"where a private pull told to fast-forward only cannot, \
+    because HEAD and what the pull fetched have diverged from a common commit, \
+    'git dupe merge --no-ff FETCH_HEAD' merges what it fetched to merge, and, where it \
+    fetched one branch to merge from one remote, 'git dupe rebase FETCH_HEAD' replays the \
+    commits HEAD has of its own onto that branch; plain 'git merge' and 'git rebase' act on \
+    the project's repository";
+
 /// The hint after a `pull` that exited 128 with no way to reconcile chosen.
 pub const UNRECONCILED: &[u8] = b"where a private pull finds divergent branches, \
     'git dupe config pull.rebase false' has it merge, 'git dupe config pull.rebase true' \
@@ -313,6 +335,22 @@ mod tests {
                     "plain 'git config'",
                 ],
             ),
+            (
+                DETACHED_PULL,
+                &[
+                    "detached",
+                    "'git dupe pull <remote> <branch>' pulls",
+                    "plain 'git pull'",
+                ],
+            ),
+            (
+                FAST_FORWARD_ONLY,
+                &[
+                    "'git dupe merge --no-ff FETCH_HEAD' merges",
+                    "'git dupe rebase FETCH_HEAD' replays",
+                    "plain 'git merge' and 'git rebase'",
+                ],
+            ),
         ] {
             let hint = String::from_utf8(hint.to_vec()).unwrap();
             for part in parts {
@@ -354,6 +392,21 @@ mod tests {
                 rejected(Some(b"origin")),
                 b"and 'git dupe fetch origin' fetches from that remote alone",
                 b"'git dupe pull origin <branch>'",
+            ),
+            (
+                FAST_FORWARD_ONLY.to_vec(),
+                b"because HEAD and what the pull fetched have diverged from a common commit",
+                b"'git dupe merge --no-ff FETCH_HEAD'",
+            ),
+            (
+                FAST_FORWARD_ONLY.to_vec(),
+                b"where it fetched one branch to merge from one remote",
+                b"'git dupe rebase FETCH_HEAD'",
+            ),
+            (
+                DETACHED_PULL.to_vec(),
+                b"where a private pull fails because HEAD is detached",
+                b"'git dupe pull <remote> <branch>'",
             ),
         ] {
             let at = |part: &[u8]| line.windows(part.len()).position(|window| window == part);

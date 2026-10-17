@@ -1,20 +1,22 @@
-//! The hint after a private `merge` or `rebase` whose autostash came back with conflicts
-//! (`Holds/G19`, S12): the run exits 0, a stash entry keeps the changes, and the index
-//! holds unmerged entries, which such a run leaves no other way but under `--quit`. One
-//! `hint:` follows Git's output, naming `git dupe add`, `git dupe stash drop`,
-//! `git dupe reset --hard`, and `git dupe stash pop`, whether `--autostash` or the
-//! configuration asked for the autostash. A merge stopped by its own conflicts exits 1 and
-//! gets none; a stopped rebase gets its own line; a `--quit`, which exits 0 leaving its
-//! conflicts unmerged and any autostash unapplied in the stash, gets none. The question is
-//! one `ls-files -u -z` after a run that exited 0 and left no stop, and none after any
-//! other end (G22).
+//! The hint after a private `merge`, `rebase`, or `pull` whose autostash came back with
+//! conflicts (`Holds/G19`, `Holds/G18`, S12): the run exits 0, a stash entry keeps the
+//! changes, and the index holds unmerged entries, which such a run leaves no other way but
+//! under `--quit`, which `pull` lacks. One `hint:` follows Git's output, naming
+//! `git dupe add`, `git dupe stash drop`, `git dupe reset --hard`, and `git dupe stash pop`,
+//! whether `--autostash` or the configuration asked for the autostash. A merge stopped by
+//! its own conflicts exits 1 and gets none, as does a pull stopped by its merge's or its
+//! rebase's conflicts; a stopped rebase gets its own line; a `--quit`, which exits 0
+//! leaving its conflicts unmerged and any autostash unapplied in the stash, gets none. The
+//! question is one `ls-files -u -z` after a run that exited 0 and left no stop, and none
+//! after any other end (G22).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, STOPPED_REBASE_HINT, Scenario, asked_after, gits_then_one_hint, hinted, private_add,
-    private_alias, private_commit, under_each_release, unhinted, write,
+    End, STOPPED_REBASE_HINT, Scenario, asked_after, dupe_succeeds, gits_then_one_hint, hinted,
+    private_add, private_alias, private_commit, text, transfer_asked_after, under_each_release,
+    unhinted, write,
 };
 
 /// The commands the hint after an autostash that came back with conflicts names.
@@ -71,6 +73,22 @@ fn edited(s: &Scenario, root: &Path) {
         .succeeds();
     s.private(root).git(["stash", "clear"]).succeeds();
     write(root, "notes.txt", b"edited\n");
+}
+
+/// Gives the workspace at `root` the private remote `origin`, a bare repository beside it
+/// whose `main` holds the commit of `side`, as the upstream of `main`: a pull onto `start`
+/// with `notes.txt` edited brings the edit back with conflicts, as the merge does.
+fn tracking_side(s: &Scenario, root: &Path) {
+    let remote = s.dir().join("private.git");
+    s.bare_repository(&remote);
+    for words in [
+        &["remote", "add", "origin", text(&remote)][..],
+        &["push", "-q", "origin", "side:main"],
+        &["fetch", "-q", "origin"],
+        &["branch", "-q", "--set-upstream-to=origin/main", "main"],
+    ] {
+        dupe_succeeds(s, root, words);
+    }
 }
 
 /// Whether the private index of the workspace at `root` holds an unmerged entry.
@@ -262,5 +280,89 @@ fn the_unmerged_entries_are_asked_about_once_after_a_run_that_exited_0() {
         );
         s.private(&root).git(["merge", "--no-edit", "side"]).run();
         asked_after(s, &root, &["merge", "--quit"], End::Code(0), &[]);
+    });
+}
+
+#[test]
+fn a_pull_whose_autostash_comes_back_with_conflicts_ends_with_the_same_hint() {
+    under_each_release(|s| {
+        let root = fixture(s);
+        tracking_side(s, &root);
+        edited(s, &root);
+        let words = ["pull", "--autostash", "--no-rebase", "--no-edit"];
+        let pulled = hinted(s, &root, &words, &AUTOSTASH);
+        assert_eq!(pulled.end, End::Code(0), "{pulled:?}");
+        assert!(unmerged(s, &root));
+        assert_eq!(stashed(s, &root), 1);
+        // Its commands do what it says: resolved, the entry is dropped.
+        s.git(["dupe", "add", "notes.txt"]).from(&root).succeeds();
+        s.git(["dupe", "stash", "drop"]).from(&root).succeeds();
+        assert!(!unmerged(s, &root));
+        assert_eq!(stashed(s, &root), 0);
+        // A rebasing pull, its autostash asked for by the configuration.
+        s.private(&root)
+            .git(["config", "rebase.autoStash", "true"])
+            .succeeds();
+        edited(s, &root);
+        let rebased = hinted(s, &root, &["pull", "--rebase"], &AUTOSTASH);
+        assert_eq!(rebased.end, End::Code(0), "{rebased:?}");
+        assert!(unmerged(s, &root));
+        s.private(&root)
+            .git(["config", "--unset", "rebase.autoStash"])
+            .succeeds();
+        private_alias(s, &root, "pa", "pull --autostash --no-rebase --no-edit");
+        edited(s, &root);
+        hinted(s, &root, &["pa"], &AUTOSTASH);
+        edited(s, &root);
+        unhinted(s, &root, &["pull", "--autostash", "-h"]);
+
+        // Nothing edited: the pull exits 0 with nothing unmerged.
+        s.private(&root)
+            .git(["reset", "-q", "--hard", "start"])
+            .succeeds();
+        let clean = unhinted(
+            s,
+            &root,
+            &["pull", "--autostash", "--no-rebase", "--no-edit"],
+        );
+        assert_eq!(clean.end, End::Code(0), "{clean:?}");
+        // A pull stopped by its merge's conflicts, or its rebase's, exits 1: none, Git's
+        // advice there naming a bare commit or a rebase that fails in the project's
+        // repository.
+        s.private(&root)
+            .git(["reset", "-q", "--hard", "start"])
+            .succeeds();
+        write(&root, "notes.txt", b"main\n");
+        private_add(s, &root, "notes.txt");
+        private_commit(s, &root);
+        let conflicted = unhinted(s, &root, &["pull", "--no-rebase", "--no-edit"]);
+        assert_eq!(conflicted.end, End::Code(1), "{conflicted:?}");
+        assert!(unmerged(s, &root));
+        s.git(["dupe", "merge", "--abort"]).from(&root).succeeds();
+        let stopped = unhinted(s, &root, &["pull", "--rebase"]);
+        assert_eq!(stopped.end, End::Code(1), "{stopped:?}");
+        s.git(["dupe", "rebase", "--abort"]).from(&root).succeeds();
+    });
+}
+
+#[test]
+fn the_unmerged_entries_are_asked_about_once_after_a_pull_that_exited_0() {
+    under_each_release(|s| {
+        let root = fixture(s);
+        tracking_side(s, &root);
+        let unmerged_entries: &[&str] = &["ls-files", "-u", "-z"];
+        let pull = ["pull", "--no-rebase", "--no-edit"];
+        transfer_asked_after(s, &root, &pull, End::Code(0), true, &[unmerged_entries]);
+        // Given a refspec, `HEAD` is not read; the words after it are options to Git.
+        let refspec = ["pull", "origin", "main", "--no-rebase", "--no-edit"];
+        transfer_asked_after(s, &root, &refspec, End::Code(0), false, &[unmerged_entries]);
+        // Stopped by its merge's conflicts, exit 1: nothing asked.
+        s.private(&root)
+            .git(["reset", "-q", "--hard", "start"])
+            .succeeds();
+        write(&root, "notes.txt", b"main\n");
+        private_add(s, &root, "notes.txt");
+        private_commit(s, &root);
+        transfer_asked_after(s, &root, &pull, End::Code(1), true, &[]);
     });
 }

@@ -17,18 +17,25 @@ fn origin() -> Vec<u8> {
 
 /// The hint, where no question may be asked.
 fn unasked(then: &Then, ended: &Outcome) -> Option<Vec<u8>> {
-    hint(then, ended, || panic!("asked for {then:?}"))
+    hint(then, ended, |question| {
+        panic!("asked {question:?} for {then:?}")
+    })
 }
 
-/// The hint, where the question is asked once and answers `answer`.
-fn answered(then: &Then, ended: &Outcome, answer: Answer) -> Option<Vec<u8>> {
+/// The hint, where `question` is asked once and answers `answer`.
+fn answered(then: &Then, ended: &Outcome, question: Question, answer: Answer) -> Option<Vec<u8>> {
     let mut asked = 0;
-    let hint = hint(then, ended, || {
+    let hint = hint(then, ended, |put| {
+        assert_eq!(put, question, "{then:?}");
         asked += 1;
         answer
     });
     assert_eq!(asked, 1, "{then:?}");
     hint
+}
+
+fn pull(unnamed: Option<Unnamed>, diverging: Option<Diverging>) -> Then {
+    Then::Pull { unnamed, diverging }
 }
 
 #[test]
@@ -54,15 +61,18 @@ fn each_push_hint_follows_its_end_and_asks_only_where_the_upstream_hint_is_due()
     for given in [None, Some("origin")] {
         let then = no_upstream_given(given);
         assert_eq!(
-            answered(&then, &git(128), Answer::Yes),
+            answered(&then, &git(128), Question::HeadVerifies, Answer::Yes),
             Some(no_upstream(b"origin"))
         );
         assert_eq!(
-            answered(&then, &git(128), Answer::No),
+            answered(&then, &git(128), Question::HeadVerifies, Answer::No),
             Some(unborn(b"origin"))
         );
         // A question that answers neither gives no hint, and no other hint follows.
-        assert_eq!(answered(&then, &git(128), Answer::Unanswered), None);
+        assert_eq!(
+            answered(&then, &git(128), Question::HeadVerifies, Answer::Unanswered),
+            None
+        );
     }
     let other_name = Refused::OtherName {
         remote: origin(),
@@ -120,32 +130,236 @@ fn each_push_hint_follows_its_end_and_asks_only_where_the_upstream_hint_is_due()
     );
 }
 
+/// In the table's order, the first that holds: a branch with no upstream after any end but
+/// 0, an unchosen way after 128, a detached `HEAD` after any end but 0, fast-forward only
+/// after 128; after 0 alone, the one question.
 #[test]
-fn a_pull_hints_at_its_upstream_first_and_at_reconciling_after_128_alone() {
-    let pull = |untracked, unreconciled| Then::Pull {
-        untracked,
-        unreconciled,
-    };
-    for unreconciled in [false, true] {
-        let then = pull(true, unreconciled);
-        for ended in [git(1), git(128), Outcome::Git(End::Signal(2))] {
-            assert_eq!(unasked(&then, &ended).as_deref(), Some(NOT_TRACKING));
+fn a_pull_hints_in_the_tables_order_the_first_that_holds() {
+    let failed = [git(1), git(128), git(2), Outcome::Git(End::Signal(2))];
+    let ways = [
+        None,
+        Some(Diverging::Unchosen),
+        Some(Diverging::FastForwardOnly),
+    ];
+    for diverging in ways {
+        let then = pull(Some(Unnamed::NoUpstream), diverging);
+        for ended in &failed {
+            assert_eq!(
+                unasked(&then, ended).as_deref(),
+                Some(NOT_TRACKING),
+                "{then:?}"
+            );
         }
-        assert_eq!(unasked(&then, &git(0)), None);
     }
-    assert_eq!(
-        unasked(&pull(false, true), &git(128)).as_deref(),
-        Some(UNRECONCILED)
-    );
+    // An unchosen way after 128 comes before a detached `HEAD`, given a URL or a path, where
+    // Git has something to merge and its advice names the way.
+    let then = pull(Some(Unnamed::Detached), Some(Diverging::Unchosen));
+    assert_eq!(unasked(&then, &git(128)).as_deref(), Some(UNRECONCILED));
+    for ended in [git(1), git(2), Outcome::Git(End::Signal(2))] {
+        assert_eq!(unasked(&then, &ended).as_deref(), Some(DETACHED_PULL));
+    }
+    for diverging in [None, Some(Diverging::FastForwardOnly)] {
+        let then = pull(Some(Unnamed::Detached), diverging);
+        for ended in &failed {
+            assert_eq!(
+                unasked(&then, ended).as_deref(),
+                Some(DETACHED_PULL),
+                "{then:?}"
+            );
+        }
+    }
+    for (diverging, line) in [
+        (Diverging::Unchosen, UNRECONCILED),
+        (Diverging::FastForwardOnly, FAST_FORWARD_ONLY),
+    ] {
+        let then = pull(None, Some(diverging));
+        assert_eq!(unasked(&then, &git(128)).as_deref(), Some(line));
+        // Exit 1, a signal numbered 128, or no run: none.
+        for ended in [
+            git(1),
+            git(129),
+            Outcome::Git(End::Signal(128)),
+            Outcome::Refused,
+        ] {
+            assert_eq!(unasked(&then, &ended), None, "{then:?}");
+        }
+    }
+    assert_eq!(unasked(&pull(None, None), &git(128)), None);
+    for ended in &failed {
+        assert_eq!(unasked(&pull(None, None), ended), None);
+    }
+}
+
+/// After a `pull` that exited 0, whatever else the guard decided, the index is asked once,
+/// and an unmerged entry, which only an autostash that came back with conflicts leaves
+/// there, draws the autostash's line; nothing is asked after any other end.
+#[test]
+fn a_pull_that_exited_0_asks_about_unmerged_entries_once() {
+    for then in [
+        pull(None, None),
+        pull(Some(Unnamed::NoUpstream), Some(Diverging::Unchosen)),
+        pull(Some(Unnamed::Detached), Some(Diverging::FastForwardOnly)),
+    ] {
+        let unmerged = |answer| answered(&then, &git(0), Question::Unmerged, answer);
+        assert_eq!(unmerged(Answer::Yes).as_deref(), Some(advice::AUTOSTASH));
+        assert_eq!(unmerged(Answer::No), None);
+        assert_eq!(unmerged(Answer::Unanswered), None);
+    }
     for ended in [
-        git(0),
         git(1),
-        Outcome::Git(End::Signal(128)),
+        git(128),
+        Outcome::Git(End::Signal(9)),
         Outcome::Refused,
     ] {
-        assert_eq!(unasked(&pull(false, true), &ended), None);
+        assert_eq!(unasked(&pull(None, None), &ended), None);
     }
-    assert_eq!(unasked(&pull(false, false), &git(128)), None);
+    // Neither `push` nor any other command asks it.
+    for then in [
+        Then::Nothing,
+        Then::NoRemoteChosen,
+        push(None, None),
+        push(Some(Refused::NoUpstream { remote: origin() }), None),
+    ] {
+        assert_eq!(unasked(&then, &git(0)), None, "{then:?}");
+    }
+}
+
+fn records<'a>(listing: &[(&'a str, Option<&'a str>)]) -> Vec<Record<'a>> {
+    listing
+        .iter()
+        .map(|&(key, value)| (key.as_bytes(), value.map(str::as_bytes)))
+        .collect()
+}
+
+#[test]
+fn a_pull_lacks_a_branch_to_merge_on_a_detached_head_or_a_branch_with_no_upstream() {
+    let main = Current::Branch(b"main");
+    let upstream = [
+        ("branch.main.remote", Some("origin")),
+        ("branch.main.merge", Some("refs/heads/main")),
+    ];
+    let remote_alone = [("branch.main.remote", Some("origin"))];
+    let unnamed_by = |listing, given, current| unnamed(&records(listing), given, current);
+    for listing in [&[][..], &upstream, &remote_alone] {
+        // Detached, given no repository or a remote word, whichever: no branch key.
+        for given in [Repository::Default, Repository::Alone(b"backup")] {
+            assert_eq!(
+                unnamed_by(listing, given, Current::Detached),
+                Some(Unnamed::Detached)
+            );
+        }
+        // A refspec names what to merge; `HEAD` not read decides nothing.
+        for current in [main, Current::Detached, Current::AnyBranch] {
+            assert_eq!(
+                unnamed_by(listing, Repository::WithRefspec(b"origin"), current),
+                None
+            );
+        }
+        assert_eq!(
+            unnamed_by(listing, Repository::Alone(b"origin"), Current::AnyBranch),
+            None
+        );
+    }
+    // On a branch, `pull` counts the `merge` key alone.
+    assert_eq!(unnamed_by(&upstream, Repository::Default, main), None);
+    for listing in [&[][..], &remote_alone] {
+        assert_eq!(
+            unnamed_by(listing, Repository::Default, main),
+            Some(Unnamed::NoUpstream)
+        );
+    }
+    assert_eq!(
+        unnamed_by(&remote_alone, Repository::Alone(b"origin"), main),
+        Some(Unnamed::NoUpstream)
+    );
+    // Another remote than the branch's, or none set: Git's advice names no command.
+    assert_eq!(
+        unnamed_by(&remote_alone, Repository::Alone(b"backup"), main),
+        None
+    );
+    assert_eq!(unnamed_by(&[], Repository::Alone(b"origin"), main), None);
+}
+
+#[test]
+fn a_pull_is_told_to_fast_forward_only_by_its_word_or_by_pull_ff_only_untyped_over() {
+    let main = Current::Branch(b"main");
+    let diverging_by = |listing, given, words: &[&str]| {
+        let words: Vec<&[u8]> = words.iter().map(|word| word.as_bytes()).collect();
+        diverging(&records(listing), given, main, &words)
+    };
+    let only = [("pull.ff", Some("only"))];
+    let rebase = [("pull.rebase", Some("true"))];
+    let given = [
+        Repository::Default,
+        Repository::Alone(b"origin"),
+        Repository::WithRefspec(b"origin"),
+    ];
+    for given in given {
+        for (listing, words) in [
+            // `--ff-only` typed decides, whatever else is typed or set.
+            (&[][..], &["--ff-only"][..]),
+            (&rebase, &["--ff-only"]),
+            (&[], &["--rebase", "--ff-only"]),
+            (&[], &["-o", "--ff-only"]),
+            // The key, where no word of the six overrides it.
+            (&only, &[]),
+            (&only, &["-v", "--autostash"]),
+            (&only, &["--ff-o"]),
+            (
+                &[("pull.ff", Some("false")), ("pull.ff", Some("only"))],
+                &[],
+            ),
+            (
+                &[("pull.ff", Some("only")), ("pull.rebase", Some("true"))],
+                &[],
+            ),
+        ] {
+            assert_eq!(
+                diverging_by(listing, given, words),
+                Some(Diverging::FastForwardOnly),
+                "{listing:?} {words:?}"
+            );
+        }
+        for (listing, words) in [
+            // A word of the six overrides the key.
+            (&only[..], &["--rebase"][..]),
+            (&only, &["-r"]),
+            (&only, &["--rebase=merges"]),
+            (&only, &["--no-rebase"]),
+            (&only, &["--ff"]),
+            (&only, &["--no-ff"]),
+            // A value Git refuses, `true`, or the key set aside, chooses another way.
+            (&[("pull.ff", Some("Only"))], &[]),
+            (&[("pull.ff", None)], &[]),
+            (&[("pull.ff", Some("only")), ("pull.ff", Some("true"))], &[]),
+            (&rebase, &[]),
+            (&[], &["--no-rebase"]),
+        ] {
+            assert_eq!(
+                diverging_by(listing, given, words),
+                None,
+                "{listing:?} {words:?}"
+            );
+        }
+        // Nothing chooses: the divergent-branches hint.
+        for words in [&[][..], &["-v"], &["--ff-o"], &["--autostash"]] {
+            assert_eq!(
+                diverging_by(&[], given, words),
+                Some(Diverging::Unchosen),
+                "{words:?}"
+            );
+        }
+    }
+    // Given a repository, any branch's `branch.<name>.rebase` chooses.
+    let other = [("branch.other.rebase", Some("true"))];
+    assert_eq!(
+        diverging_by(&other, Repository::Default, &[]),
+        Some(Diverging::Unchosen)
+    );
+    assert_eq!(
+        diverging_by(&other, Repository::Alone(b"origin"), &[]),
+        None
+    );
 }
 
 #[test]
