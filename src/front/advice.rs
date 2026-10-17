@@ -412,6 +412,15 @@ fn asked(question: Question, against: Against) -> Answer {
     }
 }
 
+/// Whether `rev-parse -q --verify <name>` names a commit in the private repository
+/// `against` names: `HEAD` on a branch with one, or a pick's pseudo-reference (S12).
+pub(super) fn verifies(name: &'static str, against: Against) -> Answer {
+    if against.private_repository().is_none() {
+        return Answer::Unanswered;
+    }
+    asked(Question::Verifies(name), against)
+}
+
 /// Whether the index of the private repository `against` names holds an unmerged entry:
 /// one `ls-files -u -z` from the root, answering by whether it lists anything once it has
 /// exited 0. The one reader of unmerged entries.

@@ -34,28 +34,40 @@
 //!   (G22, R4). Each is git-dupe's own and only reads (G5, R2); the `config` run has
 //!   `GIT_CONFIG` removed and sees a remote a `-c` before `dupe` or an alias chain's
 //!   prefix defines, which `Run` carries.
-//! - A run the guard let through may end with one `hint:` where Git's own advice names a
-//!   plain `git` command, which under `git dupe` would act on the project's repository
-//!   (`Holds/G18`, G25): after a `push` given no repository whose configuration chooses
-//!   no remote (`guards::transfer`), which runs as Git itself all the same, and that did
-//!   not exit 0, naming `git dupe remote add`; after a `push` on a branch with no
-//!   upstream that exited 128, given no repository, or given the branch's remote and no
-//!   refspec (`guards::transfer`), naming `git dupe push -u` with the remote Git takes or
-//!   the word typed, and `HEAD`, which pushes the branch to the one of its name there
-//!   whatever tag or other ref shares the name, where the branch's own name would be
-//!   refused as ambiguous (S13); after any other `push` that exited 1, a rejected update
-//!   or a hook's refusal alike, naming `git dupe pull` and `git dupe fetch`; after a
-//!   `pull` on a branch with no upstream that did not exit 0, given no repository, or
-//!   given the branch's `branch.<name>.remote` and no refspec, naming
-//!   `git dupe pull <remote> <branch>` and `git dupe branch --set-upstream-to`;
-//!   and after any other `pull` that exited 128 while neither the configuration nor an
-//!   exact word of the six chooses how to reconcile divergent branches, naming
-//!   `git dupe config pull.rebase` and `pull.ff`. A bundle or an abbreviation of those
-//!   words is not read, so the last may follow where Git chose, never where a key did.
-//! - Each hint is decided from the records the guard already read and the run's end
-//!   alone, never from what Git printed (R5), so it costs no run (G22): for a `pull`
-//!   given a repository, the `branch.<name>.rebase` that keeps the last away is any
-//!   branch's, whether or not `HEAD` was read for the tracking hint.
+//! - A run the guard let through may end with one `hint:`, its line in `hints`, where
+//!   Git's own advice names a plain `git` command, which under `git dupe` would act on the
+//!   project's repository (`Holds/G18`, G25), the first that holds deciding: after a
+//!   `push` given no repository whose configuration chooses no remote
+//!   (`guards::transfer`), which runs as Git itself all the same, and that did not exit 0,
+//!   naming `git dupe remote add`; after a `push` on a branch with no upstream that exited
+//!   128, given no repository, or given the branch's remote and no refspec
+//!   (`guards::transfer`), naming `git dupe push -u` with the remote Git takes or the word
+//!   typed, and `HEAD`, which pushes the branch to the one of its name there whatever tag
+//!   or other ref shares the name, where the branch's own name would be refused as
+//!   ambiguous (S13), and, on a branch with no commit yet, where that push has no source
+//!   to push, `git dupe commit` before it; after a `push` so given that exited 128 on a
+//!   branch whose upstream has another name, under `push.default` unset or `simple`,
+//!   naming `git dupe push <remote> HEAD:<upstream>` and `git dupe push <remote> HEAD`,
+//!   the remote the branch's own, whose upstream the first pushes to; after a `push` given
+//!   no repository, or a repository word and no refspec, that exited 128 on a detached
+//!   `HEAD`, naming `git dupe push <remote> HEAD:<branch>` with the remote Git takes or
+//!   the word typed; after any other `push` that exited 1, a rejected update or a hook's
+//!   refusal alike, naming `git dupe pull` and `git dupe fetch`, given with the repository
+//!   word typed, where one is, so that they name the destination that refused it and not
+//!   the branch's upstream; after a `pull` on a branch with no upstream that did not exit
+//!   0, given no repository, or given the branch's `branch.<name>.remote` and no refspec,
+//!   naming `git dupe pull <remote> <branch>` and `git dupe branch --set-upstream-to`; and
+//!   after any other `pull` that exited 128 while neither the configuration nor an exact
+//!   word of the six chooses how to reconcile divergent branches, naming `git dupe config
+//!   pull.rebase` and `pull.ff`. A bundle or an abbreviation of those words is not read,
+//!   so the last may follow where Git chose, never where a key did.
+//! - Each hint is decided from the records the guard already read and the run's end,
+//!   never from what Git printed (R5), so it costs no run (G22) but one: the private
+//!   `rev-parse -q --verify HEAD` after a `push` that exited 128 owed the no-upstream
+//!   hint, whose answer alone tells a branch with no commit, exit 1, from one with
+//!   commits, exit 0 (S12); it is `advice`'s question, and an answer of neither gives no
+//!   hint. For a `pull` given a repository, the `branch.<name>.rebase` that keeps the
+//!   last away is any branch's, whether or not `HEAD` was read for the tracking hint.
 //!   None follows a run among whose words is `-h` or `--help`, so that a help request's
 //!   output stays Git's alone under every release, nor `fetch`, `remote`, or a run the
 //!   guard did not let start; and none where the configuration was not asked, where
@@ -64,6 +76,7 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 
+use super::advice::{self, Answer};
 use super::commands::{self, Command};
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
@@ -74,32 +87,12 @@ use crate::guards::transfer::{self, Current, DefaultRemote, Record, Repository, 
 use crate::runner::locate::Facts;
 use crate::runner::records;
 use crate::runner::{Against, End, Run};
+use hints::{
+    NO_REMOTE_CHOSEN, NOT_TRACKING, UNRECONCILED, detached, no_upstream, other_name, rejected,
+    unborn,
+};
 
-/// The hint after a failed `push` whose configuration chooses no remote: true whichever
-/// remote Git took, the only one of another name included, so it never says that none
-/// exists.
-const NO_REMOTE_CHOSEN: &[u8] = b"to push private history, 'git dupe remote add <name> <url>' \
-    adds a private remote and 'git dupe push -u <name> <branch>' pushes to it; plain \
-    'git remote' and 'git push' act on the project's repository";
-
-/// The hint after a rejected `push`: Git's advice for a rejected update names plain
-/// `git pull`. It says what to do in that case, true too after a hook's refusal.
-const REJECTED: &[u8] = b"where a private push is rejected because the remote holds commits \
-    this branch lacks, 'git dupe pull', or 'git dupe fetch' and then a merge or rebase, \
-    brings them here before the next push; plain 'git pull' and 'git fetch' act on the \
-    project's repository";
-
-/// The hint after a failed `pull` on a branch with no upstream.
-const NOT_TRACKING: &[u8] = b"the current private branch has no upstream to pull from: \
-    'git dupe pull <remote> <branch>' pulls a branch this once, and \
-    'git dupe branch --set-upstream-to=<remote>/<branch>' makes it the upstream; plain \
-    'git pull' and 'git branch' act on the project's repository";
-
-/// The hint after a `pull` that exited 128 with no way to reconcile chosen.
-const UNRECONCILED: &[u8] = b"where a private pull finds divergent branches, \
-    'git dupe config pull.rebase false' has it merge, 'git dupe config pull.rebase true' \
-    rebase, and 'git dupe config pull.ff only' take only a fast-forward; plain \
-    'git config' acts on the project's repository";
+mod hints;
 
 /// The words of `pull` that choose how to reconcile, each matched exactly; `--rebase`
 /// also with its value after `=`.
@@ -121,22 +114,31 @@ pub enum Then {
     /// `push` given no repository whose configuration chooses no remote: its hint after a
     /// run that did not exit 0.
     NoRemoteChosen,
-    /// Any other `push`: after a run that exited 128, the hint naming `git dupe push -u`,
-    /// on a branch with no upstream given no repository or the branch's remote and no
-    /// refspec, which this holds; after a run that exited 1, the hint after a rejected
-    /// update.
-    Push(Option<Upstream>),
+    /// Any other `push`: after a run that exited 128, the hint for what Git refused it
+    /// for, where `refused` holds that; after a run that exited 1, the hint after a
+    /// rejected update, naming the repository word `given`, where one was.
+    Push {
+        refused: Option<Refused>,
+        given: Option<Vec<u8>>,
+    },
     /// `pull`: after a run that did not exit 0, the hint for a branch with no upstream,
     /// when `untracked`; otherwise, after a run that exited 128, the hint naming how to
     /// reconcile, when `unreconciled`.
     Pull { untracked: bool, unreconciled: bool },
 }
 
-/// The remote the upstream hint names for a branch with no upstream that `push` was asked
-/// to push: the one Git takes, given no repository, or the repository word typed.
+/// What Git refuses a `push` given no refspec for, exit 128, naming a plain command
+/// (S13), with the remote the hint names.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Upstream {
-    remote: Vec<u8>,
+pub enum Refused {
+    /// A branch with no upstream: the remote Git takes, given no repository, or the
+    /// branch's remote typed.
+    NoUpstream { remote: Vec<u8> },
+    /// A branch whose upstream has another name: the branch's remote, and the raw value
+    /// of its `merge`.
+    OtherName { remote: Vec<u8>, merge: Vec<u8> },
+    /// A detached `HEAD`: the remote Git takes, given no repository, or the word typed.
+    Detached { remote: Vec<u8> },
 }
 
 /// Whether `words`, the command word first, may run against the repository `against`
@@ -199,32 +201,28 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
         None => Current::AnyBranch,
         Some(head) => records::branch_of(head).map_or(Current::Detached, Current::Branch),
     };
+    let chooses_no_remote = match current {
+        Current::Branch(branch) => transfer::push_chooses_no_remote(&records, Some(branch)),
+        Current::Detached => transfer::push_chooses_no_remote(&records, None),
+        // Given no repository, `HEAD` is always read.
+        Current::AnyBranch => false,
+    };
     Ok(match (private, repository) {
         _ if help => Then::Nothing,
-        (Some(Transfer::Push), Some(Repository::Default)) => match current {
-            Current::AnyBranch => Then::Push(None),
-            Current::Detached if transfer::push_chooses_no_remote(&records, None) => {
-                Then::NoRemoteChosen
-            }
-            Current::Detached => Then::Push(None),
-            Current::Branch(branch) if transfer::push_chooses_no_remote(&records, Some(branch)) => {
-                Then::NoRemoteChosen
-            }
-            Current::Branch(branch) => Then::Push(without_upstream(&records, branch, None)),
+        (Some(Transfer::Push), Some(Repository::Default)) if chooses_no_remote => {
+            Then::NoRemoteChosen
+        }
+        (Some(Transfer::Push), Some(given)) => Then::Push {
+            refused: refused(&records, given, current),
+            given: given.word().map(<[u8]>::to_vec),
         },
-        (Some(Transfer::Push), Some(given)) => Then::Push(match (given, current) {
-            (Repository::Alone(word), Current::Branch(branch)) => {
-                without_upstream(&records, branch, Some(word))
-            }
-            _ => None,
-        }),
         (Some(Transfer::Pull), Some(given)) => Then::Pull {
             untracked: match (given, current) {
                 (Repository::Default, Current::Branch(branch)) => {
-                    !transfer::has_upstream(&records, branch)
+                    !transfer::has_upstream(Transfer::Pull, &records, branch)
                 }
                 (Repository::Alone(word), Current::Branch(branch)) => {
-                    !transfer::has_upstream(&records, branch)
+                    !transfer::has_upstream(Transfer::Pull, &records, branch)
                         && transfer::is_the_branch_remote(Transfer::Pull, &records, branch, word)
                 }
                 _ => false,
@@ -241,22 +239,41 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
     })
 }
 
-/// The upstream `push` on `branch` would set, when the configuration's `records` give the
-/// branch none and Git's advice names a plain command: given no repository when `word` is
-/// `None`, the remote Git takes; given the repository `word` and no refspec, that word as
-/// typed, where it is the branch's remote.
-fn without_upstream(
-    records: &[Record<'_>],
-    branch: &[u8],
-    word: Option<&[u8]>,
-) -> Option<Upstream> {
-    let remote = match word {
-        None => transfer::push_remote(records, Some(branch)),
-        Some(word) if transfer::is_the_branch_remote(Transfer::Push, records, branch, word) => word,
-        Some(_) => return None,
+/// What Git would refuse `push` for, given `given` with `HEAD` at `current`, where its
+/// advice names a plain command and the configuration's `records` choose a remote: none
+/// given a refspec, nor on a branch given a repository word other than the branch's
+/// remote, to which Git pushes the branch under its own name (S13). Where several would
+/// follow, the first holds: a branch has no upstream, or one of another name.
+fn refused(records: &[Record<'_>], given: Repository<'_>, current: Current<'_>) -> Option<Refused> {
+    let word = match given {
+        Repository::WithRefspec(_) => return None,
+        Repository::Default | Repository::Alone(_) => given.word(),
     };
-    (!transfer::has_upstream(records, branch)).then(|| Upstream {
-        remote: remote.to_vec(),
+    let branch = match current {
+        Current::Branch(branch) => branch,
+        Current::Detached => {
+            let remote = word.unwrap_or_else(|| transfer::push_remote(records, None));
+            return Some(Refused::Detached {
+                remote: remote.to_vec(),
+            });
+        }
+        Current::AnyBranch => return None,
+    };
+    if let Some(word) = word
+        && !transfer::is_the_branch_remote(Transfer::Push, records, branch, word)
+    {
+        return None;
+    }
+    if !transfer::has_upstream(Transfer::Push, records, branch) {
+        let remote = word.unwrap_or_else(|| transfer::push_remote(records, Some(branch)));
+        return Some(Refused::NoUpstream {
+            remote: remote.to_vec(),
+        });
+    }
+    let upstream = transfer::upstream_of_another_name(records, branch)?;
+    transfer::push_default_is_simple(records).then(|| Refused::OtherName {
+        remote: upstream.remote.to_vec(),
+        merge: upstream.merge.to_vec(),
     })
 }
 
@@ -265,9 +282,10 @@ fn reconciling(word: &[u8]) -> bool {
     RECONCILING.contains(&word) || word.starts_with(b"--rebase=")
 }
 
-/// Writes what follows a run that ended as `ended`, the guard having decided `then`.
-pub fn after(then: Then, ended: &Outcome) {
-    if let Some(hint) = hint(&then, ended) {
+/// Writes what follows a run that ended as `ended` against the repository `against`
+/// names, the guard having decided `then`.
+pub fn after(then: Then, ended: &Outcome, against: Against) {
+    if let Some(hint) = hint(&then, ended, || advice::verifies("HEAD", against)) {
         lines::write(Level::Hint, &hint);
     }
 }
@@ -275,15 +293,20 @@ pub fn after(then: Then, ended: &Outcome) {
 /// The hint that follows a run that started and ended as `ended`, the guard having
 /// decided `then`: "did not exit 0" is any end but exit 0, a signal included, and an end
 /// named by its number is never a signal's. A run that did not start is no run.
-fn hint(then: &Then, ended: &Outcome) -> Option<Vec<u8>> {
+/// `head_verifies` is asked whether `HEAD` names a commit only after a `push` that
+/// exited 128 owed the no-upstream hint (G22).
+fn hint(then: &Then, ended: &Outcome, head_verifies: impl FnOnce() -> Answer) -> Option<Vec<u8>> {
     let Outcome::Git(end) = ended else {
         return None;
     };
     let failed = *end != End::Code(0);
     match then {
         Then::NoRemoteChosen if failed => Some(NO_REMOTE_CHOSEN.to_vec()),
-        Then::Push(Some(upstream)) if *end == End::Code(128) => Some(no_upstream(upstream)),
-        Then::Push(_) if *end == End::Code(1) => Some(REJECTED.to_vec()),
+        Then::Push {
+            refused: Some(refused),
+            ..
+        } if *end == End::Code(128) => refusal(refused, head_verifies),
+        Then::Push { given, .. } if *end == End::Code(1) => Some(rejected(given.as_deref())),
         Then::Pull {
             untracked: true, ..
         } if failed => Some(NOT_TRACKING.to_vec()),
@@ -294,29 +317,18 @@ fn hint(then: &Then, ended: &Outcome) -> Option<Vec<u8>> {
     }
 }
 
-/// The hint after a `push` that exited 128 on a branch with no upstream, naming the
-/// remote Git takes and `HEAD` for the branch, whose own name a tag or another ref may
-/// share.
-fn no_upstream(upstream: &Upstream) -> Vec<u8> {
-    [
-        &b"the current private branch has no upstream: 'git dupe push -u "[..],
-        &offered_remote(&upstream.remote),
-        b" HEAD' pushes it and sets one; plain 'git push' acts on the project's repository",
-    ]
-    .concat()
-}
-
-/// The remote's name or URL `name` as a shell reads it back as one word, or the
-/// placeholder `<remote>` where none is to be named: a value from the configuration may
-/// be empty, begin with `-`, which `push` reads as an option, or hold a control byte,
-/// which would break the line (F8).
-fn offered_remote(name: &[u8]) -> Vec<u8> {
-    let named =
-        name.first().is_some_and(|&first| first != b'-') && !name.iter().any(u8::is_ascii_control);
-    if named {
-        shell_word(name)
-    } else {
-        b"<remote>".to_vec()
+/// The hint after a `push` that Git refused, exit 128, for `refused`. A branch with no
+/// upstream is asked whether `HEAD` names a commit: where it does not, the branch is
+/// unborn, and the push the hint names would have no source to push (S13).
+fn refusal(refused: &Refused, head_verifies: impl FnOnce() -> Answer) -> Option<Vec<u8>> {
+    match refused {
+        Refused::NoUpstream { remote } => match head_verifies() {
+            Answer::Yes => Some(no_upstream(remote)),
+            Answer::No => Some(unborn(remote)),
+            Answer::Unanswered => None,
+        },
+        Refused::OtherName { remote, merge } => Some(other_name(remote, merge)),
+        Refused::Detached { remote } => Some(detached(remote)),
     }
 }
 

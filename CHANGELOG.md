@@ -27,6 +27,13 @@ Every change a user of git-dupe would notice, newest first, in the form of
   amend names plain `git reset HEAD^`, and after a commit during an empty `cherry-pick`
   plain `git commit --allow-empty`, which act on the project's repository. Git's output
   and exit status are unchanged.
+- After a private `push` that Git refuses on a branch whose upstream has another name
+  than the branch, under `push.default` unset or `simple`, `git dupe` now ends with a
+  `hint:` naming `git dupe push <remote> HEAD:<upstream>` and
+  `git dupe push <remote> HEAD`, and after one that Git refuses on a detached `HEAD`,
+  with a hint naming `git dupe push <remote> HEAD:<branch>`, because Git's own advice
+  there names plain `git push`, which acts on the project's repository. Git's output and
+  exit status are unchanged.
 
 ### Fixed
 
@@ -74,6 +81,17 @@ Every change a user of git-dupe would notice, newest first, in the form of
   uncommitted; Git's own advice there names only `git add` and `git rm`. The hint after
   a stopped `revert` now also names `git dupe commit --allow-empty`, as the one after a
   stopped `cherry-pick` does.
+- The `hint:` after a rejected `git dupe push` given a repository now names that
+  repository, as `git dupe pull <remote> <branch>` and `git dupe fetch <remote>`, where
+  it named the plain `git dupe pull` and `git dupe fetch`, which take the branch's
+  upstream; on a branch with no commit yet, the hint naming
+  `git dupe push -u <remote> HEAD` now names `git dupe commit` first, because that push
+  has nothing to push before it; and that hint now also follows on a branch with
+  `branch.<name>.merge` set and no `branch.<name>.remote`, which Git's push counts as
+  having no upstream. A word holding `=`, as `--recurse-submodules=check`, is no longer
+  read as taking the next word as its value, so that
+  `git dupe push --recurse-submodules=check origin main` is read as Git reads it, given
+  the repository `origin`.
 - The `hint:` naming `git dupe branch -D` after a `git dupe branch -d` that refuses now
   also follows `--delete` abbreviated, as `--del`, and `d` in a bundle of short options,
   as `-vd`, where Git's own advice names plain `git branch -D`, which acts on the

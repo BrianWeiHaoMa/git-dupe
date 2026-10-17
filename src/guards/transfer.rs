@@ -7,21 +7,23 @@
 //! after a failed run (`Holds/G18`): whether `push` given no repository leaves the choice
 //! of a remote to Git, which remote it takes, whether a repository given with no refspec
 //! is the one Git's advice names a plain command for, whether a branch has an upstream,
-//! and whether `pull` is told how to reconcile divergent branches.
+//! whether that upstream has another name and `push.default` has Git refuse for it, and
+//! whether `pull` is told how to reconcile divergent branches.
 //!
 //! What the code below cannot show:
 //!
 //! - **Given no repository** is read from the words left to right, up to the first `--`
 //!   that is not presumed a value. A word that follows a dashed word other than one
-//!   `known` lists for the command is presumed that word's value and is read as nothing
-//!   else, a `--` and a `--repo` among them, because Git gives an option that requires a
-//!   value the next word whatever it is (S13). Whether a word is presumed a value is
-//!   decided by the word before it alone: a dashed word that is itself presumed a value
-//!   presumes the next one too. A known word is the word exactly as written: a letter in
-//!   a bundle, an abbreviation, a known word with a value after `=`, and a word of
-//!   another command's list are not known, so that the word after each is presumed its
-//!   value, as it is after a word a later Git adds. The default remote is then compared
-//!   where Git would not consult it: over-inclusive, which refuses and sends nothing.
+//!   `known` lists for the command, and other than one holding `=`, is presumed that
+//!   word's value and is read as nothing else, a `--` and a `--repo` among them, because
+//!   Git gives an option that requires a value the next word whatever it is, and none to
+//!   a word whose value is attached after its `=` (S13). Whether a word is presumed a
+//!   value is decided by the word before it alone: a dashed word that is itself presumed
+//!   a value presumes the next one too, unless it holds `=`. A known word is the word
+//!   exactly as written: a letter in a bundle, an abbreviation, and a word of another
+//!   command's list are not known, so that the word after each is presumed its value, as
+//!   it is after a word a later Git adds. The default remote is then compared where Git
+//!   would not consult it: over-inclusive, which refuses and sends nothing.
 //! - A repository is given by a word after that `--`; by a word before it that is not
 //!   dashed and not presumed a value; or, for `push`, by a `--repo` with a value,
 //!   attached or as the next word, that is not itself presumed a value, unless a later
@@ -33,6 +35,11 @@
 //!   later word that would give one, so that an option and a word presumed a value after
 //!   the repository word are not refspecs. The reading serves the hints alone: the
 //!   comparison of destinations takes every word whatever it is.
+//! - A branch has an upstream for `push` only while both `branch.<name>.remote` and
+//!   `branch.<name>.merge` are reported, and for `pull` while the second is (S13). Git
+//!   compares the raw value of the one `merge` with `refs/heads/<name>`, so a value
+//!   without that prefix names a branch of another name even where it spells the
+//!   branch's own.
 //! - A configuration key is matched as Git reads one: its section and variable without
 //!   regard to ASCII case, the name between them exactly. Every `url` and `pushurl`
 //!   record of every remote is a URL, whichever command runs, because Git pushes to every
@@ -198,8 +205,18 @@ pub enum Repository<'a> {
     Default,
     /// The repository word, with no refspec after it.
     Alone(&'a [u8]),
-    /// A repository with a refspec after it.
-    WithRefspec,
+    /// The repository word, with a refspec after it.
+    WithRefspec(&'a [u8]),
+}
+
+impl<'a> Repository<'a> {
+    /// The repository word given, with a refspec or without; `None` given no repository.
+    pub fn word(self) -> Option<&'a [u8]> {
+        match self {
+            Repository::Default => None,
+            Repository::Alone(word) | Repository::WithRefspec(word) => Some(word),
+        }
+    }
 }
 
 /// What `words`, those after the command, give `transfer` in place of the default remote.
@@ -211,7 +228,7 @@ pub fn repository<'a>(transfer: Transfer, words: &[&'a [u8]]) -> Repository<'a> 
     for (at, &word) in words.iter().enumerate() {
         let presumed = presumes_the_next;
         let dashed = word.starts_with(b"-");
-        presumes_the_next = dashed && !known.contains(&word);
+        presumes_the_next = dashed && !word.contains(&b'=') && !known.contains(&word);
         if transfer == Transfer::Push && clears_repo(word) {
             by_repo = None;
         }
@@ -222,12 +239,12 @@ pub fn repository<'a>(transfer: Transfer, words: &[&'a [u8]]) -> Repository<'a> 
             return match (first, &words[at + 1..]) {
                 (Some(word), &[]) | (None, &[word]) => Repository::Alone(word),
                 (None, &[]) => by_repo.map_or(Repository::Default, Repository::Alone),
-                _ => Repository::WithRefspec,
+                (Some(word), _) | (None, &[word, ..]) => Repository::WithRefspec(word),
             };
         }
         if !dashed {
-            if first.is_some() {
-                return Repository::WithRefspec;
+            if let Some(first) = first {
+                return Repository::WithRefspec(first);
             }
             first = Some(word);
         } else if transfer == Transfer::Push {
@@ -414,12 +431,57 @@ fn defines(key: &[u8], word: &[u8]) -> bool {
     })
 }
 
-/// Whether the configuration's `records` give `branch` an upstream: a
-/// `branch.<branch>.merge` reported, with a value or without.
-pub fn has_upstream(records: &[Record<'_>], branch: &[u8]) -> bool {
-    records
+/// Whether the configuration's `records` give `branch` an upstream for `transfer`: a
+/// `branch.<branch>.merge` reported, with a value or without, and, for `push`, a
+/// `branch.<branch>.remote` too, either of which unset `push` counts as none (S13).
+pub fn has_upstream(transfer: Transfer, records: &[Record<'_>], branch: &[u8]) -> bool {
+    let reported = |variable: &[u8]| {
+        records
+            .iter()
+            .any(|&(key, _)| is(key, b"branch", Some(branch), variable))
+    };
+    reported(b"merge") && (transfer != Transfer::Push || reported(b"remote"))
+}
+
+/// The upstream of `branch` for `push`, from the configuration's `records`, where its name
+/// is not the branch's own: the value of `branch.<branch>.remote`, and the one value of
+/// `branch.<branch>.merge`, other than `refs/heads/<branch>`, as Git compares them (S13).
+/// `None` where `push` counts no upstream, and where `merge` has several records, for
+/// which Git refuses naming no command, or one without a value, which it cannot read.
+pub fn upstream_of_another_name<'a>(records: &[Record<'a>], branch: &[u8]) -> Option<Upstream<'a>> {
+    if !has_upstream(Transfer::Push, records, branch) {
+        return None;
+    }
+    let mut merges = records
         .iter()
-        .any(|&(key, _)| is(key, b"branch", Some(branch), b"merge"))
+        .filter(|&&(key, _)| is(key, b"branch", Some(branch), b"merge"));
+    let (Some(&(_, Some(merge))), None) = (merges.next(), merges.next()) else {
+        return None;
+    };
+    let own = [&b"refs/heads/"[..], branch].concat();
+    let remote = last(records, b"branch", Some(branch), b"remote")?.value;
+    (merge != own).then_some(Upstream { remote, merge })
+}
+
+/// A branch's upstream as `push` reads it: the remote, and the raw value of `merge`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Upstream<'a> {
+    pub remote: &'a [u8],
+    pub merge: &'a [u8],
+}
+
+/// Whether the configuration's `records` leave `push.default` unset or `simple`, under
+/// which `push` refuses to push a branch to an upstream of another name (S13): its last
+/// record, whose value Git reads exactly; a record without a value is neither.
+pub fn push_default_is_simple(records: &[Record<'_>]) -> bool {
+    match records
+        .iter()
+        .rev()
+        .find(|&&(key, _)| is(key, b"push", None, b"default"))
+    {
+        None => true,
+        Some(&(_, value)) => value == Some(b"simple"),
+    }
 }
 
 /// Where `HEAD` stands for `pull`, whose `branch.<name>.rebase` is that of the branch it

@@ -11,11 +11,13 @@
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, Transfer, hinted, holds, private_add, private_commit, text,
-    under_each_release, unhinted, without_maintenance, write, write_executable,
+    End, Output, Scenario, commit_here, committing, diverged, hinted, holds,
+    succeeded_without_a_hint, text, under_each_release, unhinted, without_maintenance, write,
+    write_executable,
 };
 
 const UPSTREAM: &[u8] = b"'git dupe push -u origin HEAD'";
+const DETACHED: &[u8] = b"'git dupe push origin HEAD:<branch>'";
 const REJECTED: [&[u8]; 2] = [b"'git dupe pull'", b"'git dupe fetch'"];
 const NOT_TRACKING: [&[u8]; 2] = [
     b"'git dupe pull <remote> <branch>'",
@@ -28,71 +30,6 @@ fn dupe(s: &Scenario, root: &Path, words: &[&str]) -> Output {
     s.git(["dupe"].into_iter().chain(words.iter().copied()))
         .from(root)
         .succeeds()
-}
-
-/// `output` ended with status 0 and holds nothing of git-dupe's: no line of Git's names
-/// `git dupe`.
-fn succeeded_without_a_hint(output: &Output) {
-    assert_eq!(output.end, End::Code(0), "{output:?}");
-    assert!(!holds(&output.stderr, b"git dupe"), "{output:?}");
-}
-
-/// The private configuration a merge needs: an identity, and no maintenance left running.
-fn committing(s: &Scenario, root: &Path) {
-    for (key, value) in [
-        ("user.name", "Scenario"),
-        ("user.email", "scenario@example.invalid"),
-        ("maintenance.auto", "false"),
-    ] {
-        dupe(s, root, &["config", key, value]);
-    }
-}
-
-/// A private commit of a new file `notes/<name>.md`.
-fn commit_here(s: &Scenario, root: &Path, name: &str) {
-    let path = format!("notes/{name}.md");
-    write(root, &path, b"here\n");
-    private_add(s, root, &path);
-    private_commit(s, root);
-}
-
-/// A teammate's clone of the private remote commits `notes/<name>.md` and pushes it, so
-/// that the remote's `main` moves on.
-fn remote_moves_on(s: &Scenario, t: &Transfer, name: &str) {
-    let teammate = s.dir().join(format!("teammate-{name}"));
-    s.git([
-        "clone",
-        "-q",
-        "-b",
-        "main",
-        text(&t.private_remote),
-        text(&teammate),
-    ])
-    .succeeds();
-    write(&teammate, &format!("notes/{name}.md"), b"there\n");
-    let identity = [
-        "-c",
-        "user.name=Teammate",
-        "-c",
-        "user.email=teammate@example.invalid",
-        "-c",
-        "maintenance.auto=false",
-    ];
-    for words in [
-        &["add", "notes"][..],
-        &["commit", "-qm", name],
-        &["push", "-q"],
-    ] {
-        s.git(identity.iter().chain(words))
-            .from(&teammate)
-            .succeeds();
-    }
-}
-
-/// The remote's `main` and the private `main` each hold a commit the other lacks.
-fn diverged(s: &Scenario, t: &Transfer, name: &str) {
-    remote_moves_on(s, t, &format!("{name}-there"));
-    commit_here(s, &t.root, &format!("{name}-here"));
 }
 
 #[test]
@@ -142,9 +79,11 @@ fn a_push_on_a_branch_with_no_upstream_names_push_u_with_the_remote_git_takes() 
             .succeeds();
         assert_eq!(merge.stdout, b"refs/heads/main\n");
         assert_eq!(unhinted(s, root, &["push"]).end, End::Code(0));
-        // On a detached `HEAD` no branch lacks an upstream.
+        // On a detached `HEAD` no branch lacks an upstream: the detached hint instead.
         dupe(s, root, &["checkout", "-q", "--detach"]);
-        assert_eq!(unhinted(s, root, &["push"]).end, End::Code(128));
+        let ours = hinted(s, root, &["push"], &[DETACHED]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        assert!(!holds(&ours.stderr, UPSTREAM), "{ours:?}");
     });
 }
 
@@ -209,7 +148,9 @@ fn a_push_given_the_branchs_remote_and_no_refspec_names_push_u_with_it() {
         succeeded_without_a_hint(&output);
         assert_eq!(unhinted(s, root, &["push", "origin"]).end, End::Code(0));
         dupe(s, root, &["checkout", "-q", "--detach"]);
-        assert_eq!(unhinted(s, root, &["push", "origin"]).end, End::Code(128));
+        let ours = hinted(s, root, &["push", "origin"], &[DETACHED]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        assert!(!holds(&ours.stderr, UPSTREAM), "{ours:?}");
     });
 }
 
@@ -338,10 +279,15 @@ fn a_rejected_push_names_pull_and_fetch() {
         let root = &t.root;
         committing(s, root);
         diverged(s, &t, "first");
-        for words in [&["push"][..], &["push", "origin", "main"]] {
-            let ours = hinted(s, root, words, &REJECTED);
-            assert_eq!(ours.end, End::Code(1), "{words:?}: {ours:?}");
-        }
+        let ours = hinted(s, root, &["push"], &REJECTED);
+        assert_eq!(ours.end, End::Code(1), "{ours:?}");
+        // Given a repository, the hint names it, the destination that rejected the push.
+        let named = [
+            &b"'git dupe pull origin <branch>'"[..],
+            b"'git dupe fetch origin'",
+        ];
+        let ours = hinted(s, root, &["push", "origin", "main"], &named);
+        assert_eq!(ours.end, End::Code(1), "{ours:?}");
         // A help request, or a `--help` Git takes as the value of `-o`.
         for words in [&["push", "-h"][..], &["push", "-o", "--help"]] {
             unhinted(s, root, words);

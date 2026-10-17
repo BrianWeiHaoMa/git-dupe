@@ -34,8 +34,8 @@ mod watched_runs;
 mod worktrees;
 
 pub use advice::{
-    IGNORED_HINT, STOPPED_REBASE_HINT, asked_after, gits_then_one_hint, hinted, unhinted,
-    without_maintenance,
+    IGNORED_HINT, STOPPED_REBASE_HINT, asked_after, gits_then_one_hint, hinted,
+    succeeded_without_a_hint, unhinted, without_maintenance,
 };
 pub use aliases::{global_alias, private_alias};
 pub use attached::{
@@ -71,7 +71,10 @@ pub use public::{
 };
 pub use release_archive::{install_note, note_commands, release_archive};
 pub use releases::oldest_supported;
-pub use remotes::{Everything, MANY_URLS, PROJECT_URL, SecondMachine, Transfer, dupe_clone};
+pub use remotes::{
+    Everything, MANY_URLS, PROJECT_URL, SecondMachine, Transfer, commit_here, committing, diverged,
+    dupe_clone,
+};
 pub use repository::locate_words;
 pub use scenario::{Scenario, report, under_each_release};
 pub use stash::{refused_stash_untracked, stash_refusal_first, stash_untracked_line};

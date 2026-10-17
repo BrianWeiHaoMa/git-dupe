@@ -29,7 +29,8 @@ back with conflicts, a cherry-pick or revert without -n that stops, a commit
 that refuses while a cherry-pick or revert is stopped, a commit --amend that
 refuses, as one that would leave the commit empty does, a checkout or switch
 that detaches HEAD, a branch -d that refuses, a push or pull on a branch with
-no upstream, a rejected push, a pull that cannot reconcile divergent
+no upstream, a push to an upstream of another name than the branch's, a push
+from a detached HEAD, a rejected push, a pull that cannot reconcile divergent
 branches, and an add of a path the private repository ignores, git-dupe
 follows Git's output with a hint that names the git dupe form, such as git
 dupe rebase --continue, git dupe push -u origin HEAD, or git dupe config

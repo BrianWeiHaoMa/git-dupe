@@ -9,7 +9,8 @@ use std::ffi::OsStr;
 use std::iter;
 use std::path::{Path, PathBuf};
 
-use super::attached::daily_state;
+use super::attached::{daily_state, private_add, private_commit};
+use super::files::{text, write};
 use super::output::{End, Output};
 use super::scenario::Scenario;
 use super::tree::Tree;
@@ -92,6 +93,66 @@ impl Scenario {
         }
         transfer
     }
+}
+
+/// The private configuration a merge needs in the workspace at `root`: an identity, and no
+/// maintenance left running.
+pub fn committing(s: &Scenario, root: &Path) {
+    for (key, value) in [
+        ("user.name", "Scenario"),
+        ("user.email", "scenario@example.invalid"),
+        ("maintenance.auto", "false"),
+    ] {
+        s.git(["dupe", "config", key, value]).from(root).succeeds();
+    }
+}
+
+/// A private commit of a new file `notes/<name>.md` in the workspace at `root`.
+pub fn commit_here(s: &Scenario, root: &Path, name: &str) {
+    let path = format!("notes/{name}.md");
+    write(root, &path, b"here\n");
+    private_add(s, root, &path);
+    private_commit(s, root);
+}
+
+/// A teammate's clone of the private remote commits `notes/<name>.md` and pushes it, so
+/// that the remote's `main` moves on.
+pub fn remote_moves_on(s: &Scenario, t: &Transfer, name: &str) {
+    let teammate = s.dir().join(format!("teammate-{name}"));
+    s.git([
+        "clone",
+        "-q",
+        "-b",
+        "main",
+        text(&t.private_remote),
+        text(&teammate),
+    ])
+    .succeeds();
+    write(&teammate, &format!("notes/{name}.md"), b"there\n");
+    let identity = [
+        "-c",
+        "user.name=Teammate",
+        "-c",
+        "user.email=teammate@example.invalid",
+        "-c",
+        "maintenance.auto=false",
+    ];
+    for words in [
+        &["add", "notes"][..],
+        &["commit", "-qm", name],
+        &["push", "-q"],
+    ] {
+        s.git(identity.iter().chain(words))
+            .from(&teammate)
+            .succeeds();
+    }
+}
+
+/// The remote's `main` and the private `main` of the workspace `t` each hold a commit the
+/// other lacks.
+pub fn diverged(s: &Scenario, t: &Transfer, name: &str) {
+    remote_moves_on(s, t, &format!("{name}-there"));
+    commit_here(s, &t.root, &format!("{name}-here"));
 }
 
 /// A second machine of the project: beside a pushed workspace, the first machine, a second,

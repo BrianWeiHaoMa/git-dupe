@@ -4,55 +4,118 @@ fn git(code: u8) -> Outcome {
     Outcome::Git(End::Code(code))
 }
 
-fn upstream(remote: &str) -> Upstream {
-    upstream_of(remote.as_bytes())
+fn push(refused: Option<Refused>, given: Option<&str>) -> Then {
+    Then::Push {
+        refused,
+        given: given.map(|given| given.as_bytes().to_vec()),
+    }
 }
 
-fn upstream_of(remote: &[u8]) -> Upstream {
-    Upstream {
-        remote: remote.to_vec(),
-    }
+fn origin() -> Vec<u8> {
+    b"origin".to_vec()
+}
+
+/// The hint, where no question may be asked.
+fn unasked(then: &Then, ended: &Outcome) -> Option<Vec<u8>> {
+    hint(then, ended, || panic!("asked for {then:?}"))
+}
+
+/// The hint, where the question is asked once and answers `answer`.
+fn answered(then: &Then, ended: &Outcome, answer: Answer) -> Option<Vec<u8>> {
+    let mut asked = 0;
+    let hint = hint(then, ended, || {
+        asked += 1;
+        answer
+    });
+    assert_eq!(asked, 1, "{then:?}");
+    hint
 }
 
 #[test]
 fn the_no_remote_hint_follows_a_run_that_did_not_exit_0() {
     let then = Then::NoRemoteChosen;
-    assert_eq!(hint(&then, &git(0)), None);
+    assert_eq!(unasked(&then, &git(0)), None);
     for ended in [git(128), git(1), Outcome::Git(End::Signal(9))] {
-        assert_eq!(hint(&then, &ended).as_deref(), Some(NO_REMOTE_CHOSEN));
+        assert_eq!(unasked(&then, &ended).as_deref(), Some(NO_REMOTE_CHOSEN));
     }
     // A run that did not start, or a refusal, is no run.
-    assert_eq!(hint(&then, &Outcome::Refused), None);
+    assert_eq!(unasked(&then, &Outcome::Refused), None);
     for ended in [git(0), git(1), git(128), Outcome::Git(End::Signal(9))] {
-        assert_eq!(hint(&Then::Nothing, &ended), None);
+        assert_eq!(unasked(&Then::Nothing, &ended), None);
     }
 }
 
+/// After 128, the hint for what Git refused the push for, `HEAD` asked about only for a
+/// branch with no upstream; after 1, the rejected hint naming the destination given; after
+/// any other end, none, and no question (G22).
 #[test]
-fn a_push_hints_at_the_upstream_after_128_and_at_a_rejection_after_1() {
-    let without = Then::Push(Some(upstream("origin")));
-    let upstream_hint = hint(&without, &git(128)).unwrap();
-    assert!(
-        upstream_hint.starts_with(b"the current private branch has no upstream"),
-        "{}",
-        upstream_hint.escape_ascii()
-    );
-    for then in [&without, &Then::Push(None)] {
-        assert_eq!(hint(then, &git(1)).as_deref(), Some(REJECTED));
-        for ended in [
-            git(0),
-            git(129),
-            Outcome::Git(End::Signal(1)),
-            Outcome::Refused,
-        ] {
-            assert_eq!(hint(then, &ended), None, "{then:?}");
+fn each_push_hint_follows_its_end_and_asks_only_where_the_upstream_hint_is_due() {
+    let no_upstream_given = |given| push(Some(Refused::NoUpstream { remote: origin() }), given);
+    for given in [None, Some("origin")] {
+        let then = no_upstream_given(given);
+        assert_eq!(
+            answered(&then, &git(128), Answer::Yes),
+            Some(no_upstream(b"origin"))
+        );
+        assert_eq!(
+            answered(&then, &git(128), Answer::No),
+            Some(unborn(b"origin"))
+        );
+        // A question that answers neither gives no hint, and no other hint follows.
+        assert_eq!(answered(&then, &git(128), Answer::Unanswered), None);
+    }
+    let other_name = Refused::OtherName {
+        remote: origin(),
+        merge: b"refs/heads/main".to_vec(),
+    };
+    let detached = Refused::Detached {
+        remote: b"backup".to_vec(),
+    };
+    for (refused, after_128) in [
+        (
+            Some(other_name.clone()),
+            Some(super::other_name(b"origin", b"refs/heads/main")),
+        ),
+        (Some(detached.clone()), Some(super::detached(b"backup"))),
+        (None, None),
+    ] {
+        for given in [None, Some("origin")] {
+            let then = push(refused.clone(), given);
+            assert_eq!(unasked(&then, &git(128)), after_128, "{then:?}");
         }
     }
-    // Given a repository, or detached, a push owes no upstream hint after 128.
-    assert_eq!(hint(&Then::Push(None), &git(128)), None);
+    for refused in [
+        None,
+        Some(Refused::NoUpstream { remote: origin() }),
+        Some(other_name),
+        Some(detached),
+    ] {
+        let given_none = push(refused.clone(), None);
+        assert_eq!(
+            unasked(&given_none, &git(1)).as_deref(),
+            Some(hints::REJECTED)
+        );
+        let given = push(refused.clone(), Some("backup"));
+        assert_eq!(unasked(&given, &git(1)), Some(rejected(Some(b"backup"))));
+        for then in [&given_none, &given] {
+            for (at, ended) in [
+                git(0),
+                git(129),
+                git(2),
+                Outcome::Git(End::Signal(1)),
+                Outcome::Git(End::Signal(128)),
+                Outcome::Refused,
+            ]
+            .iter()
+            .enumerate()
+            {
+                assert_eq!(unasked(then, ended), None, "{then:?} after end {at}");
+            }
+        }
+    }
     // The no-remote hint and the rejected one are never both owed.
     assert_eq!(
-        hint(&Then::NoRemoteChosen, &git(1)).as_deref(),
+        unasked(&Then::NoRemoteChosen, &git(1)).as_deref(),
         Some(NO_REMOTE_CHOSEN)
     );
 }
@@ -66,12 +129,12 @@ fn a_pull_hints_at_its_upstream_first_and_at_reconciling_after_128_alone() {
     for unreconciled in [false, true] {
         let then = pull(true, unreconciled);
         for ended in [git(1), git(128), Outcome::Git(End::Signal(2))] {
-            assert_eq!(hint(&then, &ended).as_deref(), Some(NOT_TRACKING));
+            assert_eq!(unasked(&then, &ended).as_deref(), Some(NOT_TRACKING));
         }
-        assert_eq!(hint(&then, &git(0)), None);
+        assert_eq!(unasked(&then, &git(0)), None);
     }
     assert_eq!(
-        hint(&pull(false, true), &git(128)).as_deref(),
+        unasked(&pull(false, true), &git(128)).as_deref(),
         Some(UNRECONCILED)
     );
     for ended in [
@@ -80,87 +143,9 @@ fn a_pull_hints_at_its_upstream_first_and_at_reconciling_after_128_alone() {
         Outcome::Git(End::Signal(128)),
         Outcome::Refused,
     ] {
-        assert_eq!(hint(&pull(false, true), &ended), None);
+        assert_eq!(unasked(&pull(false, true), &ended), None);
     }
-    assert_eq!(hint(&pull(false, false), &git(128)), None);
-}
-
-#[test]
-fn the_upstream_hint_names_the_remote_as_a_shell_reads_it_back_and_head() {
-    let named = |remote: &[u8]| no_upstream(&upstream_of(remote));
-    for (remote, command) in [
-        (&b"origin"[..], &b"'git dupe push -u origin HEAD'"[..]),
-        (
-            b"/srv/private.git",
-            b"'git dupe push -u /srv/private.git HEAD'",
-        ),
-        (
-            b"git@host:me/p.git",
-            b"'git dupe push -u git@host:me/p.git HEAD'",
-        ),
-        // `push` reads a first word that is no option as the repository, `+` and all.
-        (b"+backup", b"'git dupe push -u +backup HEAD'"),
-        // A byte above ASCII is no shell's concern.
-        (
-            "caf\u{e9}".as_bytes(),
-            "'git dupe push -u caf\u{e9} HEAD'".as_bytes(),
-        ),
-        // Quoted where a shell would read a byte otherwise.
-        (b"my remote", b"'git dupe push -u \"my remote\" HEAD'"),
-        (b"it's", b"'git dupe push -u \"it's\" HEAD'"),
-        (b"$HOME", b"'git dupe push -u \"\\$HOME\" HEAD'"),
-        // Empty, read as an option, or breaking the line: the placeholder.
-        (b"", b"'git dupe push -u <remote> HEAD'"),
-        (b"-x", b"'git dupe push -u <remote> HEAD'"),
-        (b"a\nb", b"'git dupe push -u <remote> HEAD'"),
-    ] {
-        let line = named(remote);
-        assert!(
-            line.windows(command.len()).any(|window| window == command),
-            "{}: {}",
-            line.escape_ascii(),
-            command.escape_ascii()
-        );
-    }
-}
-
-#[test]
-fn each_hint_is_one_line_naming_the_git_dupe_commands_and_the_plain_ones() {
-    let upstream = no_upstream(&upstream("origin"));
-    for (hint, parts) in [
-        (
-            &upstream[..],
-            &["'git dupe push -u origin HEAD'", "plain 'git push'"][..],
-        ),
-        (
-            REJECTED,
-            &["'git dupe pull'", "'git dupe fetch'", "plain 'git pull'"],
-        ),
-        (
-            NOT_TRACKING,
-            &[
-                "'git dupe pull <remote> <branch>'",
-                "'git dupe branch --set-upstream-to=<remote>/<branch>'",
-                "plain 'git pull' and 'git branch'",
-            ],
-        ),
-        (
-            UNRECONCILED,
-            &[
-                "'git dupe config pull.rebase false'",
-                "'git dupe config pull.rebase true'",
-                "'git dupe config pull.ff only'",
-                "plain 'git config'",
-            ],
-        ),
-    ] {
-        let hint = String::from_utf8(hint.to_vec()).unwrap();
-        for part in parts {
-            assert!(hint.contains(part), "{hint}: {part}");
-        }
-        assert!(hint.contains("the project's repository"), "{hint}");
-        assert!(!hint.contains('\n'), "{hint}");
-    }
+    assert_eq!(unasked(&pull(false, false), &git(128)), None);
 }
 
 #[test]
@@ -188,23 +173,4 @@ fn the_reconciling_words_are_read_exactly() {
     ] {
         assert!(!reconciling(word.as_bytes()), "{word}");
     }
-}
-
-#[test]
-fn the_hint_names_the_git_dupe_commands_and_never_says_no_remote_exists() {
-    let hint = String::from_utf8(NO_REMOTE_CHOSEN.to_vec()).unwrap();
-    assert!(
-        hint.contains("'git dupe remote add <name> <url>'"),
-        "{hint}"
-    );
-    assert!(
-        hint.contains("'git dupe push -u <name> <branch>'"),
-        "{hint}"
-    );
-    assert!(
-        hint.find("git dupe remote add") < hint.find("git dupe push -u"),
-        "{hint}"
-    );
-    assert!(!hint.contains("no remote"), "{hint}");
-    assert!(!hint.contains('\n'), "{hint}");
 }

@@ -11,8 +11,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Runs, Scenario, Transfer, hinted, holds, run_traced, text, under_each_release, unhinted,
-    without_maintenance,
+    End, Runs, Scenario, Transfer, hinted, holds, run_traced, run_words, text, under_each_release,
+    unhinted, without_maintenance,
 };
 
 /// The words of the hint that no line of Git's holds.
@@ -150,11 +150,11 @@ fn the_hint_follows_whichever_remote_git_takes_and_no_chosen_one() {
             config(s, &t, &[key, "backup"]);
             upstream_hinted(s, root, &["push"], "backup");
             if key == "branch.main.pushRemote" {
-                // The runs of a push owed the hint are those of one owed none, the
-                // sequence of a transfer command given no repository (G22).
+                // The runs of a push owed this hint are the sequence of a transfer command
+                // given no repository; one owed the upstream hint also asks, after its
+                // run, whether `HEAD` names a commit (G22).
                 let (output, choosing) = run_traced(s.git(words).from(root), &trace);
                 assert!(!holds(&output.stderr, HINT), "{output:?}");
-                assert_eq!(commands(&hinting), commands(&choosing));
                 let sequence = [
                     "rev-parse",
                     "config",
@@ -167,6 +167,14 @@ fn the_hint_follows_whichever_remote_git_takes_and_no_chosen_one() {
                     "check-ignore",
                 ];
                 assert_eq!(commands(&hinting), sequence);
+                let mut asking = sequence.to_vec();
+                asking.insert(6, "rev-parse");
+                assert_eq!(commands(&choosing), asking);
+                let own = choosing.own();
+                assert_eq!(
+                    own.words()[6],
+                    run_words(&["rev-parse", "-q", "--verify", "HEAD"])
+                );
             }
             config(s, &t, &["--unset", key]);
         }

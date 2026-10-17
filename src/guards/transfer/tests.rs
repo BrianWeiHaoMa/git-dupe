@@ -68,9 +68,6 @@ fn a_word_after_a_dashed_word_not_known_is_its_value_whatever_it_is() {
         "--repo=origin --no-r",
         "--repo origin --no-repo",
         "--repo=origin -o --no-repo",
-        // The `--` after `--repo=origin` is presumed its value, so a `--no-repo` after
-        // it is a later word that clears it, where Git reads a refspec.
-        "--repo=origin -- --no-repo",
         // `--no-repo` is not known, so the `--repo` after it is presumed its value.
         "--no-repo --repo=origin",
         // A dashed word presumed a value presumes the next.
@@ -145,28 +142,52 @@ fn the_repository_word_stands_alone_until_a_refspec_follows_it() {
         ("--repo origin backup", "backup"),
         ("backup --repo=origin", "backup"),
         // A word presumed a value is no refspec.
-        ("--repo=origin main", "origin"),
+        ("-o main origin", "origin"),
+        // A word holding `=` takes its value attached and no next word, so the word after
+        // it is the repository, as Git takes it whatever the `--repo` before it said.
+        ("--repo=origin main", "main"),
+        ("--recurse-submodules=check origin", "origin"),
+        ("-o=ci.skip origin", "origin"),
+        ("-o --force-with-lease=main origin", "origin"),
+        // After a `--` that is no value, the first word, whatever it spells.
+        ("--repo=origin -- --no-repo", "--no-repo"),
     ] {
         let expected = Repository::Alone(word.as_bytes());
         assert_eq!(read(Transfer::Push, words), expected, "push {words}");
     }
-    for words in [
-        "origin main",
-        "origin HEAD",
-        "-- origin main",
-        "origin -- main",
+    // With a refspec after it, the repository word is still the one Git pushes to.
+    for (words, word) in [
+        ("origin main", "origin"),
+        ("origin HEAD", "origin"),
+        ("-- origin main", "origin"),
+        ("origin -- main", "origin"),
+        ("--all origin main", "origin"),
+        ("--repo=backup origin main", "origin"),
+        ("--recurse-submodules=check origin main", "origin"),
+        ("-v -- backup main dest", "backup"),
     ] {
-        assert_eq!(
-            read(Transfer::Push, words),
-            Repository::WithRefspec,
-            "push {words}"
-        );
+        let expected = Repository::WithRefspec(word.as_bytes());
+        assert_eq!(read(Transfer::Push, words), expected, "push {words}");
+        assert_eq!(expected.word(), Some(word.as_bytes()));
+    }
+    for words in ["origin main", "-- origin main", "origin -- main"] {
         assert_eq!(
             read(Transfer::Pull, words),
-            Repository::WithRefspec,
+            Repository::WithRefspec(b"origin"),
             "pull {words}"
         );
     }
+    // Without `=`, a word not known still takes the next as its value.
+    assert_eq!(
+        read(Transfer::Push, "--recurse-submodules origin main"),
+        Repository::Alone(b"main")
+    );
+    assert_eq!(
+        read(Transfer::Push, "--all origin"),
+        Repository::Alone(b"origin")
+    );
+    assert_eq!(Repository::Alone(b"origin").word(), Some(&b"origin"[..]));
+    assert_eq!(Repository::Default.word(), None);
     for words in ["origin", "--rebase origin", "origin -v", "--jobs 1 origin"] {
         assert_eq!(
             read(Transfer::Pull, words),
@@ -568,26 +589,140 @@ fn push_takes_the_remote_of_its_first_key_reported_and_otherwise_origin() {
 }
 
 #[test]
-fn a_branch_has_an_upstream_while_its_merge_key_is_reported() {
-    let has = |listing: &[(&str, Option<&str>)], branch: &str| {
-        has_upstream(&records(listing), branch.as_bytes())
+fn a_branch_has_an_upstream_while_its_merge_key_and_for_push_its_remote_are_reported() {
+    let has = |transfer, listing: &[(&str, Option<&str>)], branch: &str| {
+        has_upstream(transfer, &records(listing), branch.as_bytes())
     };
-    for listing in [
-        &[("branch.main.merge", Some("refs/heads/main"))][..],
-        &[("BRANCH.main.MERGE", Some("refs/heads/main"))],
-        &[("branch.main.merge", None)],
+    let remote = ("branch.main.remote", Some("origin"));
+    for merge in [
+        ("branch.main.merge", Some("refs/heads/main")),
+        ("BRANCH.main.MERGE", Some("refs/heads/main")),
+        ("branch.main.merge", None),
     ] {
-        assert!(has(listing, "main"), "{listing:?}");
+        assert!(has(Transfer::Pull, &[merge], "main"), "{merge:?}");
+        assert!(has(Transfer::Push, &[merge, remote], "main"), "{merge:?}");
+        assert!(has(Transfer::Push, &[remote, merge], "main"), "{merge:?}");
+        assert!(
+            has(
+                Transfer::Push,
+                &[merge, ("BRANCH.main.REMOTE", None)],
+                "main"
+            ),
+            "{merge:?}"
+        );
+        // `push` counts no upstream while either key is unset, where `pull` reads `merge`.
+        assert!(!has(Transfer::Push, &[merge], "main"), "{merge:?}");
+        assert!(
+            !has(
+                Transfer::Push,
+                &[merge, ("branch.other.remote", Some("origin"))],
+                "main"
+            ),
+            "{merge:?}"
+        );
     }
     for listing in [
         &[][..],
-        &[("branch.main.remote", Some("origin"))],
-        &[("branch.Main.merge", Some("refs/heads/main"))],
-        &[("branch.other.merge", Some("refs/heads/main"))],
-        &[("branch.merge", Some("refs/heads/main"))],
-        &[("branch.main.merge.x", Some("refs/heads/main"))],
+        &[remote],
+        &[("branch.Main.merge", Some("refs/heads/main")), remote],
+        &[("branch.other.merge", Some("refs/heads/main")), remote],
+        &[("branch.merge", Some("refs/heads/main")), remote],
+        &[("branch.main.merge.x", Some("refs/heads/main")), remote],
     ] {
-        assert!(!has(listing, "main"), "{listing:?}");
+        for transfer in [Transfer::Push, Transfer::Pull] {
+            assert!(!has(transfer, listing, "main"), "{transfer:?} {listing:?}");
+        }
+    }
+}
+
+/// Git compares the raw value of the one `merge` with `refs/heads/<name>`, and names the
+/// remote of `branch.<name>.remote` (S13).
+#[test]
+fn an_upstream_of_another_name_is_the_one_merge_value_other_than_the_branchs_ref() {
+    let upstream = |listing: &[(&str, Option<&str>)]| {
+        upstream_of_another_name(&records(listing), b"topic")
+            .map(|upstream| (upstream.remote.to_vec(), upstream.merge.to_vec()))
+    };
+    let remote = ("branch.topic.remote", Some("origin"));
+    for (merge, expected) in [
+        ("refs/heads/main", "refs/heads/main"),
+        // Without the prefix, the branch's own name is another to Git.
+        ("topic", "topic"),
+        ("refs/tags/topic", "refs/tags/topic"),
+        ("refs/heads/Topic", "refs/heads/Topic"),
+    ] {
+        let found = upstream(&[remote, ("branch.topic.merge", Some(merge))]);
+        assert_eq!(
+            found,
+            Some((b"origin".to_vec(), expected.as_bytes().to_vec())),
+            "{merge}"
+        );
+    }
+    // The remote is the last record's, as Git reads it.
+    let found = upstream(&[
+        remote,
+        ("branch.topic.merge", Some("refs/heads/main")),
+        ("branch.topic.remote", Some("backup")),
+    ]);
+    assert_eq!(found.map(|(remote, _)| remote), Some(b"backup".to_vec()));
+    for listing in [
+        // The branch's own ref: an upstream of its name.
+        &[remote, ("branch.topic.merge", Some("refs/heads/topic"))][..],
+        // No upstream for `push`: the no-upstream hint's, not this one's.
+        &[("branch.topic.merge", Some("refs/heads/main"))],
+        &[remote],
+        // Several values, which Git refuses naming no command; one it cannot read.
+        &[
+            remote,
+            ("branch.topic.merge", Some("refs/heads/main")),
+            ("branch.topic.merge", Some("refs/heads/other")),
+        ],
+        &[
+            remote,
+            ("branch.topic.merge", Some("refs/heads/main")),
+            ("branch.topic.merge", None),
+        ],
+        &[remote, ("branch.topic.merge", None)],
+        // Another branch's keys.
+        &[
+            ("branch.main.remote", Some("origin")),
+            ("branch.main.merge", Some("refs/heads/other")),
+        ],
+    ] {
+        assert_eq!(upstream(listing), None, "{listing:?}");
+    }
+}
+
+#[test]
+fn push_default_is_simple_while_unset_or_its_last_record_says_simple_exactly() {
+    let simple = |listing: &[(&str, Option<&str>)]| push_default_is_simple(&records(listing));
+    for listing in [
+        &[][..],
+        &[("push.default", Some("simple"))],
+        &[("PUSH.Default", Some("simple"))],
+        &[
+            ("push.default", Some("current")),
+            ("push.default", Some("simple")),
+        ],
+        &[("push.autoSetupRemote", Some("true"))],
+        &[("remote.push.default", Some("current"))],
+    ] {
+        assert!(simple(listing), "{listing:?}");
+    }
+    for listing in [
+        &[("push.default", Some("current"))][..],
+        &[("push.default", Some("upstream"))],
+        &[("push.default", Some("tracking"))],
+        &[("push.default", Some("matching"))],
+        &[("push.default", Some("nothing"))],
+        &[("push.default", Some("Simple"))],
+        &[("push.default", None)],
+        &[
+            ("push.default", Some("simple")),
+            ("push.default", Some("current")),
+        ],
+    ] {
+        assert!(!simple(listing), "{listing:?}");
     }
 }
 

@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::files::copy;
 use super::fresh::FreshDirectory;
-use super::output::{End, Output, names};
+use super::output::{End, Output, holds, names};
 use super::scenario::{Git, Scenario};
 use super::trace::{run_traced, run_words};
 use super::tree::Tree;
@@ -165,6 +165,13 @@ pub fn unhinted(s: &Scenario, root: &Path, words: &[&str]) -> Output {
     let (ours, gits) = ours_and_gits(s, root, words);
     assert_eq!(ours, gits, "{words:?}");
     ours
+}
+
+/// `output` ended with status 0 and holds nothing of git-dupe's: no line of Git's names
+/// `git dupe`.
+pub fn succeeded_without_a_hint(output: &Output) {
+    assert_eq!(output.end, End::Code(0), "{output:?}");
+    assert!(!holds(&output.stderr, b"git dupe"), "{output:?}");
 }
 
 /// `git dupe <words>` from the root of the workspace at `root`, `words` beginning with a

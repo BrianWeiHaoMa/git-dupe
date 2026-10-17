@@ -16,10 +16,11 @@
 //!   nothing (G20). Settle is not their business: each returns into the sequence, which
 //!   settles. Of git-dupe's own lines only a hint may follow the run, before settle's
 //!   warnings, where Git's advice for the outcome names a plain `git` command: after a
-//!   `push` or `pull`, decided from the guard's records (`transfer`), and after a word
-//!   passed through (`advice`), which reads the words Git runs for its help request, an
-//!   alias's expansion included, and asks nothing where no private repository stands;
-//!   never after `stash` or `git dupe git` (G20).
+//!   `push` or `pull`, decided from the guard's records and the private repository's
+//!   state (`transfer`), and after a word passed through (`advice`), which reads the
+//!   words Git runs for its help request, an alias's expansion included, and asks
+//!   nothing where no private repository stands; never after `stash` or `git dupe git`
+//!   (G20).
 //! - Where no workspace is attached, a help request after a word passed through, after
 //!   `stash`, or after one of the four is the only thing that runs, unread, after the
 //!   same guard (`Holds/G24`). The four's guard compares there too, from the facts of
@@ -67,7 +68,7 @@ impl Passed<'_> {
                     Some(Err(ended)) => ended,
                     Some(Ok(then)) => {
                         let ended = run(against, words);
-                        transfer::after(then, &ended);
+                        transfer::after(then, &ended, against);
                         ended
                     }
                     None => run(against, words),
