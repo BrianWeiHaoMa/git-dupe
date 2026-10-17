@@ -10,16 +10,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Scenario, global_alias, hinted, holds, private_add, private_alias, private_commit,
-    run_traced, text, under_each_release, unhinted, write, write_executable,
+    End, STOPPED_REBASE_HINT as REBASE, Scenario, global_alias, hinted, holds, private_add,
+    private_alias, private_commit, run_traced, text, under_each_release, unhinted, write,
+    write_executable,
 };
-
-const REBASE: [&[u8]; 4] = [
-    b"'git dupe add <path>'",
-    b"'git dupe rebase --continue'",
-    b"'git dupe rebase --skip'",
-    b"'git dupe rebase --abort'",
-];
 
 const AM: [&[u8]; 4] = [
     b"'git dupe add <path>'",
@@ -36,8 +30,9 @@ const CHERRY_PICK: [&[u8]; 5] = [
     b"'git dupe cherry-pick --abort'",
 ];
 
-const REVERT: [&[u8]; 4] = [
+const REVERT: [&[u8]; 5] = [
     b"'git dupe add <path>'",
+    b"'git dupe commit --allow-empty'",
     b"'git dupe revert --continue'",
     b"'git dupe revert --skip'",
     b"'git dupe revert --abort'",
@@ -125,6 +120,9 @@ fn a_stopped_rebase_or_am_ends_with_one_hint() {
         fs::write(&patch, made.stdout).unwrap();
         let applying = hinted(s, &root, &["am", text(&patch)], &AM);
         assert_eq!(applying.end, End::Code(128), "{applying:?}");
+        // The stop decides, whatever the end: showing its patch exits 0.
+        let shown = hinted(s, &root, &["am", "--show-current-patch"], &AM);
+        assert_eq!(shown.end, End::Code(0), "{shown:?}");
         unhinted(s, &root, &["am", "--abort"]);
 
         // A hook that refuses the rebase leaves nothing stopped: the state decides.
@@ -203,6 +201,56 @@ fn a_stopped_cherry_pick_or_revert_ends_with_one_hint() {
                 "check-ignore"
             ]
         );
+    });
+}
+
+#[test]
+fn a_pick_under_no_commit_that_stops_ends_with_no_hint() {
+    under_each_release(|s| {
+        let root = fixture(s);
+        let reset = || s.private(&root).git(["reset", "-q", "--hard"]).succeeds();
+        // Under `-n`, in a bundle too, or `--no-commit` Git's advice names only `git add` and
+        // `git rm`, and a revert's pseudo-reference stands all the same: the words keep the
+        // hint away.
+        for words in [
+            &["revert", "-n", "HEAD~1"][..],
+            &["revert", "--no-commit", "HEAD~1"],
+            &["revert", "-sn", "HEAD~1"],
+        ] {
+            let stopped = unhinted(s, &root, words);
+            assert_eq!(stopped.end, End::Code(1), "{stopped:?}");
+            s.private(&root)
+                .git(["rev-parse", "-q", "--verify", "REVERT_HEAD"])
+                .succeeds();
+            reset();
+        }
+        private_alias(s, &root, "rvn", "revert --no-commit");
+        unhinted(s, &root, &["rvn", "HEAD~1"]);
+        reset();
+        for words in [
+            &["cherry-pick", "-n", "side"][..],
+            &["cherry-pick", "--no-commit", "side"],
+        ] {
+            let stopped = unhinted(s, &root, words);
+            assert_eq!(stopped.end, End::Code(1), "{stopped:?}");
+            reset();
+        }
+        private_alias(s, &root, "cpn", "cherry-pick -n");
+        unhinted(s, &root, &["cpn", "side"]);
+        reset();
+        // Decided from the words before the run: no question after it.
+        assert_eq!(
+            own_runs(s, &root, &["cherry-pick", "-n", "side"]),
+            [
+                "rev-parse",
+                "config",
+                "cherry-pick",
+                "ls-files",
+                "ls-files",
+                "check-ignore"
+            ]
+        );
+        reset();
     });
 }
 
@@ -329,10 +377,38 @@ fn a_branch_delete_that_refuses_ends_with_one_hint() {
         let root = fixture(s);
         let unmerged = hinted(s, &root, &["branch", "-d", "side"], &UNMERGED);
         assert_eq!(unmerged.end, End::Code(1), "{unmerged:?}");
-        hinted(s, &root, &["branch", "--delete", "side"], &UNMERGED);
-        // Decided from the exit alone, so a branch that does not exist draws it too.
+        // Every spelling Git reads as `--delete`, a bundle of short options included.
+        for spelling in ["--delete", "-vd", "-dv"] {
+            let refused = hinted(s, &root, &["branch", spelling, "side"], &UNMERGED);
+            assert_eq!(refused.end, End::Code(1), "{refused:?}");
+        }
+        // A prefix of `--delete`, which a release that also reads `--delete-merged` refuses
+        // as ambiguous, exit 129, advising nothing: plain Git's exit decides.
+        for prefix in ["--del", "--dele"] {
+            let words = ["branch", prefix, "side"];
+            let gits = s
+                .private(&root)
+                .git(["-c", "help.autocorrect=0"].iter().chain(&words))
+                .run();
+            if gits.end == End::Code(1) {
+                hinted(s, &root, &words, &UNMERGED);
+            } else {
+                assert_eq!(gits.end, End::Code(129), "{gits:?}");
+                unhinted(s, &root, &words);
+            }
+        }
+        // Decided from the exit alone, so a branch that does not exist draws it too, a
+        // remote-tracking one included.
         let missing = hinted(s, &root, &["branch", "-d", "nosuch"], &UNMERGED);
         assert_eq!(missing.end, End::Code(1), "{missing:?}");
+        let remote = hinted(s, &root, &["branch", "-dr", "side"], &UNMERGED);
+        assert_eq!(remote.end, End::Code(1), "{remote:?}");
+        unhinted(s, &root, &["branch", "-m", "side", "other"]);
+        unhinted(s, &root, &["branch", "-m", "other", "side"]);
+        // `-D` forces the deletion wherever it stands, in a bundle too.
+        s.private(&root).git(["branch", "copy", "side"]).succeeds();
+        let bundled = unhinted(s, &root, &["branch", "-Dd", "copy"]);
+        assert_eq!(bundled.end, End::Code(0), "{bundled:?}");
         let forced = unhinted(s, &root, &["branch", "-D", "side"]);
         assert_eq!(forced.end, End::Code(0), "{forced:?}");
     });

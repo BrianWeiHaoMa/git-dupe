@@ -33,7 +33,9 @@ mod tree;
 mod watched_runs;
 mod worktrees;
 
-pub use advice::{IGNORED_HINT, gits_then_one_hint, hinted, unhinted, without_maintenance};
+pub use advice::{
+    IGNORED_HINT, STOPPED_REBASE_HINT, gits_then_one_hint, hinted, unhinted, without_maintenance,
+};
 pub use aliases::{global_alias, private_alias};
 pub use attached::{
     Region, completed_hint, daily_edited, daily_state, dupe_succeeds, gitdupe_written_and_staged,

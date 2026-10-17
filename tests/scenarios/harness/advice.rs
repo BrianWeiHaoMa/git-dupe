@@ -19,6 +19,17 @@ pub const IGNORED_HINT: [&[u8]; 2] = [
     b"'git dupe config advice.addIgnoredFile false'",
 ];
 
+/// The commands the hint after a private rebase that stopped names, at a conflict, an
+/// `edit` or `break` stop, a reword whose editor failed, or a todo list Git could not read.
+pub const STOPPED_REBASE_HINT: [&[u8]; 6] = [
+    b"'git dupe add <path>'",
+    b"'git dupe commit --amend'",
+    b"'git dupe rebase --edit-todo'",
+    b"'git dupe rebase --continue'",
+    b"'git dupe rebase --skip'",
+    b"'git dupe rebase --abort'",
+];
+
 /// The workspace at `root` copied aside, to be put back at the same path, so that the
 /// paths Git's output names are the same in every execution.
 struct Saved {

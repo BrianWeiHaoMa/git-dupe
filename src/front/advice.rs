@@ -11,15 +11,25 @@
 //!   written after every byte of Git's, before settle's warnings. It follows the state,
 //!   not Git's `advice.*` settings, so it still follows where a setting silences Git's
 //!   advice. The exit status is the run's (F9).
-//! - The words read are the run's as typed, or those an alias chain reached (`alias`).
-//!   They are matched as exact words: a bundle or an abbreviation of `--detach`, `-q`,
-//!   `-d`, or `--delete` is not read, so a hint may follow where Git printed no advice,
-//!   never one the state makes false. None follows a run with `-h` or `--help` before the
-//!   first `--` of the words read, which an expansion's own `--` can move a typed `-h`
-//!   after, nor a run that did not start, nor one against a Git directory where no private
-//!   repository stands, as where a help request runs in a worktree no `init` attached.
-//! - "Did not exit 0" is any end but exit 0, a signal included: an interrupted rebase is a
-//!   stopped one. An end named by its number, 0 or 1, is never a signal's.
+//! - The words read are the run's as typed, or those an alias chain reached (`alias`), up
+//!   to their first `--`, after which a word is an operand. The words that keep the
+//!   `checkout` and `switch` hint away are matched exactly: a bundle or an abbreviation of
+//!   `--detach` or `-q` is not read, so a hint may follow where Git printed no advice,
+//!   never one the state makes false. `cherry-pick`'s and `revert`'s `-n` is read in a
+//!   bundle too (`reads_as_no_commit`), because the line's `--continue` would commit what
+//!   it was given to leave uncommitted. `branch`'s `--delete` is read in every spelling Git
+//!   reads as it (`reads_as_delete`), so a bundle that holds `d` as another option's value
+//!   draws the hint where Git printed no advice; the line is true either way. None follows
+//!   a run with `-h` or `--help` before the first `--` of the words read, which an
+//!   expansion's own `--` can move a typed `-h` after, nor a run that did not start, nor
+//!   one against a Git directory where no private repository stands, as where a help
+//!   request runs in a worktree no `init` attached.
+//! - A stopped `rebase` or `am` is decided by its directory, whatever the run's end: an
+//!   `edit` or `break` stop of `rebase -i` exits 0, and an interrupted rebase is a stopped
+//!   one. An `am` reads only `rebase-apply`, the one its own stop keeps: beside a rebase
+//!   stopped in `rebase-merge`, its line would name commands that fail. "Did not exit 0"
+//!   is any end but exit 0, a signal included. An end named by its number, 0 or 1, is
+//!   never a signal's.
 //! - The runs a family adds are fixed for its words (G22, R4): `checkout` and `switch` ask
 //!   the private `symbolic-ref -q HEAD` before the run and, after one that exited 0, again,
 //!   both only where the words admit the hint; `cherry-pick` and `revert` ask `rev-parse
@@ -41,9 +51,14 @@ use super::lines::{self, Level};
 use super::outcome::Outcome;
 use crate::runner::{Against, End, Run};
 
+// `--skip` is described by the commit it leaves out: at an `edit`, `break`, or reword
+// stop the commit stopped at is already made, and `--skip` keeps it.
 const REBASE: &[u8] = b"a private rebase that stopped goes on with 'git dupe rebase --continue' \
-    once 'git dupe add <path>' has marked each conflict resolved, skips the commit with \
-    'git dupe rebase --skip', or ends with 'git dupe rebase --abort'; plain 'git add' and \
+    once 'git dupe add <path>' has marked each conflict resolved, \
+    'git dupe commit --amend' has amended the commit an edit or a reword stopped at, or \
+    'git dupe rebase --edit-todo' has mended a todo list Git could not read, as the stop \
+    asks; 'git dupe rebase --skip' leaves out a commit that would not apply, and \
+    'git dupe rebase --abort' ends the rebase; plain 'git add', 'git commit', and \
     'git rebase' act on the project's repository";
 
 const AM: &[u8] = b"a private 'am' that stopped goes on with 'git dupe am --continue' once \
@@ -59,9 +74,10 @@ const CHERRY_PICK: &[u8] = b"a private cherry-pick that stopped goes on with \
     on the project's repository";
 
 const REVERT: &[u8] = b"a private revert that stopped goes on with 'git dupe revert --continue' \
-    once 'git dupe add <path>' has marked each conflict resolved, skips the commit with \
-    'git dupe revert --skip', or ends with 'git dupe revert --abort'; plain 'git add' and \
-    'git revert' act on the project's repository";
+    once 'git dupe add <path>' has marked each conflict resolved, or, where the revert is \
+    empty, with 'git dupe commit --allow-empty'; it skips the commit with \
+    'git dupe revert --skip', or ends with 'git dupe revert --abort'; plain 'git add', \
+    'git commit', and 'git revert' act on the project's repository";
 
 const DETACHED: &[u8] = b"HEAD is now detached in the private repository: \
     'git dupe switch -c <new-branch-name>' keeps commits made here on a new branch, and \
@@ -75,50 +91,50 @@ const UNMERGED: &[u8] = b"'git dupe branch -D <branch>' deletes a private branch
 const FAMILIES: [Family; 7] = [
     Family {
         word: b"rebase",
-        excluding: &[],
-        requiring: &[],
-        trigger: Trigger::Stopped,
+        excluding: None,
+        requiring: None,
+        trigger: Trigger::Stopped(&["rebase-merge", "rebase-apply"]),
         line: REBASE,
     },
     Family {
         word: b"am",
-        excluding: &[],
-        requiring: &[],
-        trigger: Trigger::Stopped,
+        excluding: None,
+        requiring: None,
+        trigger: Trigger::Stopped(&["rebase-apply"]),
         line: AM,
     },
     Family {
         word: b"cherry-pick",
-        excluding: &[],
-        requiring: &[],
+        excluding: Some(reads_as_no_commit),
+        requiring: None,
         trigger: Trigger::Picking("CHERRY_PICK_HEAD"),
         line: CHERRY_PICK,
     },
     Family {
         word: b"revert",
-        excluding: &[],
-        requiring: &[],
+        excluding: Some(reads_as_no_commit),
+        requiring: None,
         trigger: Trigger::Picking("REVERT_HEAD"),
         line: REVERT,
     },
     Family {
         word: b"checkout",
-        excluding: &[b"--detach", b"-q", b"--quiet"],
-        requiring: &[],
+        excluding: Some(|word| matches!(word, b"--detach" | b"-q" | b"--quiet")),
+        requiring: None,
         trigger: Trigger::Detached,
         line: DETACHED,
     },
     Family {
         word: b"switch",
-        excluding: &[b"--detach", b"-d", b"-q", b"--quiet"],
-        requiring: &[],
+        excluding: Some(|word| matches!(word, b"--detach" | b"-d" | b"-q" | b"--quiet")),
+        requiring: None,
         trigger: Trigger::Detached,
         line: DETACHED,
     },
     Family {
         word: b"branch",
-        excluding: &[],
-        requiring: &[b"-d", b"--delete"],
+        excluding: None,
+        requiring: Some(reads_as_delete),
         trigger: Trigger::ExitedOne,
         line: UNMERGED,
     },
@@ -127,11 +143,11 @@ const FAMILIES: [Family; 7] = [
 /// A command word whose run Git's advice may follow, and when the hint follows it.
 struct Family {
     word: &'static [u8],
-    /// Words before the first `--` any of which keeps the hint away: Git prints no advice
-    /// after them.
-    excluding: &'static [&'static [u8]],
-    /// Words one of which must stand among the words, when there are any.
-    requiring: &'static [&'static [u8]],
+    /// What no word before the first `--` may spell, when anything: Git prints no such
+    /// advice after it.
+    excluding: Option<fn(&[u8]) -> bool>,
+    /// What one word before the first `--` must spell, when anything.
+    requiring: Option<fn(&[u8]) -> bool>,
     trigger: Trigger,
     line: &'static [u8],
 }
@@ -139,9 +155,8 @@ struct Family {
 /// The run's end and the state after which a family's hint follows (S12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Trigger {
-    /// A run that did not exit 0, while `rebase-merge` or `rebase-apply` is a directory in
-    /// the private Git directory.
-    Stopped,
+    /// A run of any end, while one of these is a directory in the private Git directory.
+    Stopped(&'static [&'static str]),
     /// A run that did not exit 0, while `rev-parse -q --verify` of this name exits 0.
     Picking(&'static str),
     /// A run that exited 0 and left a branch for a detached `HEAD`: `symbolic-ref -q HEAD`
@@ -154,8 +169,8 @@ enum Trigger {
 /// A question of the private repository's state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Question {
-    /// Whether `rebase-merge` or `rebase-apply` is a directory in its Git directory.
-    Stopped,
+    /// Whether one of these is a directory in its Git directory.
+    Stopped(&'static [&'static str]),
     /// Whether `rev-parse -q --verify <name>` names a commit.
     Verifies(&'static str),
     /// Whether `symbolic-ref -q HEAD` finds `HEAD` on a branch, or detached.
@@ -207,24 +222,53 @@ fn before_asking(
     }
 }
 
-/// The family whose word begins `words` when the rest admit its hint: no help request
-/// and no excluding word before the first `--`, and a required word among them.
+/// The family whose word begins `words` when the rest admit its hint: before the first
+/// `--`, no help request and no excluding word, and a word that spells what the family
+/// requires.
 fn admitted(words: &[OsString]) -> Option<&'static Family> {
     let (command, rest) = words.split_first()?;
     let family = FAMILIES
         .iter()
         .find(|family| family.word == command.as_bytes())?;
-    let mut before_the_end = rest
+    let before_the_end: Vec<&[u8]> = rest
         .iter()
         .map(|word| word.as_bytes())
-        .take_while(|word| *word != b"--");
-    let kept_away = before_the_end
-        .any(|word| matches!(word, b"-h" | b"--help") || family.excluding.contains(&word));
-    let required = family.requiring.is_empty()
-        || rest
-            .iter()
-            .any(|word| family.requiring.contains(&word.as_bytes()));
+        .take_while(|word| *word != b"--")
+        .collect();
+    let kept_away = before_the_end.iter().any(|word| {
+        matches!(*word, b"-h" | b"--help") || family.excluding.is_some_and(|spells| spells(word))
+    });
+    let required = family
+        .requiring
+        .is_none_or(|spells| before_the_end.iter().any(|word| spells(word)));
     (!kept_away && required).then_some(family)
+}
+
+/// Whether `cherry-pick` or `revert` reads `word` as `--no-commit`: the word itself, or
+/// `-n` alone or bundled before any of `m`, `X`, and `S`, which take the rest of the word
+/// as their value. A prefix of `--no-commit` is read as another option or refused.
+fn reads_as_no_commit(word: &[u8]) -> bool {
+    if word == b"--no-commit" {
+        return true;
+    }
+    match word.strip_prefix(b"-") {
+        Some(letters) if !letters.starts_with(b"-") => letters
+            .iter()
+            .take_while(|letter| !matches!(letter, b'm' | b'X' | b'S'))
+            .any(|letter| *letter == b'n'),
+        _ => false,
+    }
+}
+
+/// Whether `branch` reads `word` as `--delete`, or refuses it as ambiguous, exit 129, in
+/// every listed release (S12): `--delete` or a prefix of it at least three bytes long, or
+/// a word of short options, beginning with one `-`, that holds `d` and not `D`, which
+/// would force the deletion.
+fn reads_as_delete(word: &[u8]) -> bool {
+    match word.strip_prefix(b"--") {
+        Some(long) => !long.is_empty() && b"delete".starts_with(long),
+        None => word.starts_with(b"-") && word.contains(&b'd') && !word.contains(&b'D'),
+    }
 }
 
 /// Whether the hint follows a run that ended as `end`: `ask` is put a question only once
@@ -232,7 +276,7 @@ fn admitted(words: &[OsString]) -> Option<&'static Family> {
 fn follows(trigger: Trigger, end: &End, ask: impl FnOnce(Question) -> Answer) -> bool {
     let exited_0 = *end == End::Code(0);
     match trigger {
-        Trigger::Stopped => !exited_0 && ask(Question::Stopped) == Answer::Yes,
+        Trigger::Stopped(directories) => ask(Question::Stopped(directories)) == Answer::Yes,
         Trigger::Picking(name) => !exited_0 && ask(Question::Verifies(name)) == Answer::Yes,
         Trigger::Detached => exited_0 && ask(Question::OnABranch) == Answer::No,
         Trigger::ExitedOne => *end == End::Code(1),
@@ -242,7 +286,7 @@ fn follows(trigger: Trigger, end: &End, ask: impl FnOnce(Question) -> Answer) ->
 /// The answer of the private repository `against` names.
 fn asked(question: Question, against: Against) -> Answer {
     let words = match question {
-        Question::Stopped => return stopped(against),
+        Question::Stopped(directories) => return stopped(against, directories),
         Question::Verifies(name) => ["rev-parse", "-q", "--verify", name].to_vec(),
         Question::OnABranch => ["symbolic-ref", "-q", "HEAD"].to_vec(),
     };
@@ -253,16 +297,16 @@ fn asked(question: Question, against: Against) -> Answer {
     }
 }
 
-/// Whether `lstat` finds `rebase-merge` or `rebase-apply` a directory in the private Git
-/// directory; a symbolic link to one is none.
-fn stopped(against: Against) -> Answer {
+/// Whether `lstat` finds one of `directories` a directory in the private Git directory; a
+/// symbolic link to one is none.
+fn stopped(against: Against, directories: &[&str]) -> Answer {
     let Some(git_directory) = against.private_repository() else {
         return Answer::Unanswered;
     };
-    let directory = |name: &str| {
+    let directory = |name: &&str| {
         fs::symlink_metadata(git_directory.join(name)).is_ok_and(|found| found.is_dir())
     };
-    if directory("rebase-merge") || directory("rebase-apply") {
+    if directories.iter().any(directory) {
         Answer::Yes
     } else {
         Answer::No

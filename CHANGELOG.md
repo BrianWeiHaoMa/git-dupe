@@ -40,6 +40,24 @@ Every change a user of git-dupe would notice, newest first, in the form of
   `git dupe branch --set-upstream-to`, because Git's own advice there names plain
   `git push --set-upstream` or `git pull`, which act on the project's repository. Git's
   output and exit status are unchanged.
+- A private `rebase -i` that stops at an `edit` or a `break`, which Git ends with status
+  0, now ends with the `hint:` a stopped rebase gets, and that hint now also names
+  `git dupe commit --amend` and `git dupe rebase --edit-todo`, because Git's own advice
+  at an `edit` stop, a reword whose editor failed, or a todo list Git cannot read names
+  plain `git commit --amend` or `git rebase --edit-todo`, which act on the project's
+  repository. A private `am` run while a rebase, and no `am`, is stopped no longer ends
+  with the hint of a stopped `am`, whose commands fail there. Git's output and exit
+  status are unchanged.
+- A `git dupe revert` given `-n`, alone or in a bundle of short options such as `-sn`,
+  or `--no-commit`, that stops on a conflict no longer ends with the `hint:` naming
+  `git dupe revert --continue`, which commits what `--no-commit` was given to leave
+  uncommitted; Git's own advice there names only `git add` and `git rm`. The hint after
+  a stopped `revert` now also names `git dupe commit --allow-empty`, as the one after a
+  stopped `cherry-pick` does.
+- The `hint:` naming `git dupe branch -D` after a `git dupe branch -d` that refuses now
+  also follows `--delete` abbreviated, as `--del`, and `d` in a bundle of short options,
+  as `-vd`, where Git's own advice names plain `git branch -D`, which acts on the
+  project's repository.
 
 ## [0.3.1] - 2026-10-16
 
