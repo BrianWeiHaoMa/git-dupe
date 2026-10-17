@@ -298,8 +298,9 @@ fn each_trigger_follows_its_end_and_state() {
                 "{end:?} {answer:?}"
             );
         }
-        // A pick stands where its pseudo-reference verifies and no rebase directory stands
+        // A pick stands where its pseudo-reference verifies and no rebase stands stopped
         // beside it: a rebase stopped at a pick that became empty keeps `CHERRY_PICK_HEAD`.
+        // A stopped `am` beside it is no rebase.
         for (verifies, rebasing, hinted) in [
             (Answer::Yes, Answer::No, true),
             (Answer::Yes, Answer::Yes, false),
@@ -311,7 +312,7 @@ fn each_trigger_follows_its_end_and_state() {
                 if question == Question::Verifies("CHERRY_PICK_HEAD") {
                     verifies
                 } else {
-                    assert_eq!(question, Question::Stopped(A_REBASE_DIRECTORY));
+                    assert_eq!(question, Question::Stopped(A_REBASE_STOPPED));
                     assert_eq!(verifies, Answer::Yes, "asked after {verifies:?}");
                     rebasing
                 }
@@ -466,7 +467,6 @@ fn a_merge_is_asked_about_its_autostash_only_after_exit_0() {
 fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick_and_the_stop_beside_it() {
     let pick = Question::Verifies("CHERRY_PICK_HEAD");
     let rebase = Question::Stopped(A_REBASE_STOPPED);
-    let directory = Question::Stopped(A_REBASE_DIRECTORY);
     // `--amend` and `--allow-empty` are read exactly, before the first `--`.
     for typed in [
         &["commit", "--amend"][..],
@@ -499,8 +499,8 @@ fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick_and_the_stop_besi
     }
     // Without `--amend`, a stopped cherry-pick is asked about, and a stopped revert never:
     // Git's advice for a commit during one names only the revert's own commands. Where the
-    // pick stands, so may a rebase stopped at a pick that became empty, whose line follows,
-    // or an `am`, beside which none does: the rebase's line would name commands Git refuses.
+    // pick stands, so may a rebase stopped at a pick that became empty, whose line follows
+    // instead; a stopped `am` beside the pick is no rebase, and the pick's line follows.
     for typed in [
         &["commit", "-m", "x"][..],
         &["commit"],
@@ -508,14 +508,13 @@ fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick_and_the_stop_besi
         &["commit", "--amen"],
         &["commit", "--", "--amend"],
     ] {
-        let neither = [
-            (pick, Answer::Yes),
-            (rebase, Answer::No),
-            (directory, Answer::No),
-        ];
         assert_eq!(
-            decision(typed, &End::Code(1), &neither),
-            (Some(CHERRY_PICK), vec![pick, rebase, directory]),
+            decision(
+                typed,
+                &End::Code(1),
+                &[(pick, Answer::Yes), (rebase, Answer::No)]
+            ),
+            (Some(CHERRY_PICK), vec![pick, rebase]),
             "{typed:?}"
         );
         assert_eq!(
@@ -525,16 +524,6 @@ fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick_and_the_stop_besi
                 &[(pick, Answer::Yes), (rebase, Answer::Yes)]
             ),
             (Some(REBASE), vec![pick, rebase]),
-            "{typed:?}"
-        );
-        let beside_an_am = [
-            (pick, Answer::Yes),
-            (rebase, Answer::No),
-            (directory, Answer::Yes),
-        ];
-        assert_eq!(
-            decision(typed, &End::Code(1), &beside_an_am),
-            (None, vec![pick, rebase, directory]),
             "{typed:?}"
         );
         assert_eq!(

@@ -58,15 +58,15 @@
 //!   `stash drop` would be false there. `merge` keeps no stop of its own, so its entry reads
 //!   no directory.
 //! - `CHERRY_PICK_HEAD` and `REVERT_HEAD` are asked of Git, because they live in the
-//!   reference store, which may hold no file for them (S15); `rebase-merge` and
-//!   `rebase-apply` are directories in every store, read by `lstat` (S12), after the
-//!   pseudo-reference, so that the runs stay fixed for the words and the end.
-//! - A rebase stopped at a pick that became empty keeps `CHERRY_PICK_HEAD` beside its
-//!   directory (S12): a `cherry-pick` or `revert` run there has stopped nothing of its own
-//!   and draws no hint, and a `commit` there draws the rebase's line, Git's advice naming
-//!   `git rebase --skip`. Beside a stopped `am`, which keeps `rebase-apply` holding
-//!   `applying`, a `commit` while a cherry-pick stands draws none: the rebase's line would
-//!   name commands Git refuses while the `am` stands.
+//!   reference store, which may hold no file for them (S15); a rebase's stop is in the
+//!   Git directory in every store, read by `lstat` (S12), after the pseudo-reference, so
+//!   that the runs stay fixed for the words and the end.
+//! - A rebase stopped at a pick that became empty keeps `CHERRY_PICK_HEAD` beside its stop
+//!   (S12): a `cherry-pick` or `revert` run there has stopped nothing of its own and draws
+//!   no hint, and a `commit` there draws the rebase's line, Git's advice naming
+//!   `git rebase --skip`. A stopped `am`, which keeps `rebase-apply` holding `applying`,
+//!   is no rebase: a pick stopped beside it, and a `commit` while it stands, draw the
+//!   pick's line, whose commands Git runs while the `am` stands.
 //! - A `commit` during a stopped revert gets no hint: Git's advice there names only the
 //!   revert's own commands, which fail in the project's repository, and none of its
 //!   own (S12).
@@ -250,23 +250,16 @@ const A_REBASE_STOPPED: &[Marker] = &[
 /// An `am` stopped: `rebase-apply` holding a file `applying`.
 const AN_AM_STOPPED: &[Marker] = &[Marker::Holding("rebase-apply", "applying")];
 
-/// Either directory a rebase or an `am` keeps while it stands.
-const A_REBASE_DIRECTORY: &[Marker] = &[
-    Marker::Directory("rebase-merge"),
-    Marker::Directory("rebase-apply"),
-];
-
 /// The run's end and the state after which a family's hint follows (S12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Trigger {
     /// A run of any end, while one of these markers stands.
     Stopped(&'static [Marker]),
     /// A run that did not exit 0, while `rev-parse -q --verify` of this name exits 0 and
-    /// no rebase directory stands.
+    /// no rebase stands stopped.
     Picking(&'static str),
     /// A run that exited 1, while `rev-parse -q --verify` of this name exits 0: the
-    /// family's line where no rebase directory stands, the rebase's where a rebase stands
-    /// stopped, and none beside another stop, as an `am`'s.
+    /// rebase's line where a rebase stands stopped, and the family's otherwise.
     ExitedOneWhile(&'static str),
     /// A run that exited 0, while `ls-files -u -z` lists an unmerged entry.
     Unmerged,
@@ -428,7 +421,7 @@ fn follows(
         Trigger::Picking(name) => {
             !exited_0
                 && ask(Question::Verifies(name)) == Answer::Yes
-                && ask(Question::Stopped(A_REBASE_DIRECTORY)) == Answer::No
+                && ask(Question::Stopped(A_REBASE_STOPPED)) == Answer::No
         }
         Trigger::ExitedOneWhile(name) => {
             if !exited_1 || ask(Question::Verifies(name)) != Answer::Yes {
@@ -436,7 +429,7 @@ fn follows(
             }
             match ask(Question::Stopped(A_REBASE_STOPPED)) {
                 Answer::Yes => return Some(REBASE),
-                Answer::No => ask(Question::Stopped(A_REBASE_DIRECTORY)) == Answer::No,
+                Answer::No => true,
                 Answer::Unanswered => false,
             }
         }

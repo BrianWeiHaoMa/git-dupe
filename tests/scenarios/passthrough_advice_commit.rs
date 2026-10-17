@@ -4,10 +4,10 @@
 //! commit empty, which exit 1 alone does not prove, so that a hook's refusal draws it too;
 //! without `--amend`, while a cherry-pick stands stopped, the cherry-pick's line, or, where
 //! a rebase stands stopped at a pick that became empty, which keeps `CHERRY_PICK_HEAD` too,
-//! the rebase's. A commit during a stopped revert gets none: Git's advice there names only
-//! the revert's own commands, which fail in the project's repository. The amend's hint
-//! asks nothing; the other asks `CHERRY_PICK_HEAD`, and only after exit 1 (G22), and reads
-//! the rebase's directories by `lstat`.
+//! the rebase's, a stopped `am` beside the pick being no rebase. A commit during a stopped
+//! revert gets none: Git's advice there names only the revert's own commands, which fail
+//! in the project's repository. The amend's hint asks nothing; the other asks
+//! `CHERRY_PICK_HEAD`, and only after exit 1 (G22), and reads a rebase's stop by `lstat`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -248,9 +248,10 @@ fn a_commit_during_a_rebase_stopped_at_a_pick_that_became_empty_ends_with_the_re
         assert_eq!(fs::read(root.join("notes.txt")).unwrap(), b"four\n");
         assert!(!root.join(".git/dupe/rebase-merge").exists());
 
-        // Beside a stopped `am`, which keeps `rebase-apply` too, a cherry-pick that became
-        // empty: a commit draws no hint, the rebase's line naming commands Git refuses while
-        // the `am` stands.
+        // Beside a stopped `am`, which keeps `rebase-apply` holding a file of its own and not
+        // a rebase's, a cherry-pick that becomes empty stops a pick of its own: it draws the
+        // cherry-pick's line, and so does a commit while it stands, whose commands Git runs
+        // while the `am` stands.
         s.private(&root).git(["switch", "-q", "main"]).succeeds();
         let patch = s.dir().join("two.patch");
         let made = s
@@ -260,12 +261,16 @@ fn a_commit_during_a_rebase_stopped_at_a_pick_that_became_empty_ends_with_the_re
         fs::write(&patch, made.stdout).unwrap();
         let applying = s.private(&root).git(["am", text(&patch)]).run();
         assert_eq!(applying.end, End::Code(128), "{applying:?}");
-        let empty = s.private(&root).git(["cherry-pick", "HEAD"]).run();
+        let empty = hinted(s, &root, &["cherry-pick", "HEAD"], &CHERRY_PICK);
         assert_eq!(empty.end, End::Code(1), "{empty:?}");
-        let beside = unhinted(s, &root, &["commit", "-m", "x"]);
+        let beside = hinted(s, &root, &["commit", "-m", "x"], &CHERRY_PICK);
         assert_eq!(beside.end, End::Code(1), "{beside:?}");
         asked_after(s, &root, &["commit", "-m", "x"], End::Code(1), &[PICK]);
-        s.private(&root).git(["cherry-pick", "--abort"]).succeeds();
+        // The line's `--abort` ends the pick, and the `am` stands still.
+        s.git(["dupe", "cherry-pick", "--abort"])
+            .from(&root)
+            .succeeds();
+        assert!(root.join(".git/dupe/rebase-apply/applying").exists());
         s.private(&root).git(["am", "--abort"]).succeeds();
     });
 }
