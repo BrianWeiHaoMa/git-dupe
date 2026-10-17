@@ -3,7 +3,9 @@
 //! list Git cannot read, which exit 1, the rebase directory stands, and one `hint:` follows
 //! Git's output whatever the exit, naming `git dupe commit --amend` and
 //! `git dupe rebase --edit-todo` beside the conflict's commands; once the rebase has ended,
-//! none follows. The stop is read by `lstat`, so the hint adds no Git run (G22).
+//! none follows. A `rebase` and an `am` share `rebase-apply`, each marking it with a file
+//! of its own: beside the other's stop, neither draws its line. The stop is read by
+//! `lstat`, so the hint adds no Git run (G22).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -128,5 +130,41 @@ fn a_rebase_stopped_by_its_editor_or_its_todo_list_ends_with_one_hint_after_exit
         assert_eq!(mended.end, End::Code(0), "{mended:?}");
         let continued = unhinted(s, &root, &["rebase", "--continue"]);
         assert_eq!(continued.end, End::Code(0), "{continued:?}");
+    });
+}
+
+#[test]
+fn a_stop_the_other_command_keeps_in_rebase_apply_draws_no_hint() {
+    under_each_release(|s| {
+        let root = three_commits(s);
+        // A patch of the second commit no longer applies on the third: the `am` stops.
+        let patch = s.dir().join("two.patch");
+        let made = s
+            .private(&root)
+            .git(["format-patch", "-1", "--stdout", "HEAD~1"])
+            .succeeds();
+        fs::write(&patch, made.stdout).unwrap();
+        let applying = s.private(&root).git(["am", text(&patch)]).run();
+        assert_eq!(applying.end, End::Code(128), "{applying:?}");
+        // Beside it Git refuses a rebase, whose `--continue`, `--skip`, and `--abort` would
+        // be refused too.
+        let refused = unhinted(s, &root, &["rebase", "HEAD~1"]);
+        assert_eq!(refused.end, End::Code(128), "{refused:?}");
+        s.private(&root).git(["am", "--abort"]).succeeds();
+
+        // A rebase of the last two commits onto another first stops on the conflict, in
+        // `rebase-apply` under `--apply`: beside it, an `am` is no stopped `am`.
+        s.private(&root)
+            .git(["switch", "-q", "-c", "side", "HEAD~2"])
+            .succeeds();
+        write(&root, "notes.txt", b"side\n");
+        private_add(s, &root, "notes.txt");
+        private_commit(s, &root);
+        s.private(&root).git(["switch", "-q", "main"]).succeeds();
+        let stopped = hinted(s, &root, &["rebase", "--apply", "side"], &REBASE);
+        assert_eq!(stopped.end, End::Code(1), "{stopped:?}");
+        let shown = unhinted(s, &root, &["am", "--show-current-patch"]);
+        assert_eq!(shown.end, End::Code(0), "{shown:?}");
+        unhinted(s, &root, &["rebase", "--abort"]);
     });
 }

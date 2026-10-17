@@ -23,10 +23,13 @@ Every change a user of git-dupe would notice, newest first, in the form of
   `git dupe commit --amend --allow-empty` and `git dupe reset HEAD^`, and after a
   private `commit` that exits 1 while a `cherry-pick` is stopped, as one does once the
   pick has become empty, with the hint of the stopped `cherry-pick`, naming
-  `git dupe commit --allow-empty` and `git dupe cherry-pick --skip`, because Git's own
-  advice after the amend names plain `git reset HEAD^`, and after a commit during an
-  empty `cherry-pick` plain `git commit --allow-empty`, which act on the project's
-  repository. Git's output and exit status are unchanged.
+  `git dupe commit --allow-empty` and `git dupe cherry-pick --skip`, or, where a rebase
+  stands stopped there too, as at a pick that became empty, with the hint of the stopped
+  rebase, naming `git dupe rebase --skip`, because Git's own advice after the amend
+  names plain `git reset HEAD^`, and after a commit during an empty pick plain
+  `git commit --allow-empty` and `git cherry-pick --skip` or `git rebase --skip`, which
+  act on the project's repository. Beside a stopped `am`, no hint follows such a commit.
+  Git's output and exit status are unchanged.
 - After a private `push` that Git refuses on a branch whose upstream has another name
   than the branch, under `push.default` unset or `simple`, `git dupe` now ends with a
   `hint:` naming `git dupe push <remote> HEAD:<upstream>` and
@@ -34,7 +37,7 @@ Every change a user of git-dupe would notice, newest first, in the form of
   with a hint naming `git dupe push <remote> HEAD:<branch>`, because Git's own advice
   there names plain `git push`, which acts on the project's repository. Git's output and
   exit status are unchanged.
-- After a private `pull` given no refspec that fails on a detached `HEAD`, `git dupe`
+- After a private `pull` given no refspec that exits 1 on a detached `HEAD`, `git dupe`
   now ends with a `hint:` naming `git dupe pull <remote> <branch>`, and after one told
   to fast-forward only, by `--ff-only` or `pull.ff=only`, that Git refuses, as it does
   where the branches have diverged, with a hint naming
@@ -84,17 +87,23 @@ Every change a user of git-dupe would notice, newest first, in the form of
   branch with no commit yet, the hint naming `git dupe push -u <remote> HEAD` now names
   `git dupe commit` first, because that push has nothing to push before it, and it now
   also follows on a branch with `branch.<name>.merge` set and no
-  `branch.<name>.remote`, which Git's push counts as having no upstream. Git's output
+  `branch.<name>.remote`, which Git's push counts as having no upstream. The hint after
+  a `git dupe pull` on a branch with no upstream now follows there too, which Git's pull
+  counts so as well, and only where Git exits 1: given a URL or a path as the branch's
+  remote, Git has the remote's `HEAD` to merge and, where it cannot, exits 128, and the
+  hint of a pull that cannot reconcile divergent branches follows instead. Git's output
   and exit status are unchanged.
 - A private `rebase -i` that stops at an `edit` or a `break`, which Git ends with status
   0, now ends with the `hint:` a stopped rebase gets, and that hint now also names
   `git dupe commit --amend` and `git dupe rebase --edit-todo`, because Git's own advice
   at an `edit` stop, a reword whose editor failed, or a todo list Git cannot read names
   plain `git commit --amend` or `git rebase --edit-todo`, which act on the project's
-  repository. A private `am` run while a rebase, and no `am`, is stopped no longer ends
-  with the hint of a stopped `am`, whose commands fail there, unless the rebase runs
-  under `--apply`, which keeps the state a stopped `am` keeps. Git's output and exit
-  status are unchanged.
+  repository. A private `am` run while a rebase is stopped, and a `rebase` run while an
+  `am` is stopped, no longer end with the hint of the other, whose commands fail there,
+  and a `cherry-pick` or `revert` run while a rebase or an `am` is stopped no longer ends
+  with the hint of a stopped `cherry-pick` or `revert`, whose commands leave a rebase
+  stopped at a pick that became empty as it was. Git's output and exit status are
+  unchanged.
 - A `git dupe revert` given `-n`, alone or in a bundle of short options such as `-sn`,
   or `--no-commit`, that stops on a conflict no longer ends with the `hint:` naming
   `git dupe revert --continue`, which commits what `--no-commit` was given to leave

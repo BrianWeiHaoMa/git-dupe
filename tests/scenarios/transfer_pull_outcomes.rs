@@ -3,11 +3,12 @@
 //! or a repository word and no refspec, the pull of a remote's branch; and after a pull told
 //! to fast-forward only, by `--ff-only` or `pull.ff=only`, that exited 128, the merge and the
 //! rebase of what it fetched. Git's own run and output unchanged, then one `hint:`; none
-//! after a help request or `git dupe git` (G19, G20, F9); neither adds a run (G22). Where
-//! several would follow, the first that holds in `Holds/G18`'s order: a pull given a path
-//! on a detached `HEAD` has the remote's `HEAD` to merge, and gets the divergent-branches
-//! hint first. The hints `transfer_advice` pins, and the autostash's (`autostash_hint`),
-//! stay as they are.
+//! after a help request or `git dupe git` (G19, G20, F9); neither adds a run (G22). The
+//! detached hint follows exit 1 alone, with which Git's advice for it comes: a pull given a
+//! path on a detached `HEAD` has the remote's `HEAD` to merge, and where it cannot, Git
+//! exits 128 with the divergent-branches or fast-forward-only advice, whose hint follows.
+//! The hints `transfer_advice` pins, and the autostash's (`autostash_hint`), stay as they
+//! are.
 
 use std::fs;
 
@@ -125,6 +126,11 @@ fn a_pull_on_a_detached_head_names_the_pull_of_a_remotes_branch() {
         remote_moves_on(s, &t, "again");
         let path = text(&t.private_remote);
         let ours = hinted(s, root, &["pull", path], &[UNRECONCILED]);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        assert!(!holds(&ours.stderr, DETACHED), "{ours:?}");
+        // Told to fast-forward only, it refuses, exit 128: the hint for that, where the
+        // detached one follows exit 1 alone.
+        let ours = hinted(s, root, &["pull", "--ff-only", path], &FAST_FORWARD_ONLY);
         assert_eq!(ours.end, End::Code(128), "{ours:?}");
         assert!(!holds(&ours.stderr, DETACHED), "{ours:?}");
     });
@@ -258,9 +264,9 @@ fn the_fast_forward_only_hint_follows_a_128_that_got_no_other_hint() {
         conflicted(s, &t);
         let ours = hinted(s, root, &["pull", "--ff-only"], &FAST_FORWARD_ONLY);
         assert_eq!(ours.end, End::Code(128), "{ours:?}");
-        // On a detached `HEAD` there, given no repository, the divergent-branches hint
-        // comes before the detached one, and with a way chosen, the detached one follows,
-        // each true as its condition reads.
+        // On a detached `HEAD` there, given no repository, Git refuses with 128: the
+        // divergent-branches hint follows, true as its condition reads, and with a way
+        // chosen none does, the detached one following exit 1 alone.
         dupe_succeeds(s, root, &["merge", "--abort"]);
         dupe_succeeds(s, root, &["checkout", "-q", "--detach"]);
         let merged = s
@@ -272,7 +278,7 @@ fn the_fast_forward_only_hint_follows_a_128_that_got_no_other_hint() {
         assert_eq!(ours.end, End::Code(128), "{ours:?}");
         assert!(!holds(&ours.stderr, DETACHED), "{ours:?}");
         dupe_succeeds(s, root, &["config", "pull.rebase", "false"]);
-        let ours = hinted(s, root, &["pull"], &[DETACHED]);
+        let ours = unhinted(s, root, &["pull"]);
         assert_eq!(ours.end, End::Code(128), "{ours:?}");
     });
 }

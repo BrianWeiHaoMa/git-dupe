@@ -2,17 +2,19 @@
 //! not `--allow-empty`, one `hint:` naming `git dupe commit --amend --allow-empty` and
 //! `git dupe reset HEAD^`, in words conditioned on the amend that would have left the
 //! commit empty, which exit 1 alone does not prove, so that a hook's refusal draws it too;
-//! without `--amend`, while a cherry-pick stands stopped, the cherry-pick's line. A commit
-//! during a stopped revert gets none: Git's advice there names only the revert's own
-//! commands, which fail in the project's repository. The amend's hint asks nothing; the
-//! other asks `CHERRY_PICK_HEAD`, and only after exit 1 (G22).
+//! without `--amend`, while a cherry-pick stands stopped, the cherry-pick's line, or, where
+//! a rebase stands stopped at a pick that became empty, which keeps `CHERRY_PICK_HEAD` too,
+//! the rebase's. A commit during a stopped revert gets none: Git's advice there names only
+//! the revert's own commands, which fail in the project's repository. The amend's hint
+//! asks nothing; the other asks `CHERRY_PICK_HEAD`, and only after exit 1 (G22), and reads
+//! the rebase's directories by `lstat`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, asked_after, hinted, private_add, private_alias, private_commit,
-    under_each_release, unhinted, write, write_executable,
+    End, Output, STOPPED_REBASE_HINT as REBASE, Scenario, asked_after, hinted, private_add,
+    private_alias, private_commit, text, under_each_release, unhinted, write, write_executable,
 };
 
 const EMPTY_AMEND: [&[u8]; 2] = [
@@ -200,5 +202,70 @@ fn a_commit_ends_with_the_hint_of_a_stopped_cherry_pick_alone() {
         let dry = unhinted(s, &root, &["commit", "--dry-run"]);
         assert_eq!(dry.end, End::Code(0), "{dry:?}");
         asked_after(s, &root, &["commit", "--dry-run"], End::Code(0), &[]);
+    });
+}
+
+#[test]
+fn a_commit_during_a_rebase_stopped_at_a_pick_that_became_empty_ends_with_the_rebases_hint() {
+    under_each_release(|s| {
+        let root = fixture(s);
+        // A branch from the second commit whose first commit makes the change the third made:
+        // rebased onto `main` with every pick kept, that pick becomes empty, and `rebase -i`
+        // stops there with `CHERRY_PICK_HEAD` standing.
+        s.private(&root)
+            .git(["switch", "-q", "-c", "side", "start~1"])
+            .succeeds();
+        for content in ["three", "four"] {
+            write(&root, "notes.txt", format!("{content}\n").as_bytes());
+            private_add(s, &root, "notes.txt");
+            // A message of its own, so that the first is not the very commit `main` holds.
+            let message = format!("side {content}");
+            s.private(&root)
+                .git(["commit", "-qm", message.as_str()])
+                .succeeds();
+        }
+        let stopped = s
+            .private(&root)
+            .git(["rebase", "-i", "--reapply-cherry-picks", "main"])
+            .run();
+        assert_eq!(stopped.end, End::Code(1), "{stopped:?}");
+        let picking = s
+            .private(&root)
+            .git(["rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"])
+            .run();
+        assert_eq!(picking.end, End::Code(0), "{picking:?}");
+        let refused = hinted(s, &root, &["commit", "-m", "x"], &REBASE);
+        assert_eq!(refused.end, End::Code(1), "{refused:?}");
+        // The rebase's directory is read by `lstat`: one question, as for a cherry-pick.
+        asked_after(s, &root, &["commit", "-m", "x"], End::Code(1), &[PICK]);
+        // A cherry-pick run there is no stopped cherry-pick: no hint, the same question.
+        let continued = unhinted(s, &root, &["cherry-pick", "--continue"]);
+        assert_ne!(continued.end, End::Code(0), "{continued:?}");
+        let words = ["cherry-pick", "--continue"];
+        asked_after(s, &root, &words, continued.end, &[PICK]);
+        // The rebase's `--skip` leaves the empty pick out, and the rebase ends.
+        s.git(["dupe", "rebase", "--skip"]).from(&root).succeeds();
+        assert_eq!(fs::read(root.join("notes.txt")).unwrap(), b"four\n");
+        assert!(!root.join(".git/dupe/rebase-merge").exists());
+
+        // Beside a stopped `am`, which keeps `rebase-apply` too, a cherry-pick that became
+        // empty: a commit draws no hint, the rebase's line naming commands Git refuses while
+        // the `am` stands.
+        s.private(&root).git(["switch", "-q", "main"]).succeeds();
+        let patch = s.dir().join("two.patch");
+        let made = s
+            .private(&root)
+            .git(["format-patch", "-1", "--stdout", "start~1"])
+            .succeeds();
+        fs::write(&patch, made.stdout).unwrap();
+        let applying = s.private(&root).git(["am", text(&patch)]).run();
+        assert_eq!(applying.end, End::Code(128), "{applying:?}");
+        let empty = s.private(&root).git(["cherry-pick", "HEAD"]).run();
+        assert_eq!(empty.end, End::Code(1), "{empty:?}");
+        let beside = unhinted(s, &root, &["commit", "-m", "x"]);
+        assert_eq!(beside.end, End::Code(1), "{beside:?}");
+        asked_after(s, &root, &["commit", "-m", "x"], End::Code(1), &[PICK]);
+        s.private(&root).git(["cherry-pick", "--abort"]).succeeds();
+        s.private(&root).git(["am", "--abort"]).succeeds();
     });
 }

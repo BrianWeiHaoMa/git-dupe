@@ -335,6 +335,9 @@ fn a_pull_on_a_branch_with_no_upstream_names_pull_and_set_upstream_to() {
         // The form the hint names sets the upstream; then no hint is owed.
         dupe(s, root, &["branch", "--set-upstream-to=origin/main"]);
         succeeded_without_a_hint(&s.git(["dupe", "pull"]).from(root).run());
+        // Without `branch.<name>.remote`, `pull` counts no upstream either, as `push` does.
+        dupe(s, root, &["config", "--unset", "branch.main.remote"]);
+        assert_eq!(hinted(s, root, &["pull"], &NOT_TRACKING).end, End::Code(1));
     });
 }
 
@@ -396,6 +399,22 @@ fn a_divergent_pull_with_no_way_to_reconcile_names_pull_rebase_and_pull_ff() {
             let ours = hinted(s, root, words, &RECONCILE);
             assert_eq!(ours.end, End::Code(128), "{words:?}: {ours:?}");
         }
+        // A `branch.<name>.remote` that is a path, and no `merge`: Git has the remote's
+        // `HEAD` to merge, and the divergent-branches hint follows its exit 128, where the
+        // no-upstream one follows exit 1 alone.
+        s.git(["symbolic-ref", "HEAD", "refs/heads/main"])
+            .from(&t.private_remote)
+            .succeeds();
+        dupe(
+            s,
+            root,
+            &["config", "branch.main.remote", text(&t.private_remote)],
+        );
+        dupe(s, root, &["config", "--unset", "branch.main.merge"]);
+        let ours = hinted(s, root, &["pull"], &RECONCILE);
+        assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        assert!(!holds(&ours.stderr, NOT_TRACKING[1]), "{ours:?}");
+        dupe(s, root, &["branch", "--set-upstream-to=origin/main"]);
         // A word that chooses, or a key: Git's own refusal to fast-forward, with its own
         // hint and not this one.
         let ours = hinted(s, root, &["pull", "--ff-only"], &[FAST_FORWARD_ONLY]);

@@ -47,11 +47,10 @@
 //!   later word that would give one, so that an option and a word presumed a value after
 //!   the repository word are not refspecs. The reading serves the hints alone: the
 //!   comparison of destinations takes every word whatever it is.
-//! - A branch has an upstream for `push` only while both `branch.<name>.remote` and
-//!   `branch.<name>.merge` are reported, and for `pull` while the second is (S13). Git
-//!   compares the raw value of the one `merge` with `refs/heads/<name>`, so a value
-//!   without that prefix names a branch of another name even where it spells the
-//!   branch's own.
+//! - A branch has an upstream for `push` and `pull` only while both `branch.<name>.remote`
+//!   and `branch.<name>.merge` are reported (S13). Git compares the raw value of the one
+//!   `merge` with `refs/heads/<name>`, so a value without that prefix names a branch of
+//!   another name even where it spells the branch's own.
 //! - A configuration key is matched as Git reads one: its section and variable without
 //!   regard to ASCII case, the name between them exactly. Every `url` and `pushurl`
 //!   record of every remote is a URL, whichever command runs, because Git pushes to every
@@ -467,16 +466,16 @@ fn defines(key: &[u8], word: &[u8]) -> bool {
     })
 }
 
-/// Whether the configuration's `records` give `branch` an upstream for `transfer`: a
-/// `branch.<branch>.merge` reported, with a value or without, and, for `push`, a
-/// `branch.<branch>.remote` too, either of which unset `push` counts as none (S13).
-pub fn has_upstream(transfer: Transfer, records: &[Record<'_>], branch: &[u8]) -> bool {
+/// Whether the configuration's `records` give `branch` an upstream for `push` and `pull`:
+/// a `branch.<branch>.merge` and a `branch.<branch>.remote` reported, each with a value or
+/// without, either of which unset both count as none (S13).
+pub fn has_upstream(records: &[Record<'_>], branch: &[u8]) -> bool {
     let reported = |variable: &[u8]| {
         records
             .iter()
             .any(|&(key, _)| is(key, b"branch", Some(branch), variable))
     };
-    reported(b"merge") && (transfer != Transfer::Push || reported(b"remote"))
+    reported(b"merge") && reported(b"remote")
 }
 
 /// The upstream of `branch` for `push`, from the configuration's `records`, where its name
@@ -485,7 +484,7 @@ pub fn has_upstream(transfer: Transfer, records: &[Record<'_>], branch: &[u8]) -
 /// `None` where `push` counts no upstream, and where `merge` has several records, for
 /// which Git refuses naming no command, or one without a value, which it cannot read.
 pub fn upstream_of_another_name<'a>(records: &[Record<'a>], branch: &[u8]) -> Option<Upstream<'a>> {
-    if !has_upstream(Transfer::Push, records, branch) {
+    if !has_upstream(records, branch) {
         return None;
     }
     let mut merges = records

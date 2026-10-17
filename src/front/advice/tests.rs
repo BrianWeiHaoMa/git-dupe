@@ -15,6 +15,18 @@ fn unasked(question: Question) -> Answer {
     panic!("asked {question:?}")
 }
 
+/// Whether the line of an entry with `trigger` follows a run that ended as `end`.
+fn holds(trigger: Trigger, end: &End, ask: impl FnMut(Question) -> Answer) -> bool {
+    let family = Family {
+        word: b"word",
+        excluding: None,
+        requiring: None,
+        trigger,
+        line: b"line",
+    };
+    follows(&family, end, ask).is_some()
+}
+
 /// The line `decided` gives for the entries `typed` admits after a run that ended as `end`,
 /// each question answered as `answers` says, and the questions it put, in order.
 fn decision(
@@ -173,17 +185,27 @@ fn a_pick_reads_as_no_commit_the_word_and_n_in_a_bundle() {
     }
 }
 
+/// A rebase and an `am` share `rebase-apply`, each marking it with a file of its own (S12).
 #[test]
-fn an_am_is_stopped_only_by_the_directory_its_own_stop_keeps() {
-    let directories = |word: &[u8]| {
+fn a_rebase_and_an_am_are_each_stopped_only_by_what_their_own_stop_keeps() {
+    let markers = |word: &[u8]| {
         let family = FAMILIES.iter().find(|family| family.word == word).unwrap();
         match family.trigger {
-            Trigger::Stopped(directories) => directories,
+            Trigger::Stopped(markers) => markers,
             trigger => panic!("{trigger:?}"),
         }
     };
-    assert_eq!(directories(b"rebase"), ["rebase-merge", "rebase-apply"]);
-    assert_eq!(directories(b"am"), ["rebase-apply"]);
+    assert_eq!(
+        markers(b"rebase"),
+        [
+            Marker::Directory("rebase-merge"),
+            Marker::Holding("rebase-apply", "rebasing")
+        ]
+    );
+    assert_eq!(
+        markers(b"am"),
+        [Marker::Holding("rebase-apply", "applying")]
+    );
 }
 
 #[test]
@@ -263,81 +285,85 @@ fn a_detached_head_is_asked_about_before_the_run_only_where_the_words_admit_it()
 #[test]
 fn each_trigger_follows_its_end_and_state() {
     let picking = Trigger::Picking("CHERRY_PICK_HEAD");
-    let stopped = Trigger::Stopped(&["rebase-merge", "rebase-apply"]);
-    for trigger in [stopped, picking] {
-        for end in [End::Code(1), End::Code(128), End::Signal(9)] {
-            assert!(
-                follows(trigger, &end, |_| Answer::Yes),
-                "{trigger:?} {end:?}"
+    let stopped = Trigger::Stopped(A_REBASE_STOPPED);
+    for end in [End::Code(1), End::Code(128), End::Signal(9)] {
+        for (answer, hinted) in [
+            (Answer::Yes, true),
+            (Answer::No, false),
+            (Answer::Unanswered, false),
+        ] {
+            assert_eq!(
+                holds(stopped, &end, |_| answer),
+                hinted,
+                "{end:?} {answer:?}"
             );
-            assert!(
-                !follows(trigger, &end, |_| Answer::No),
-                "{trigger:?} {end:?}"
-            );
-            assert!(!follows(trigger, &end, |_| Answer::Unanswered));
+        }
+        // A pick stands where its pseudo-reference verifies and no rebase directory stands
+        // beside it: a rebase stopped at a pick that became empty keeps `CHERRY_PICK_HEAD`.
+        for (verifies, rebasing, hinted) in [
+            (Answer::Yes, Answer::No, true),
+            (Answer::Yes, Answer::Yes, false),
+            (Answer::Yes, Answer::Unanswered, false),
+            (Answer::No, Answer::No, false),
+            (Answer::Unanswered, Answer::No, false),
+        ] {
+            let follow = holds(picking, &end, |question| {
+                if question == Question::Verifies("CHERRY_PICK_HEAD") {
+                    verifies
+                } else {
+                    assert_eq!(question, Question::Stopped(A_REBASE_DIRECTORY));
+                    assert_eq!(verifies, Answer::Yes, "asked after {verifies:?}");
+                    rebasing
+                }
+            });
+            assert_eq!(follow, hinted, "{end:?} {verifies:?} {rebasing:?}");
         }
     }
     // A pick that exited 0 stopped nothing; a rebase stopped at `edit` or `break` exits 0
     // with its directory in place, so the stop is asked about whatever the end.
-    assert!(!follows(picking, &End::Code(0), unasked));
+    assert!(!holds(picking, &End::Code(0), unasked));
     for (answer, hinted) in [
         (Answer::Yes, true),
         (Answer::No, false),
         (Answer::Unanswered, false),
     ] {
         assert_eq!(
-            follows(stopped, &End::Code(0), |question| {
-                assert_eq!(
-                    question,
-                    Question::Stopped(&["rebase-merge", "rebase-apply"])
-                );
+            holds(stopped, &End::Code(0), |question| {
+                assert_eq!(question, Question::Stopped(A_REBASE_STOPPED));
                 answer
             }),
             hinted,
             "{answer:?}"
         );
     }
-    assert!(follows(
-        Trigger::Stopped(&["rebase-apply"]),
+    assert!(holds(
+        Trigger::Stopped(AN_AM_STOPPED),
         &End::Code(1),
         |question| {
-            assert_eq!(question, Question::Stopped(&["rebase-apply"]));
+            assert_eq!(question, Question::Stopped(AN_AM_STOPPED));
             Answer::Yes
         }
     ));
-    assert!(follows(picking, &End::Code(1), |question| {
-        assert_eq!(question, Question::Verifies("CHERRY_PICK_HEAD"));
-        Answer::Yes
-    }));
-    assert!(follows(Trigger::ExitedOne, &End::Code(1), unasked));
+    assert!(holds(Trigger::ExitedOne, &End::Code(1), unasked));
     for end in [End::Code(0), End::Code(128), End::Signal(1), End::Signal(9)] {
-        assert!(!follows(Trigger::ExitedOne, &end, unasked), "{end:?}");
+        assert!(!holds(Trigger::ExitedOne, &end, unasked), "{end:?}");
     }
-    // A commit during a stopped pick exits 1; an autostash that came back with conflicts
-    // leaves its run exiting 0.
-    let while_picking = Trigger::ExitedOneWhile("CHERRY_PICK_HEAD");
-    for (trigger, end, question) in [
-        (
-            while_picking,
-            End::Code(1),
-            Question::Verifies("CHERRY_PICK_HEAD"),
-        ),
-        (Trigger::Unmerged, End::Code(0), Question::Unmerged),
+    // A commit during a stopped pick exits 1 (its lines: below); an autostash that came
+    // back with conflicts leaves its run exiting 0.
+    for (answer, hinted) in [
+        (Answer::Yes, true),
+        (Answer::No, false),
+        (Answer::Unanswered, false),
     ] {
-        for (answer, hinted) in [
-            (Answer::Yes, true),
-            (Answer::No, false),
-            (Answer::Unanswered, false),
-        ] {
-            let follow = follows(trigger, &end, |asked| {
-                assert_eq!(asked, question);
-                answer
-            });
-            assert_eq!(follow, hinted, "{trigger:?} {answer:?}");
-        }
+        let follow = holds(Trigger::Unmerged, &End::Code(0), |asked| {
+            assert_eq!(asked, Question::Unmerged);
+            answer
+        });
+        assert_eq!(follow, hinted, "{answer:?}");
     }
+    let while_picking = Trigger::ExitedOneWhile("CHERRY_PICK_HEAD");
     for end in [End::Code(0), End::Code(128), End::Signal(1), End::Signal(9)] {
-        assert!(!follows(while_picking, &end, unasked), "{end:?}");
+        assert!(!holds(while_picking, &end, unasked), "{end:?}");
     }
     for end in [
         End::Code(1),
@@ -345,13 +371,13 @@ fn each_trigger_follows_its_end_and_state() {
         End::Signal(9),
         End::Signal(15),
     ] {
-        assert!(!follows(Trigger::Unmerged, &end, unasked), "{end:?}");
+        assert!(!holds(Trigger::Unmerged, &end, unasked), "{end:?}");
     }
 }
 
 #[test]
 fn a_rebase_is_asked_about_its_autostash_only_where_it_exited_0_and_left_no_stop() {
-    let stopped = Question::Stopped(&["rebase-merge", "rebase-apply"]);
+    let stopped = Question::Stopped(A_REBASE_STOPPED);
     let unmerged = Question::Unmerged;
     let rebase = &["rebase", "side"][..];
     // Stopped, the stop's line decides and nothing is asked after it.
@@ -437,8 +463,10 @@ fn a_merge_is_asked_about_its_autostash_only_after_exit_0() {
 }
 
 #[test]
-fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_cherry_pick() {
+fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick_and_the_stop_beside_it() {
     let pick = Question::Verifies("CHERRY_PICK_HEAD");
+    let rebase = Question::Stopped(A_REBASE_STOPPED);
+    let directory = Question::Stopped(A_REBASE_DIRECTORY);
     // `--amend` and `--allow-empty` are read exactly, before the first `--`.
     for typed in [
         &["commit", "--amend"][..],
@@ -470,7 +498,9 @@ fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_cherry_pick() {
         );
     }
     // Without `--amend`, a stopped cherry-pick is asked about, and a stopped revert never:
-    // Git's advice for a commit during one names only the revert's own commands.
+    // Git's advice for a commit during one names only the revert's own commands. Where the
+    // pick stands, so may a rebase stopped at a pick that became empty, whose line follows,
+    // or an `am`, beside which none does: the rebase's line would name commands Git refuses.
     for typed in [
         &["commit", "-m", "x"][..],
         &["commit"],
@@ -478,9 +508,42 @@ fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_cherry_pick() {
         &["commit", "--amen"],
         &["commit", "--", "--amend"],
     ] {
+        let neither = [
+            (pick, Answer::Yes),
+            (rebase, Answer::No),
+            (directory, Answer::No),
+        ];
         assert_eq!(
-            decision(typed, &End::Code(1), &[(pick, Answer::Yes)]),
-            (Some(CHERRY_PICK), vec![pick]),
+            decision(typed, &End::Code(1), &neither),
+            (Some(CHERRY_PICK), vec![pick, rebase, directory]),
+            "{typed:?}"
+        );
+        assert_eq!(
+            decision(
+                typed,
+                &End::Code(1),
+                &[(pick, Answer::Yes), (rebase, Answer::Yes)]
+            ),
+            (Some(REBASE), vec![pick, rebase]),
+            "{typed:?}"
+        );
+        let beside_an_am = [
+            (pick, Answer::Yes),
+            (rebase, Answer::No),
+            (directory, Answer::Yes),
+        ];
+        assert_eq!(
+            decision(typed, &End::Code(1), &beside_an_am),
+            (None, vec![pick, rebase, directory]),
+            "{typed:?}"
+        );
+        assert_eq!(
+            decision(
+                typed,
+                &End::Code(1),
+                &[(pick, Answer::Yes), (rebase, Answer::Unanswered)]
+            ),
+            (None, vec![pick, rebase]),
             "{typed:?}"
         );
         for answer in [Answer::No, Answer::Unanswered] {
@@ -507,7 +570,7 @@ fn a_detached_head_follows_a_run_that_exited_0_and_symbolic_ref_answering_1() {
         (Answer::Unanswered, false),
     ] {
         assert_eq!(
-            follows(Trigger::Detached, &End::Code(0), |question| {
+            holds(Trigger::Detached, &End::Code(0), |question| {
                 assert_eq!(question, Question::OnABranch);
                 after
             }),
@@ -522,7 +585,7 @@ fn a_detached_head_follows_a_run_that_exited_0_and_symbolic_ref_answering_1() {
         End::Signal(9),
         End::Signal(15),
     ] {
-        assert!(!follows(Trigger::Detached, &end, unasked), "{end:?}");
+        assert!(!holds(Trigger::Detached, &end, unasked), "{end:?}");
     }
 }
 

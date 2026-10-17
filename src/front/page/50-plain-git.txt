@@ -37,8 +37,7 @@ status are unchanged:
   a checkout or switch without --detach or -q that detaches HEAD
   a branch -d, in any spelling, that exits 1
   a failed push that names no remote while the configuration chooses none
-  a push on a branch with no upstream, even one with no commit
-  a pull on a branch with no branch.<name>.merge, even one with no commit
+  a push or pull on a branch with no upstream, even one with no commit
   a push to an upstream of another name than the branch's
   a push or pull from a detached HEAD
   a push that exits 1, as a rejected one does
@@ -50,4 +49,11 @@ A push or pull on such a branch, or a push to an upstream of another name,
 gets its hint where Git refuses it given no refspec and either no remote or
 the branch's own: its branch.<name>.remote, or, for a push where that is
 unset, the only remote configured, else origin. One from a detached HEAD gets
-its hint where it fails given no refspec.
+its hint where it fails given no refspec. A pull gets either only where it
+exits 1: given a URL or a path, it merges the remote's HEAD, and where it
+cannot, it exits 128.
+
+While a rebase or am stands stopped, a cherry-pick or revert gets no hint,
+and a commit that exits 1 while a cherry-pick is stopped gets the rebase's,
+as where the rebase stopped at a pick that became empty, or none beside a
+stopped am.

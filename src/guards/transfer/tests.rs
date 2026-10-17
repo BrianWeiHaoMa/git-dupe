@@ -707,9 +707,9 @@ fn push_takes_the_remote_of_its_first_key_reported_and_otherwise_origin() {
 }
 
 #[test]
-fn a_branch_has_an_upstream_while_its_merge_key_and_for_push_its_remote_are_reported() {
-    let has = |transfer, listing: &[(&str, Option<&str>)], branch: &str| {
-        has_upstream(transfer, &records(listing), branch.as_bytes())
+fn a_branch_has_an_upstream_while_its_merge_and_remote_keys_are_both_reported() {
+    let has = |listing: &[(&str, Option<&str>)], branch: &str| {
+        has_upstream(&records(listing), branch.as_bytes())
     };
     let remote = ("branch.main.remote", Some("origin"));
     for merge in [
@@ -717,25 +717,16 @@ fn a_branch_has_an_upstream_while_its_merge_key_and_for_push_its_remote_are_repo
         ("BRANCH.main.MERGE", Some("refs/heads/main")),
         ("branch.main.merge", None),
     ] {
-        assert!(has(Transfer::Pull, &[merge], "main"), "{merge:?}");
-        assert!(has(Transfer::Push, &[merge, remote], "main"), "{merge:?}");
-        assert!(has(Transfer::Push, &[remote, merge], "main"), "{merge:?}");
+        assert!(has(&[merge, remote], "main"), "{merge:?}");
+        assert!(has(&[remote, merge], "main"), "{merge:?}");
         assert!(
-            has(
-                Transfer::Push,
-                &[merge, ("BRANCH.main.REMOTE", None)],
-                "main"
-            ),
+            has(&[merge, ("BRANCH.main.REMOTE", None)], "main"),
             "{merge:?}"
         );
-        // `push` counts no upstream while either key is unset, where `pull` reads `merge`.
-        assert!(!has(Transfer::Push, &[merge], "main"), "{merge:?}");
+        // `push` and `pull` count no upstream while either key is unset.
+        assert!(!has(&[merge], "main"), "{merge:?}");
         assert!(
-            !has(
-                Transfer::Push,
-                &[merge, ("branch.other.remote", Some("origin"))],
-                "main"
-            ),
+            !has(&[merge, ("branch.other.remote", Some("origin"))], "main"),
             "{merge:?}"
         );
     }
@@ -747,9 +738,7 @@ fn a_branch_has_an_upstream_while_its_merge_key_and_for_push_its_remote_are_repo
         &[("branch.merge", Some("refs/heads/main")), remote],
         &[("branch.main.merge.x", Some("refs/heads/main")), remote],
     ] {
-        for transfer in [Transfer::Push, Transfer::Pull] {
-            assert!(!has(transfer, listing, "main"), "{transfer:?} {listing:?}");
-        }
+        assert!(!has(listing, "main"), "{listing:?}");
     }
 }
 

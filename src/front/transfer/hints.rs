@@ -28,16 +28,16 @@ pub const REJECTED: &[u8] = b"where a private push is rejected because the branc
     rebase, brings them here before the next push; plain 'git pull' and 'git fetch' act on \
     the project's repository";
 
-/// The hint after a failed `pull` on a branch with no upstream.
+/// The hint after a `pull` that exited 1 on a branch with no upstream.
 pub const NOT_TRACKING: &[u8] = b"the current private branch has no upstream to pull from: \
     'git dupe pull <remote> <branch>' pulls a branch this once, and \
     'git dupe branch --set-upstream-to=<remote>/<branch>' makes it the upstream; plain \
     'git pull' and 'git branch' act on the project's repository";
 
-/// The hint after a failed `pull` given no refspec on a detached `HEAD`, where no branch
-/// key names an upstream: both placeholders, as Git's advice writes them. Conditioned on
-/// the cause: given a URL or a path, Git has the remote's `HEAD` to merge, and a pull fails
-/// on a detached `HEAD` for causes the command does not meet, such as unmerged entries.
+/// The hint after a `pull` given no refspec that exited 1 on a detached `HEAD`, where no
+/// branch key names an upstream: both placeholders, as Git's advice writes them.
+/// Conditioned on the cause: a pull exits 1 on a detached `HEAD` for causes the command
+/// does not meet too, such as a fetch that fails.
 pub const DETACHED_PULL: &[u8] = b"where a private pull fails because HEAD is detached, on \
     no branch, so that no upstream names a branch to pull, 'git dupe pull <remote> <branch>' \
     pulls a branch into it; plain 'git pull' acts on the project's repository";

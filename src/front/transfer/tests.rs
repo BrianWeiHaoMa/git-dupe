@@ -130,42 +130,34 @@ fn each_push_hint_follows_its_end_and_asks_only_where_the_upstream_hint_is_due()
     );
 }
 
-/// In the table's order, the first that holds: a branch with no upstream after any end but
-/// 0, an unchosen way after 128, a detached `HEAD` after any end but 0, fast-forward only
-/// after 128; after 0 alone, the one question.
+/// In the table's order, the first that holds: a branch with no upstream after 1, an
+/// unchosen way after 128, a detached `HEAD` after 1, fast-forward only after 128; after 0
+/// alone, the one question.
 #[test]
 fn a_pull_hints_in_the_tables_order_the_first_that_holds() {
-    let failed = [git(1), git(128), git(2), Outcome::Git(End::Signal(2))];
-    let ways = [
-        None,
-        Some(Diverging::Unchosen),
-        Some(Diverging::FastForwardOnly),
+    // Given a URL or a path, Git has the remote's `HEAD` to merge, and its advice after 128
+    // is the divergent-branches or the fast-forward-only one.
+    let others = [
+        git(2),
+        git(129),
+        Outcome::Git(End::Signal(1)),
+        Outcome::Refused,
     ];
-    for diverging in ways {
-        let then = pull(Some(Unnamed::NoUpstream), diverging);
-        for ended in &failed {
-            assert_eq!(
-                unasked(&then, ended).as_deref(),
-                Some(NOT_TRACKING),
-                "{then:?}"
-            );
-        }
-    }
-    // An unchosen way after 128 comes before a detached `HEAD`, given a URL or a path, where
-    // Git has something to merge and its advice names the way.
-    let then = pull(Some(Unnamed::Detached), Some(Diverging::Unchosen));
-    assert_eq!(unasked(&then, &git(128)).as_deref(), Some(UNRECONCILED));
-    for ended in [git(1), git(2), Outcome::Git(End::Signal(2))] {
-        assert_eq!(unasked(&then, &ended).as_deref(), Some(DETACHED_PULL));
-    }
-    for diverging in [None, Some(Diverging::FastForwardOnly)] {
-        let then = pull(Some(Unnamed::Detached), diverging);
-        for ended in &failed {
-            assert_eq!(
-                unasked(&then, ended).as_deref(),
-                Some(DETACHED_PULL),
-                "{then:?}"
-            );
+    for (unnamed, line) in [
+        (Unnamed::NoUpstream, NOT_TRACKING),
+        (Unnamed::Detached, DETACHED_PULL),
+    ] {
+        for (diverging, after_128) in [
+            (None, None),
+            (Some(Diverging::Unchosen), Some(UNRECONCILED)),
+            (Some(Diverging::FastForwardOnly), Some(FAST_FORWARD_ONLY)),
+        ] {
+            let then = pull(Some(unnamed), diverging);
+            assert_eq!(unasked(&then, &git(1)).as_deref(), Some(line), "{then:?}");
+            assert_eq!(unasked(&then, &git(128)).as_deref(), after_128, "{then:?}");
+            for ended in &others {
+                assert_eq!(unasked(&then, ended), None, "{then:?}");
+            }
         }
     }
     for (diverging, line) in [
@@ -184,9 +176,8 @@ fn a_pull_hints_in_the_tables_order_the_first_that_holds() {
             assert_eq!(unasked(&then, &ended), None, "{then:?}");
         }
     }
-    assert_eq!(unasked(&pull(None, None), &git(128)), None);
-    for ended in &failed {
-        assert_eq!(unasked(&pull(None, None), ended), None);
+    for ended in [git(1), git(128), git(2), Outcome::Git(End::Signal(2))] {
+        assert_eq!(unasked(&pull(None, None), &ended), None);
     }
 }
 

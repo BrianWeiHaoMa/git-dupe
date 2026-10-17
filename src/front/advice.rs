@@ -1,10 +1,10 @@
 //! The hint after a word passed through whose outcome Git's advice names a plain `git`
 //! command for (`Holds/G19`, G25): `rebase` and `am` stopped, `rebase` and `merge` whose
 //! autostash came back with conflicts, `cherry-pick` and `revert` stopped, `commit
-//! --amend` refusing and `commit` refusing while a cherry-pick stands, `checkout` and
-//! `switch` leaving a branch for a detached `HEAD`, and `branch -d` refusing. Copied under
-//! `git dupe`, Git's command would act on the project's repository; the hint names the
-//! `git dupe` form.
+//! --amend` refusing and `commit` refusing while a cherry-pick or a rebase's pick stands,
+//! `checkout` and `switch` leaving a branch for a detached `HEAD`, and `branch -d`
+//! refusing. Copied under `git dupe`, Git's command would act on the project's repository;
+//! the hint names the `git dupe` form.
 //!
 //! What the code below cannot show:
 //!
@@ -28,12 +28,13 @@
 //!   expansion's own `--` can move a typed `-h` after, nor a run that did not start, nor
 //!   one against a Git directory where no private repository stands, as where a help
 //!   request runs in a worktree no `init` attached.
-//! - A stopped `rebase` or `am` is decided by its directory, whatever the run's end: an
-//!   `edit` or `break` stop of `rebase -i` exits 0, and an interrupted rebase is a stopped
-//!   one. An `am` reads only `rebase-apply`, the one its own stop keeps: beside a rebase
-//!   stopped in `rebase-merge`, its line would name commands that fail. "Did not exit 0"
-//!   is any end but exit 0, a signal included. An end named by its number, 0 or 1, is
-//!   never a signal's.
+//! - A stopped `rebase` or `am` is decided by what its own stop keeps, whatever the run's
+//!   end: an `edit` or `break` stop of `rebase -i` exits 0, and an interrupted rebase is a
+//!   stopped one. A rebase keeps `rebase-merge`, or `rebase-apply` under `--apply`, and an
+//!   `am` keeps `rebase-apply` too, each marking `rebase-apply` with a file of its own,
+//!   `rebasing` or `applying` (S12): beside the other's stop, a line would name commands
+//!   that fail. "Did not exit 0" is any end but exit 0, a signal included. An end named by
+//!   its number, 0 or 1, is never a signal's.
 //! - Where a word has several entries, the first whose words, end, and state hold decides,
 //!   in the table's order: a `rebase` stopped is decided by its directory before the
 //!   autostash is asked about, and a `commit` by its `--amend` before a stopped
@@ -58,7 +59,14 @@
 //!   no directory.
 //! - `CHERRY_PICK_HEAD` and `REVERT_HEAD` are asked of Git, because they live in the
 //!   reference store, which may hold no file for them (S15); `rebase-merge` and
-//!   `rebase-apply` are directories in every store, read by `lstat` (S12).
+//!   `rebase-apply` are directories in every store, read by `lstat` (S12), after the
+//!   pseudo-reference, so that the runs stay fixed for the words and the end.
+//! - A rebase stopped at a pick that became empty keeps `CHERRY_PICK_HEAD` beside its
+//!   directory (S12): a `cherry-pick` or `revert` run there has stopped nothing of its own
+//!   and draws no hint, and a `commit` there draws the rebase's line, Git's advice naming
+//!   `git rebase --skip`. Beside a stopped `am`, which keeps `rebase-apply` holding
+//!   `applying`, a `commit` while a cherry-pick stands draws none: the rebase's line would
+//!   name commands Git refuses while the `am` stands.
 //! - A `commit` during a stopped revert gets no hint: Git's advice there names only the
 //!   revert's own commands, which fail in the project's repository, and none of its
 //!   own (S12).
@@ -71,6 +79,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 
 use super::lines::{self, Level};
 use super::outcome::Outcome;
@@ -135,7 +144,7 @@ const FAMILIES: [Family; 11] = [
         word: b"rebase",
         excluding: None,
         requiring: None,
-        trigger: Trigger::Stopped(&["rebase-merge", "rebase-apply"]),
+        trigger: Trigger::Stopped(A_REBASE_STOPPED),
         line: REBASE,
     },
     Family {
@@ -156,7 +165,7 @@ const FAMILIES: [Family; 11] = [
         word: b"am",
         excluding: None,
         requiring: None,
-        trigger: Trigger::Stopped(&["rebase-apply"]),
+        trigger: Trigger::Stopped(AN_AM_STOPPED),
         line: AM,
     },
     Family {
@@ -223,14 +232,41 @@ struct Family {
     line: &'static [u8],
 }
 
+/// What `lstat` finds in the private Git directory where a stop stands (S12).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Marker {
+    /// A directory of this name.
+    Directory(&'static str),
+    /// A directory of the first name holding a file of the second.
+    Holding(&'static str, &'static str),
+}
+
+/// A rebase stopped: `rebase-merge`, or `rebase-apply` holding a file `rebasing`.
+const A_REBASE_STOPPED: &[Marker] = &[
+    Marker::Directory("rebase-merge"),
+    Marker::Holding("rebase-apply", "rebasing"),
+];
+
+/// An `am` stopped: `rebase-apply` holding a file `applying`.
+const AN_AM_STOPPED: &[Marker] = &[Marker::Holding("rebase-apply", "applying")];
+
+/// Either directory a rebase or an `am` keeps while it stands.
+const A_REBASE_DIRECTORY: &[Marker] = &[
+    Marker::Directory("rebase-merge"),
+    Marker::Directory("rebase-apply"),
+];
+
 /// The run's end and the state after which a family's hint follows (S12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Trigger {
-    /// A run of any end, while one of these is a directory in the private Git directory.
-    Stopped(&'static [&'static str]),
-    /// A run that did not exit 0, while `rev-parse -q --verify` of this name exits 0.
+    /// A run of any end, while one of these markers stands.
+    Stopped(&'static [Marker]),
+    /// A run that did not exit 0, while `rev-parse -q --verify` of this name exits 0 and
+    /// no rebase directory stands.
     Picking(&'static str),
-    /// A run that exited 1, while `rev-parse -q --verify` of this name exits 0.
+    /// A run that exited 1, while `rev-parse -q --verify` of this name exits 0: the
+    /// family's line where no rebase directory stands, the rebase's where a rebase stands
+    /// stopped, and none beside another stop, as an `am`'s.
     ExitedOneWhile(&'static str),
     /// A run that exited 0, while `ls-files -u -z` lists an unmerged entry.
     Unmerged,
@@ -244,8 +280,8 @@ enum Trigger {
 /// A question of the private repository's state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Question {
-    /// Whether one of these is a directory in its Git directory.
-    Stopped(&'static [&'static str]),
+    /// Whether one of these markers stands in its Git directory.
+    Stopped(&'static [Marker]),
     /// Whether `rev-parse -q --verify <name>` names a commit.
     Verifies(&'static str),
     /// Whether `symbolic-ref -q HEAD` finds `HEAD` on a branch, or detached.
@@ -356,8 +392,8 @@ fn reads_as_delete(word: &[u8]) -> bool {
 }
 
 /// The line of the first of `families` whose end and state hold after a run that ended as
-/// `end`: each entry's question is put to `ask` in turn, and one that answers nothing ends
-/// the decision with none.
+/// `end`: each entry's questions are put to `ask` in turn, and one that answers nothing
+/// ends the decision with none.
 fn decided(
     families: &[&'static Family],
     end: &End,
@@ -365,40 +401,56 @@ fn decided(
 ) -> Option<&'static [u8]> {
     for family in families {
         let mut unanswered = false;
-        let holds = follows(family.trigger, end, |question| {
+        let line = follows(family, end, |question| {
             let answer = ask(question);
             unanswered = answer == Answer::Unanswered;
             answer
         });
-        if holds {
-            return Some(family.line);
-        }
-        if unanswered {
-            return None;
+        if line.is_some() || unanswered {
+            return line;
         }
     }
     None
 }
 
-/// Whether the hint follows a run that ended as `end`: `ask` is put a question only once
-/// the end holds.
-fn follows(trigger: Trigger, end: &End, ask: impl FnOnce(Question) -> Answer) -> bool {
+/// The line that follows a run that ended as `end` where `family`'s end and state hold:
+/// `ask` is put a question only once the end holds, and each later one only once those
+/// before it have answered as the entry needs.
+fn follows(
+    family: &Family,
+    end: &End,
+    mut ask: impl FnMut(Question) -> Answer,
+) -> Option<&'static [u8]> {
     let exited_0 = *end == End::Code(0);
     let exited_1 = *end == End::Code(1);
-    match trigger {
-        Trigger::Stopped(directories) => ask(Question::Stopped(directories)) == Answer::Yes,
-        Trigger::Picking(name) => !exited_0 && ask(Question::Verifies(name)) == Answer::Yes,
-        Trigger::ExitedOneWhile(name) => exited_1 && ask(Question::Verifies(name)) == Answer::Yes,
+    let holds = match family.trigger {
+        Trigger::Stopped(markers) => ask(Question::Stopped(markers)) == Answer::Yes,
+        Trigger::Picking(name) => {
+            !exited_0
+                && ask(Question::Verifies(name)) == Answer::Yes
+                && ask(Question::Stopped(A_REBASE_DIRECTORY)) == Answer::No
+        }
+        Trigger::ExitedOneWhile(name) => {
+            if !exited_1 || ask(Question::Verifies(name)) != Answer::Yes {
+                return None;
+            }
+            match ask(Question::Stopped(A_REBASE_STOPPED)) {
+                Answer::Yes => return Some(REBASE),
+                Answer::No => ask(Question::Stopped(A_REBASE_DIRECTORY)) == Answer::No,
+                Answer::Unanswered => false,
+            }
+        }
         Trigger::Unmerged => exited_0 && ask(Question::Unmerged) == Answer::Yes,
         Trigger::Detached => exited_0 && ask(Question::OnABranch) == Answer::No,
         Trigger::ExitedOne => exited_1,
-    }
+    };
+    holds.then_some(family.line)
 }
 
 /// The answer of the private repository `against` names.
 fn asked(question: Question, against: Against) -> Answer {
     let words = match question {
-        Question::Stopped(directories) => return stopped(against, directories),
+        Question::Stopped(markers) => return stopped(against, markers),
         Question::Unmerged => return unmerged(against),
         Question::Verifies(name) => ["rev-parse", "-q", "--verify", name].to_vec(),
         Question::OnABranch => ["symbolic-ref", "-q", "HEAD"].to_vec(),
@@ -442,20 +494,28 @@ pub(super) fn unmerged(against: Against) -> Answer {
     }
 }
 
-/// Whether `lstat` finds one of `directories` a directory in the private Git directory; a
-/// symbolic link to one is none.
-fn stopped(against: Against, directories: &[&str]) -> Answer {
-    let Some(git_directory) = against.private_repository() else {
-        return Answer::Unanswered;
-    };
-    let directory = |name: &&str| {
-        fs::symlink_metadata(git_directory.join(name)).is_ok_and(|found| found.is_dir())
-    };
-    if directories.iter().any(directory) {
-        Answer::Yes
-    } else {
-        Answer::No
+/// Whether one of `markers` stands in the Git directory of the private repository `against`
+/// names.
+fn stopped(against: Against, markers: &[Marker]) -> Answer {
+    match against.private_repository() {
+        Some(git_directory) if marked(git_directory, markers) => Answer::Yes,
+        Some(_) => Answer::No,
+        None => Answer::Unanswered,
     }
+}
+
+/// Whether `lstat` finds one of `markers` in `git_directory`: a directory where it names
+/// one, and a regular file in it where it names that too; a symbolic link is neither.
+fn marked(git_directory: &Path, markers: &[Marker]) -> bool {
+    let found = |path: &Path| fs::symlink_metadata(path).ok();
+    markers.iter().any(|marker| match *marker {
+        Marker::Directory(name) => found(&git_directory.join(name)).is_some_and(|it| it.is_dir()),
+        Marker::Holding(name, file) => {
+            let directory = git_directory.join(name);
+            found(&directory).is_some_and(|it| it.is_dir())
+                && found(&directory.join(file)).is_some_and(|it| it.is_file())
+        }
+    })
 }
 
 #[cfg(test)]

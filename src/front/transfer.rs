@@ -54,19 +54,21 @@
 //!   the word typed; after any other `push` that exited 1, a rejected update or a hook's
 //!   refusal alike, naming `git dupe pull` and `git dupe fetch`, given with the repository
 //!   word typed, where one is, so that they name the destination that refused it and not
-//!   the branch's upstream; after a `pull` that did not exit 0 on a branch with no
-//!   upstream, given no repository, or given the branch's `branch.<name>.remote` and no
-//!   refspec, naming `git dupe pull <remote> <branch>` and `git dupe branch
-//!   --set-upstream-to`; after one that exited 128 while neither the configuration nor an
-//!   exact word of the six chooses how to reconcile divergent branches, naming `git dupe
-//!   config pull.rebase` and `pull.ff`; after one that did not exit 0 on a detached
-//!   `HEAD`, given no repository, or any repository word and no refspec, naming `git dupe
-//!   pull <remote> <branch>`; after one that exited 128 where `--ff-only` is typed, or
-//!   `pull.ff` is `only` and none of the six is, naming `git dupe merge --no-ff` and `git
-//!   dupe rebase` of `FETCH_HEAD`; and after one that exited 0 whose autostash came back
-//!   with conflicts, `advice`'s line for it. Of the `pull` hints, the first that holds in
-//!   that order follows: on a detached `HEAD`, a pull given a URL or a path has the
-//!   remote's `HEAD` to merge, and Git's advice there is the divergent-branches one. A
+//!   the branch's upstream; after a `pull` that exited 1 on a branch with no upstream,
+//!   which lacks `branch.<name>.merge` or `branch.<name>.remote`, given no repository, or
+//!   given the branch's `branch.<name>.remote` and no refspec, naming `git dupe pull
+//!   <remote> <branch>` and `git dupe branch --set-upstream-to`; after one that exited 128
+//!   while neither the configuration nor an exact word of the six chooses how to reconcile
+//!   divergent branches, naming `git dupe config pull.rebase` and `pull.ff`; after one
+//!   that exited 1 on a detached `HEAD`, given no repository, or any repository word and no
+//!   refspec, naming `git dupe pull <remote> <branch>`; after one that exited 128 where
+//!   `--ff-only` is typed, or `pull.ff` is `only` and none of the six is, naming `git dupe
+//!   merge --no-ff` and `git dupe rebase` of `FETCH_HEAD`; and after one that exited 0
+//!   whose autostash came back with conflicts, `advice`'s line for it. Of the `pull` hints,
+//!   the first that holds in that order follows, and the exits keep them apart: Git's
+//!   advice for no branch to merge comes with exit 1, and a pull given a URL or a path has
+//!   the remote's `HEAD` to merge, Git's advice where it cannot being the divergent-branches
+//!   or fast-forward-only one, with 128. A
 //!   bundle or an abbreviation of the six is not read, so the divergent-branches hint may
 //!   follow where Git chose, never where a key did, and a `--ff-only` is read wherever it
 //!   stands, the value of another option included; the detached and fast-forward lines
@@ -133,12 +135,12 @@ pub enum Then {
         refused: Option<Refused>,
         given: Option<Vec<u8>>,
     },
-    /// `pull`: after a run that did not exit 0, or that exited 128, the hint for what left
-    /// Git no branch to merge, where `unnamed` holds that, or for divergent branches, where
-    /// `diverging` holds how Git was told to meet them, the first that holds of a branch
-    /// with no upstream, an unchosen way, a detached `HEAD`, and fast-forward only; after a
-    /// run that exited 0, the hint after an autostash that came back with conflicts, where
-    /// the index then holds an unmerged entry.
+    /// `pull`: after a run that exited 1, the hint for what left Git no branch to merge,
+    /// where `unnamed` holds that; after one that exited 128, the hint for divergent
+    /// branches, where `diverging` holds how Git was told to meet them; in the order of a
+    /// branch with no upstream, an unchosen way, a detached `HEAD`, and fast-forward only;
+    /// after a run that exited 0, the hint after an autostash that came back with
+    /// conflicts, where the index then holds an unmerged entry.
     Pull {
         unnamed: Option<Unnamed>,
         diverging: Option<Diverging>,
@@ -288,7 +290,7 @@ fn refused(records: &[Record<'_>], given: Repository<'_>, current: Current<'_>) 
     {
         return None;
     }
-    if !transfer::has_upstream(Transfer::Push, records, branch) {
+    if !transfer::has_upstream(records, branch) {
         let remote = word.unwrap_or_else(|| transfer::push_remote(records, Some(branch)));
         return Some(Refused::NoUpstream {
             remote: remote.to_vec(),
@@ -303,9 +305,9 @@ fn refused(records: &[Record<'_>], given: Repository<'_>, current: Current<'_>) 
 
 /// What leaves `pull`, given `given` with `HEAD` at `current`, no branch to merge, where
 /// Git's advice names `git pull <remote> <branch>` and the configuration's `records` hold
-/// what Git read (S13): nothing given a refspec; on a branch, no upstream, given no
-/// repository or the branch's own `branch.<name>.remote`; a detached `HEAD`, whatever
-/// repository word is given, because no branch key names one for it.
+/// what Git read (S13): nothing given a refspec; on a branch, no upstream, either branch
+/// key unset, given no repository or the branch's own `branch.<name>.remote`; a detached
+/// `HEAD`, whatever repository word is given, because no branch key names one for it.
 fn unnamed(records: &[Record<'_>], given: Repository<'_>, current: Current<'_>) -> Option<Unnamed> {
     let branch = match (given, current) {
         (Repository::WithRefspec(_), _) | (_, Current::AnyBranch) => return None,
@@ -318,8 +320,7 @@ fn unnamed(records: &[Record<'_>], given: Repository<'_>, current: Current<'_>) 
         }
         Repository::Default | Repository::WithRefspec(_) => true,
     };
-    (the_branch_remote && !transfer::has_upstream(Transfer::Pull, records, branch))
-        .then_some(Unnamed::NoUpstream)
+    (the_branch_remote && !transfer::has_upstream(records, branch)).then_some(Unnamed::NoUpstream)
 }
 
 /// How `pull`, given `given` with `HEAD` at `current` and the words `after` its command
@@ -395,11 +396,12 @@ fn hint(then: &Then, ended: &Outcome, ask: impl FnOnce(Question) -> Answer) -> O
             ..
         } if *end == End::Code(128) => refusal(refused, || ask(Question::HeadVerifies)),
         Then::Push { given, .. } if *end == End::Code(1) => Some(rejected(given.as_deref())),
-        // In the table's order, the first that holds (`Holds/G18`).
+        // In the table's order, the first that holds (`Holds/G18`): Git's advice for no
+        // branch to merge comes with exit 1, and for divergent branches with 128.
         Then::Pull {
             unnamed: Some(Unnamed::NoUpstream),
             ..
-        } if failed => Some(NOT_TRACKING.to_vec()),
+        } if *end == End::Code(1) => Some(NOT_TRACKING.to_vec()),
         Then::Pull {
             diverging: Some(Diverging::Unchosen),
             ..
@@ -407,7 +409,7 @@ fn hint(then: &Then, ended: &Outcome, ask: impl FnOnce(Question) -> Answer) -> O
         Then::Pull {
             unnamed: Some(Unnamed::Detached),
             ..
-        } if failed => Some(DETACHED_PULL.to_vec()),
+        } if *end == End::Code(1) => Some(DETACHED_PULL.to_vec()),
         Then::Pull {
             diverging: Some(Diverging::FastForwardOnly),
             ..
