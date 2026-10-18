@@ -8,6 +8,8 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-18
+
 ### Added
 
 - After a private `merge`, `rebase`, or `pull` whose autostash, asked for by
