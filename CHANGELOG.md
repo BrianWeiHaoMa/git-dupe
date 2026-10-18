@@ -29,9 +29,9 @@ Every change a user of git-dupe would notice, newest first, in the form of
   names plain `git reset HEAD^`, and after a commit during an empty pick plain
   `git commit --allow-empty` and `git cherry-pick --skip` or `git rebase --skip`, which
   act on the project's repository. Git's output and exit status are unchanged.
-- After a private `push` that Git refuses on a branch whose upstream has another name
-  than the branch, under `push.default` unset or `simple`, `git dupe` now ends with a
-  `hint:` naming `git dupe push <remote> HEAD:<upstream>` and
+- After a private `push` given no refspec that Git refuses on a branch whose upstream
+  has another name than the branch, under `push.default` unset or `simple`, `git dupe`
+  now ends with a `hint:` naming `git dupe push <remote> HEAD:<upstream>` and
   `git dupe push <remote> HEAD`, and after one that Git refuses on a detached `HEAD`,
   with a hint naming `git dupe push <remote> HEAD:<branch>`, because Git's own advice
   there names plain `git push`, which acts on the project's repository. Git's output and
@@ -73,7 +73,11 @@ Every change a user of git-dupe would notice, newest first, in the form of
   jobs and fetches from the default remote, as for `git dupe pull --jobs --ff 4`, is now
   refused, fetching nothing, where that default remote names the project's repository
   or a remote of it; it ran unguarded where `pull` kept a word of its own between the
-  two.
+  two. So is a `git dupe pull` given a word beginning with `-` after `--`, as
+  `git dupe pull -- -q`, which `pull` hands to `fetch` without the `--`, so that `fetch`
+  reads it as an option of its own and takes the default remote where no later word
+  names one: it is refused where that default remote names the project's repository or
+  a remote of it, whatever the later words name; it ran unguarded.
 - On a branch with no upstream, a `git dupe push <remote>` with no refspec that Git
   refuses, where `<remote>` is the branch's `branch.<name>.remote`, or, where that is
   unset, the only remote the private configuration defines, `<remote>` counted among
@@ -97,12 +101,14 @@ Every change a user of git-dupe would notice, newest first, in the form of
   `git dupe commit --amend` and `git dupe rebase --edit-todo`, because Git's own advice
   at an `edit` stop, a reword whose editor failed, or a todo list Git cannot read names
   plain `git commit --amend` or `git rebase --edit-todo`, which act on the project's
-  repository. A private `am` run while a rebase is stopped, and a `rebase` run while an
+  repository. The hint of a stopped `rebase` or `am` now also follows any run of that
+  command that leaves its stop standing, whatever its exit, as
+  `git dupe rebase --show-current-patch` or `git dupe am --show-current-patch` does with
+  status 0. A private `am` run while a rebase is stopped, and a `rebase` run while an
   `am` is stopped, no longer end with the hint of the other, whose commands fail there,
   and a `cherry-pick` or `revert` run while a rebase is stopped no longer ends with the
   hint of a stopped `cherry-pick` or `revert`, whose commands leave a rebase stopped at
-  a pick that became empty as it was. Git's output and exit status are
-  unchanged.
+  a pick that became empty as it was. Git's output and exit status are unchanged.
 - A `git dupe revert` given `-n`, alone or in a bundle of short options such as `-sn`,
   or `--no-commit`, that stops on a conflict no longer ends with the `hint:` naming
   `git dupe revert --continue`, which commits what `--no-commit` was given to leave
@@ -121,9 +127,11 @@ Every change a user of git-dupe would notice, newest first, in the form of
   `HEAD` now says that `git dupe switch -` goes back to the branch left only where that
   branch has a commit: from a branch with none yet, it has nothing to go back to.
 - The `hint:` naming `git dupe branch -D` after a `git dupe branch -d` that refuses now
-  also follows `--delete` abbreviated, as `--del`, and `d` in a bundle of short options,
-  as `-vd`, where Git's own advice names plain `git branch -D`, which acts on the
-  project's repository.
+  also follows an abbreviation of `--delete` that Git reads as it, as `--del` before Git
+  2.56.0, whose `branch` also has `--delete-merged` and refuses the abbreviation as
+  ambiguous, exit 129, hinting nothing, and `d` in a bundle of short options, as `-vd`,
+  where Git's own advice names plain `git branch -D`, which acts on the project's
+  repository.
 
 ## [0.3.1] - 2026-10-16
 
