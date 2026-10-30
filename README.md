@@ -115,61 +115,16 @@ What there is to learn fits the one screen of `git dupe help`:
 
 ## Install
 
-git-dupe runs on Linux and on macOS and needs Git 2.43.0 or newer, below 3.0.0, a
-release that is not out yet and may change what git-dupe relies on. It is one
-executable, `git-dupe`, which Git runs for `git dupe …` when it stands in a directory on
-`PATH`.
-
-**From a release.** Download the archive for your machine,
-`git-dupe-<version>-<platform>-<architecture>.tar`, from the
-[releases](https://github.com/BrianWeiHaoMa/git-dupe/releases) and follow its `INSTALL`
-note, which installs the executable and the manual page, with `~/.local/bin` on `PATH`
-and `~/.local/share/man` on the manual path:
+On x86-64 Linux or macOS, with Git 2.43.0 or newer, below 3.0.0:
 
 ```sh
-tar -xf git-dupe-<version>-<platform>-<architecture>.tar
-cd git-dupe-<version>
-mkdir -p ~/.local/bin ~/.local/share/man/man1
-cp git-dupe ~/.local/bin/
-cp git-dupe.1 ~/.local/share/man/man1/
+curl -fsSL https://raw.githubusercontent.com/BrianWeiHaoMa/git-dupe/main/install.sh | sh
 ```
 
-A release has one archive for each kind of machine, its executable built and checked on
-that kind of machine, the Macs' on macOS 26:
-
-| Archive | For |
-|---|---|
-| `git-dupe-<version>-linux-x86_64.tar` | x86-64 Linux with the GNU C library 2.39 or newer |
-| `git-dupe-<version>-macos-arm64.tar` | a Mac with Apple silicon, on macOS 11.0 or newer |
-| `git-dupe-<version>-macos-x86_64.tar` | an Intel Mac, on macOS 10.12 or newer |
-
-On a Mac, a browser marks the archive it downloads as quarantined, the mark passes to the
-files unpacked from it, and macOS holds the executable, which Apple has not notarized,
-instead of running it: remove the mark once, after installing and before its first run,
-with
-`xattr -d com.apple.quarantine ~/.local/bin/git-dupe`, or download with `curl -LO`,
-which sets none.
-
-On another machine, or where the executable does not start, install from source. Either
-way, the Git on `PATH` decides: `git --version` must say 2.43.0 or newer. Ubuntu 24.04
-ships 2.43.0 and Debian 13 ships 2.47; Ubuntu 22.04 ships 2.34 and Debian 12 ships 2.39,
-so there a newer Git comes first, from the `git-core` PPA, a backport, or a build from
-source. On a Mac, Apple's Git, which the Command Line Tools for Xcode install, will do,
-2.50.1 in their version 26.6, and so will Homebrew's.
-
-**From source.** In a clone of this repository, with Rust installed through rustup, which
-installs the toolchain the repository pins on first use:
-
-```sh
-cargo install --path .
-```
-
-That installs the executable alone. `git dupe help` and `git dupe help <command>` cover
-daily use from the executable; the manual page behind `man git-dupe` and
-`git dupe --help` comes with a release archive, installed as its `INSTALL` says.
-
-To uninstall, run `git dupe detach` in each project that uses it, then delete the two
-files, or `cargo uninstall git-dupe` after an install from source.
+It puts the latest release's executable in `~/.local/bin` and its manual page in
+`~/.local/share/man/man1`, once the download matches its published digest.
+[Installing](docs/install.md) has the rest: the archives by hand, from source, the Git
+it needs, and uninstalling.
 
 ## How it works
 
@@ -211,8 +166,8 @@ files, or `cargo uninstall git-dupe` after an install from source.
   a path spelled in another case is another path to it, while the project's Git ignores
   a hidden path in every spelling of its ASCII case.
 - **Git 2.43.0 or newer, below 3.0.0.** No single feature needs it; it is the floor the
-  suite covers, and Ubuntu 24.04's stock Git. [Install](#install) says what older
-  distributions ship.
+  suite covers, and Ubuntu 24.04's stock Git. [Installing](docs/install.md#git) says
+  what older distributions ship.
 - **Nothing is encrypted.** The dupe's remote is an ordinary Git remote: what you push
   is stored there as you pushed it, for whoever can read that repository. Push to one
   you would trust with the files, and keep out what you would not push to any Git

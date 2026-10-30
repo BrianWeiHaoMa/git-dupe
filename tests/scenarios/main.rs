@@ -27,10 +27,14 @@
 //! plain `#[test]`, kept in `manual_page` or `release_archive` beside the scenarios that
 //! install what it checks. The check of `README.md` is a plain `#[test]` too, in
 //! `readme`: the `git dupe` lines the README shows are the page's first command lines,
-//! in order, which `manual_page_commands` runs, and its other command lines hold the
-//! install note's, all of them, which `release_archive` follows, so that a change to the
-//! page's command lines as far as the README shows them, or to any of the note's, fails
-//! there until the README follows it.
+//! in order, which `manual_page_commands` runs, so that a change to the page's command
+//! lines as far as the README shows them fails there until the README follows it. The
+//! scenarios of `install` run `install.sh` as the pasted line runs it, against a stand-in
+//! for the releases pages on the loopback interface, and the plain `#[test]`s of
+//! `install_lines` pin the install lines `README.md` and `docs/install.md` show: the
+//! pasted line, and in `docs/install.md` the install note's lines, all of them, which
+//! `release_archive` follows, so that a change to any of them fails there until the
+//! documents follow it.
 
 mod harness;
 
@@ -75,6 +79,8 @@ mod in_use_scripted;
 mod init;
 mod init_template;
 mod init_worktree_config;
+mod install;
+mod install_lines;
 mod isolation;
 mod killed;
 mod macos_volume;

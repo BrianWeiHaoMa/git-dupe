@@ -8,6 +8,17 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Added
+
+- An install script: `curl -fsSL https://raw.githubusercontent.com/BrianWeiHaoMa/git-dupe/main/install.sh | sh`
+  installs the latest release on x86-64 Linux and on macOS, putting the executable in
+  `~/.local/bin` and the manual page in `~/.local/share/man/man1` as the archive's
+  `INSTALL` note does, once the archive matches its published SHA-256 digest; it
+  installs nothing when a step before the copies fails, and says what to add to `PATH`
+  when `~/.local/bin` is not on it. `docs/install.md` describes it beside the archives,
+  installing from source, the Git git-dupe needs, and uninstalling, which the README's
+  Install section now points to.
+
 ## [0.3.2] - 2026-10-18
 
 ### Added

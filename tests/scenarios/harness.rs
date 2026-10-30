@@ -8,6 +8,7 @@ mod attached;
 mod clean;
 mod concurrent;
 mod detach;
+mod documents;
 mod exclude_lock;
 mod executable;
 mod files;
@@ -20,6 +21,7 @@ mod platform;
 mod provision;
 mod public;
 mod release_archive;
+mod release_site;
 mod releases;
 mod remotes;
 mod repository;
@@ -49,6 +51,7 @@ pub use detach::{
     after_git, daily_warnings, detached, now_visible, stale_file_timestamp, stale_timestamp,
     warnings,
 };
+pub use documents::{is_git_dupe, shown_command_lines};
 pub use exclude_lock::lock_is_free;
 pub use executable::write_executable;
 pub use files::{copy, entry_names, inode, mode, name_accepted, text, write};
@@ -64,12 +67,13 @@ pub use output::{
     End, Output, holds, lines_in_order, names, names_number, names_the_route_to_private, offered,
     records, refusal, warnings_in_any_order,
 };
-pub use platform::{architecture, second_filesystem, word};
+pub use platform::{MACHINES_WITHOUT_AN_ARCHIVE, architecture, second_filesystem, word};
 pub use public::{
     EVERY_OBJECT, held_publicly, leaving_public_git, privately_tracked, public_git, public_status,
     publicly_tracked, watched_dupe, watched_dupe_succeeds,
 };
-pub use release_archive::{install_note, note_commands, release_archive};
+pub use release_archive::{install_note, note_commands, path_for_an_install, release_archive};
+pub use release_site::ReleaseSite;
 pub use releases::oldest_supported;
 pub use remotes::{
     Everything, MANY_URLS, PROJECT_URL, SecondMachine, Transfer, commit_here, committing, diverged,
@@ -77,6 +81,7 @@ pub use remotes::{
 };
 pub use repository::locate_words;
 pub use scenario::{Scenario, report, under_each_release};
+pub use sha256::hex_digest;
 pub use stash::{refused_stash_untracked, stash_refusal_first, stash_untracked_line};
 pub use sweep::{GITDUPE, Killed, Sweep, Version, copied, files, lived_in, outside};
 pub use trace::{Runs, run_traced, run_words};

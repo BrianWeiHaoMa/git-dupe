@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, architecture, asking_for_the_page, every_text_shown, holds_a_line_of_the_general_text,
-    install_note, lines_of, note_commands, release_archive, under_each_release, word,
+    install_note, lines_of, note_commands, path_for_an_install, release_archive,
+    under_each_release, word,
 };
 
 /// The directory every member lies in.
@@ -268,16 +269,8 @@ fn following_the_install_note_gives_git_dupe_and_its_page_from_a_temporary_home(
             );
         }
 
-        // That directory, the release's `git`, and the caller's `PATH` without the build
-        // directory and without any directory that holds a `git-dupe`: this machine may
-        // have one installed, which would answer in place of the copy.
-        let built = Path::new(env!("CARGO_BIN_EXE_git-dupe")).parent().unwrap();
-        let callers = std::env::var_os("PATH").unwrap_or_default();
-        let callers = std::env::split_paths(&callers)
-            .filter(|dir| dir != built && fs::symlink_metadata(dir.join("git-dupe")).is_err());
-        let release_bin = s.release_git().parent().unwrap().to_path_buf();
-        let path =
-            std::env::join_paths([bin.clone(), release_bin].into_iter().chain(callers)).unwrap();
+        // That directory first, and no other git-dupe behind it.
+        let path = path_for_an_install(s, &[&bin]);
 
         // Before the note is followed, nothing answers for git-dupe.
         let before = s.git(["dupe", "--version"]).variable("PATH", &path).run();

@@ -10,8 +10,9 @@ it has another name, read that name for `main` in them (`Set once`, below).
 
 - **The version**, `<major>.<minor>.<patch>`, is set in one place, `version` in
   `Cargo.toml`, which `Cargo.lock` follows (step 3): `git dupe --version` prints it, and
-  the archives are named by it. The README names no version of git-dupe, so setting one
-  never edits it.
+  the archives are named by it. Neither the README, nor a page under `docs/`, nor
+  `install.sh` names a version of git-dupe, so setting one never edits them: the script
+  installs whichever release is the latest.
 - **The tag** is an annotated tag `v<version>` on a commit of the default branch,
   `main`.
 - **The GitHub Release** of that tag is titled with the tag. Its notes are the version's

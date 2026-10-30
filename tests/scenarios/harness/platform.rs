@@ -5,7 +5,8 @@
 //! here.
 //!
 //! The platform's word and the machine's architecture together name the release archive
-//! (P3): its name takes both from here and spells neither itself.
+//! (P3): its name takes both from here and spells neither itself. So do the machines no
+//! archive is built for, for a check that pretends to be one.
 //!
 //! The second filesystem that F5's refusal across filesystems needs: a fresh directory on
 //! `/dev/shm` on Linux, which a machine may lack, and on macOS on a ram disk attached for
@@ -47,6 +48,11 @@ pub fn architecture() -> String {
     );
     architecture.to_owned()
 }
+
+/// What `uname -s` and `uname -m` print on machines no release archive is built for (F1,
+/// N10, P3): Linux on 64-bit Arm, and an operating system git-dupe does not run on.
+pub const MACHINES_WITHOUT_AN_ARCHIVE: [(&str, &str); 2] =
+    [("Linux", "aarch64"), ("FreeBSD", "amd64")];
 
 /// The number of `EILSEQ`, the error with which a filesystem refuses a name that is no
 /// valid encoding, as macOS's APFS refuses one whose bytes are no UTF-8; the standard

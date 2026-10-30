@@ -5,8 +5,10 @@
 //! (P3), all three under the one directory `git-dupe-<version>`. It is made anew by every
 //! check command that needs it and replaces whole the one an earlier command made, which
 //! holds the binary of an earlier source; a build that fails ends the command's archive
-//! checks instead. Needs `tar`.
+//! checks instead. Needs `tar`. And the `PATH` of a run that installs from it, or uses
+//! what was installed.
 
+use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -15,6 +17,7 @@ use std::sync::OnceLock;
 
 use super::fresh::FreshDirectory;
 use super::platform::{architecture, word};
+use super::scenario::Scenario;
 
 /// What one check command made.
 pub struct ReleaseArchive {
@@ -47,6 +50,20 @@ pub fn note_commands(note: &str) -> Vec<String> {
         .filter_map(|line| line.trim_start().strip_prefix("$ "))
         .map(str::to_owned)
         .collect()
+}
+
+/// A `PATH` on which the only git-dupe is one installed into a directory of `front`: those
+/// directories, the release's `git`, and the caller's `PATH` without the build directory
+/// and without any directory that holds a `git-dupe`, because this machine may have one
+/// installed, which would answer in place of the copy.
+pub fn path_for_an_install(s: &Scenario, front: &[&Path]) -> OsString {
+    let built = Path::new(env!("CARGO_BIN_EXE_git-dupe")).parent().unwrap();
+    let callers = std::env::var_os("PATH").unwrap_or_default();
+    let callers = std::env::split_paths(&callers)
+        .filter(|dir| dir != built && fs::symlink_metadata(dir.join("git-dupe")).is_err());
+    let release_bin = s.release_git().parent().unwrap().to_path_buf();
+    let front = front.iter().map(|dir| dir.to_path_buf());
+    std::env::join_paths(front.chain([release_bin]).chain(callers)).unwrap()
 }
 
 fn make() -> Result<ReleaseArchive, String> {
