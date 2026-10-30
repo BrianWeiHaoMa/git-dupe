@@ -5,7 +5,8 @@
 //!
 //! - Only `settle` and `remove` write the region, through `region`'s one `update`, the one
 //!   site that reads `.git/info/exclude` to write it and the one that takes the lock every
-//!   worktree's command shares, held there across no Git run (R10, `Holds/G28`), always
+//!   worktree's command shares, on the one lock file `lock` opens, held there across no
+//!   Git run (R10, `Holds/G28`), always
 //!   whole through `replace`, its rules always in `rule`'s form, its bounds always
 //!   `region`'s one reading of them: one write, one rule form, one reading back (G6,
 //!   F3). `remove` only deletes it, for `detach`, which never settles (R3). The user's
@@ -38,6 +39,7 @@ mod foreign;
 mod gitdupe;
 mod hidden;
 mod listing;
+mod lock;
 mod region;
 mod remove;
 mod replace;

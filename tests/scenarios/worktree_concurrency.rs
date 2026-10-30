@@ -7,7 +7,7 @@
 //! Two commands started together are ordered by nothing more, so whether a pair's writes
 //! of the file overlapped, and which took the lock first, is the machine's: what is
 //! observed is the outcome after every pair. That both worktrees' commands wait for the
-//! one lock on the common Git directory is observed with the harness holding it, as
+//! one lock of the common Git directory is observed with the harness holding it, as
 //! `region_lock` observes it for the main worktree alone, and that none of them starts a
 //! Git run while it holds the lock, from each Git run they start (R10).
 

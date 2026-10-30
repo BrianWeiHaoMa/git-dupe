@@ -52,7 +52,7 @@ pub use detach::{
     warnings,
 };
 pub use documents::{is_git_dupe, shown_command_lines};
-pub use exclude_lock::lock_is_free;
+pub use exclude_lock::{lock_is_free, lock_path};
 pub use executable::write_executable;
 pub use files::{copy, entry_names, inode, mode, name_accepted, text, write};
 pub use fresh::FreshDirectory;

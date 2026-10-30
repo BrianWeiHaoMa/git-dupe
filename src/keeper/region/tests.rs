@@ -1,7 +1,8 @@
 //! The one site on disk: what it writes, what it leaves, and where it writes nothing.
 
 use super::*;
-use crate::links_and_modes::{identity, mode, permissions_case, symlink};
+use crate::keeper::lock as lock_file;
+use crate::links_and_modes::{identity, mode, permissions_case, remove_link, symlink};
 use std::fs::TryLockError;
 
 mod lock;
@@ -42,15 +43,15 @@ impl Scratch {
         self.0.join(".git/info/exclude")
     }
 
-    /// Whether another descriptor of the common Git directory can take its lock now: none
-    /// is held, by an update that returned or by anyone else.
+    /// Whether another handle of the lock file can take its lock now: none is held, by an
+    /// update that returned or by anyone else.
     fn lock_is_free(&self) -> bool {
         lock_is_free(&self.0.join(".git"))
     }
 }
 
 fn lock_is_free(common_directory: &Path) -> bool {
-    match File::open(common_directory).unwrap().try_lock() {
+    match lock_file::open(common_directory).unwrap().try_lock() {
         Ok(()) => true,
         Err(TryLockError::WouldBlock) => false,
         Err(TryLockError::Error(cause)) => panic!("{}: {cause}", common_directory.display()),

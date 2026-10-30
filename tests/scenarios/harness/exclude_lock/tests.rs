@@ -2,6 +2,7 @@ use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::super::output::End;
+use super::super::tree::Tree;
 use super::*;
 
 /// An attached project in the scenario's directory, and its common Git directory.
@@ -143,4 +144,20 @@ fn a_watched_command_dropped_unwaited_leaves_no_script_waiting() {
         );
         thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// A comparison that leaves the lock file out takes a command making it and names one
+/// removing it, which G28 forbids.
+#[test]
+fn a_tree_without_the_lock_file_admits_its_making_and_names_its_removal() {
+    let s = Scenario::of_the_first_release();
+    let (_, common) = attached(&s);
+    let tree = || Tree::of(&common).without_the_lock_file(&common);
+    fs::remove_file(lock_path(&common)).unwrap();
+    let without = tree();
+    lock_is_free(&common);
+    let with = tree();
+    assert!(without.changed_in(&with).is_empty());
+    fs::remove_file(lock_path(&common)).unwrap();
+    assert_eq!(with.changed_in(&tree()), [lock_path(&common)]);
 }

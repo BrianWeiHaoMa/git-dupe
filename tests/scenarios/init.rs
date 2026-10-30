@@ -76,7 +76,13 @@ fn first_attachment_copies_local_identity_and_preserves_the_public_repository() 
             let user = b"# user text\r\n*.o\n";
             fs::write(dir.join(".git/info/exclude"), user).unwrap();
             let excluded = [dir.join(".git/dupe"), dir.join(".git/info/exclude")];
-            let before = Tree::of(&dir.join(".git")).without(&[&excluded[0], &excluded[1]]);
+            let git = dir.join(".git");
+            let left = |git: &Path| {
+                Tree::of(git)
+                    .without(&[&excluded[0], &excluded[1]])
+                    .without_the_lock_file(git)
+            };
+            let before = left(&git);
             let output = s.git(["dupe", "init"]).from(&from).run();
             succeeded_with_hints(&output, 0);
             gits_init_line(&output, &dir);
@@ -91,8 +97,7 @@ fn first_attachment_copies_local_identity_and_preserves_the_public_repository() 
             assert_eq!(found.rules, [b"/.gitdupe"]);
             assert!(found.after.is_empty());
             assert!(!dir.join(".gitdupe").exists());
-            let changed = before
-                .changed_in(&Tree::of(&dir.join(".git")).without(&[&excluded[0], &excluded[1]]));
+            let changed = before.changed_in(&left(&git));
             assert!(changed.is_empty(), "changed: {changed:?}");
             let log = s.private(&dir).git(["log"]).run();
             assert_eq!(log.end, End::Code(128), "{log:?}");

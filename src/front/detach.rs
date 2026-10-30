@@ -161,9 +161,9 @@ fn region_stands(not_deleted: NotDeleted) -> Vec<u8> {
             b"; nothing is detached",
         ]
         .concat(),
-        NotDeleted::NotLocked { directory, cause } => [
+        NotDeleted::NotLocked { file, cause } => [
             b"cannot take the lock on ",
-            bytes::of(directory.as_os_str()),
+            bytes::of(file.as_os_str()),
             b" to delete the managed region: ",
             cause.to_string().as_bytes(),
             b"; nothing is detached",
@@ -222,22 +222,23 @@ mod tests {
 
     #[test]
     fn a_region_whose_lock_cannot_be_taken_stands_and_names_the_lock() {
-        // No common Git directory to lock: the keeper's deletion stops before anything
-        // else, and the refusal names the lock and its cause, not the exclude file.
+        // No common Git directory for the lock file: the keeper's deletion stops before
+        // anything else, and the refusal names the lock file and its cause, not the exclude
+        // file.
         let root = std::env::temp_dir().join(format!("git-dupe-unlocked-{}", std::process::id()));
         let workspace = Workspace::at_root(&root);
         let Err(not_deleted) = crate::keeper::remove(&workspace, None) else {
             panic!("the region was deleted without its lock");
         };
         let line = region_stands(not_deleted);
-        let expected = [
-            b"cannot take the lock on ",
-            bytes::of(root.join(".git").as_os_str()),
-            b" to delete the managed region: ",
-        ]
-        .concat();
+        let expected = [b"cannot take the lock on ", bytes::of(root.as_os_str())].concat();
+        let names_the_region = line
+            .windows(30)
+            .any(|window| window == b" to delete the managed region:");
         assert!(
-            line.starts_with(&expected) && line.ends_with(b"; nothing is detached"),
+            line.starts_with(&expected)
+                && names_the_region
+                && line.ends_with(b"; nothing is detached"),
             "{}",
             line.escape_ascii()
         );

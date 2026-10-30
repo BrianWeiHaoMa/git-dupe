@@ -1,11 +1,14 @@
-//! The lock on the common Git directory under which every worktree's command replaces
+//! The lock on the one lock file under which every worktree's command replaces
 //! `.git/info/exclude` and deletes its region (`Holds/G28`), as a scenario takes and
 //! watches it: held as another worktree's command holds it, found free, waited at by
 //! commands, and never held by a `git-dupe` that starts a Git run (R10).
 //!
-//! The harness sees the lock only through `flock` requests of its own on the common Git
-//! directory, which answer alike on Linux and macOS (S16), and git-dupe's work only
-//! through the Git runs it starts, each recorded and answered with such a request before
+//! The harness sees the lock only through `File::lock` and `File::try_lock` requests of
+//! its own on the lock file, which answer alike on every platform (S16), never reading
+//! from it or writing to it, because on Windows the lock is mandatory and such an access
+//! fails; a request made before any command has run creates the file, as a command would.
+//! It sees git-dupe's work only through the Git runs it starts, each recorded and answered
+//! with such a request before
 //! it goes on (`watched_runs.rs`). A request that finds the lock taken as a run starts
 //! finds git-dupe holding it, which R10 forbids, where nothing else can hold it: not while
 //! the scenario holds it itself, and not while a second command of the watch runs, which
@@ -30,7 +33,8 @@
 
 use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
@@ -53,20 +57,38 @@ const GRACE: Duration = Duration::from_millis(500);
 /// gives up, as the kill harness's pause gives up (`kill.rs`).
 const LOOKS: u32 = 3000;
 
-/// Takes the lock on the common Git directory `common`, as another worktree's command
-/// takes it, until the descriptor returned is dropped.
+/// The lock file's name in a common Git directory, the one spelling under `tests/`.
+const LOCK_FILE: &str = "git-dupe.lock";
+
+/// Where the lock file of the common Git directory `common` stands.
+pub fn lock_path(common: &Path) -> PathBuf {
+    common.join(LOCK_FILE)
+}
+
+/// A handle of the lock file of `common`, opened as the product opens it.
+pub(super) fn lock_file(common: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path(common))
+}
+
+/// Takes the lock of the common Git directory `common`, as another worktree's command
+/// takes it, until the handle returned is dropped.
 pub fn hold_the_lock(common: &Path) -> File {
-    let directory = File::open(common).unwrap();
-    directory.lock().unwrap();
-    directory
+    let file = lock_file(common).unwrap();
+    file.lock().unwrap();
+    file
 }
 
-/// Whether nobody holds the lock on `common`: another descriptor takes it at once.
+/// Whether nobody holds the lock of `common`: another handle takes it at once.
 pub fn lock_is_free(common: &Path) -> bool {
-    File::open(common).unwrap().try_lock().is_ok()
+    lock_file(common).unwrap().try_lock().is_ok()
 }
 
-/// `git dupe` commands whose every Git run is watched for the lock on one common Git
+/// `git dupe` commands whose every Git run is watched for the lock of one common Git
 /// directory.
 pub struct LockWatch<'s> {
     scenario: &'s Scenario,
@@ -83,7 +105,7 @@ pub struct LockWatch<'s> {
 }
 
 impl Scenario {
-    /// A watch of the lock on the common Git directory `common`, its control directories
+    /// A watch of the lock of the common Git directory `common`, its control directories
     /// below `name` in the scenario's directory, outside every workspace.
     pub fn watching_the_lock(&self, name: &str, common: &Path) -> LockWatch<'_> {
         let control = self.dir().join(name);
@@ -134,7 +156,7 @@ impl LockWatch<'_> {
         }
     }
 
-    /// Takes the lock on the common Git directory as another worktree's command takes it,
+    /// Takes the lock of the common Git directory as another worktree's command takes it,
     /// until the hold is let go: by `Waiting::let_go`, or by dropping it.
     pub fn hold(&self) -> Held<'_> {
         assert!(

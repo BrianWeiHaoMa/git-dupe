@@ -3,11 +3,25 @@
 //! The new content goes to a fresh file inside the private Git directory, is given the
 //! original's permissions, and is renamed onto the destination, so that a kill leaves
 //! the old file or the new one and never a partial one. A rename onto a symbolic link
-//! replaces the link, not its target.
+//! replaces the link, not its target. A rename another process refuses for the moment is
+//! tried again over a bounded time (S22, E7).
 
 use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
+
+/// The waits between the eight tries of a rename, 311 ms in all (S22).
+const DELAYS: [Duration; 7] = [
+    Duration::from_millis(0),
+    Duration::from_millis(1),
+    Duration::from_millis(10),
+    Duration::from_millis(20),
+    Duration::from_millis(40),
+    Duration::from_millis(80),
+    Duration::from_millis(160),
+];
 
 /// How many names `fresh` tries before giving up.
 const NAMES: u32 = 100;
@@ -29,11 +43,35 @@ pub fn whole(
         None => Ok(()),
     });
     drop(file);
-    let replaced = written.and_then(|()| fs::rename(&fresh, destination));
+    let replaced = written.and_then(|()| renamed(&fresh, destination));
     if replaced.is_err() {
         let _ = fs::remove_file(&fresh);
     }
     replaced
+}
+
+/// `fresh` renamed onto `destination`, tried again while the destination is refused.
+fn renamed(fresh: &Path, destination: &Path) -> io::Result<()> {
+    retried(|| fs::rename(fresh, destination), thread::sleep)
+}
+
+/// `attempt`, tried again after each of `DELAYS` where it fails with raw error 5 or 32,
+/// the eighth failure returned as it is and any other error at once. On Windows those are
+/// `ERROR_ACCESS_DENIED`, which a destination another process holds without delete sharing
+/// answers, as a read-only one does, and `ERROR_SHARING_VIOLATION`. On Linux and macOS they
+/// are other errors, which the same delays try again to the same failure. The lock can be
+/// held across this: no Git run falls inside it, a replacement starting no process (R10).
+fn retried(
+    mut attempt: impl FnMut() -> io::Result<()>,
+    mut wait: impl FnMut(Duration),
+) -> io::Result<()> {
+    for delay in DELAYS {
+        match attempt() {
+            Err(cause) if matches!(cause.raw_os_error(), Some(5 | 32)) => wait(delay),
+            ended => return ended,
+        }
+    }
+    attempt()
 }
 
 /// A file made for this replacement under a name nothing in the private Git directory
@@ -62,7 +100,9 @@ fn fresh(private_directory: &Path) -> io::Result<(PathBuf, File)> {
 mod tests {
     use super::*;
     use crate::links_and_modes::{mode, permissions_case, symlink};
+    use std::cell::{Cell, RefCell};
     use std::path::PathBuf;
+    use std::time::Instant;
 
     /// A directory of the test's own below the system's temporary one, removed after.
     struct Scratch(PathBuf);
@@ -123,6 +163,100 @@ mod tests {
         assert!(failed.is_err());
         assert_eq!(fs::read(destination.join("inside")).unwrap(), b"kept\n");
         assert_eq!(fs::read_dir(scratch.0.join("private")).unwrap().count(), 0);
+    }
+
+    /// The time a rename onto a directory takes where its error is none the retry takes:
+    /// well under the 311 ms of its delays, which only Windows's raw error 5 spends here.
+    #[test]
+    fn a_rename_refused_for_another_cause_spends_no_delay() {
+        let scratch = Scratch::new("no-delay");
+        let destination = scratch.0.join("exclude");
+        fs::create_dir(&destination).unwrap();
+        let began = Instant::now();
+        let refused = whole(&scratch.0.join("private"), &destination, b"new\n", None);
+        let took = began.elapsed();
+        let cause = refused.unwrap_err();
+        if !matches!(cause.raw_os_error(), Some(5 | 32)) {
+            assert!(took < Duration::from_millis(250), "it took {took:?}");
+        }
+    }
+
+    /// What `retried` does with an attempt that fails with `errors` in turn and then
+    /// succeeds: the tries made, the waits between them, and what it returned.
+    fn tried(errors: &[i32]) -> (usize, Vec<Duration>, io::Result<()>) {
+        let tries = Cell::new(0);
+        let waits = RefCell::new(Vec::new());
+        let ended = retried(
+            || {
+                let try_number = tries.get();
+                tries.set(try_number + 1);
+                match errors.get(try_number) {
+                    Some(error) => Err(io::Error::from_raw_os_error(*error)),
+                    None => Ok(()),
+                }
+            },
+            |delay| waits.borrow_mut().push(delay),
+        );
+        (tries.get(), waits.into_inner(), ended)
+    }
+
+    #[test]
+    fn a_refused_rename_is_tried_eight_times_over_the_delays_of_311_ms() {
+        let (tries, waits, ended) = tried(&[5; 100]);
+        assert_eq!(tries, 8);
+        assert_eq!(waits, DELAYS);
+        assert_eq!(waits.iter().sum::<Duration>(), Duration::from_millis(311));
+        assert_eq!(ended.unwrap_err().raw_os_error(), Some(5));
+        // The eighth failure comes back as it is, whichever of the two it is.
+        let (tries, _, ended) = tried(&[5, 32, 5, 32, 5, 32, 5, 32, 5]);
+        assert_eq!(tries, 8);
+        assert_eq!(ended.unwrap_err().raw_os_error(), Some(32));
+    }
+
+    #[test]
+    fn a_refusal_that_ends_within_the_tries_succeeds_and_waits_no_more() {
+        let (tries, waits, ended) = tried(&[32, 32, 32]);
+        assert_eq!(tries, 4);
+        assert_eq!(waits, DELAYS[..3]);
+        assert!(ended.is_ok());
+        let (tries, waits, ended) = tried(&[5; 7]);
+        assert_eq!(tries, 8);
+        assert_eq!(waits, DELAYS);
+        assert!(ended.is_ok());
+        let (tries, waits, ended) = tried(&[]);
+        assert_eq!((tries, waits.len()), (1, 0));
+        assert!(ended.is_ok());
+    }
+
+    #[test]
+    fn any_other_error_returns_at_once() {
+        let (tries, waits, ended) = tried(&[21, 5]);
+        assert_eq!((tries, waits.len()), (1, 0));
+        assert_eq!(ended.unwrap_err().raw_os_error(), Some(21));
+        let (tries, waits, ended) = tried(&[5, 21, 5]);
+        assert_eq!((tries, waits.len()), (2, 1));
+        assert_eq!(ended.unwrap_err().raw_os_error(), Some(21));
+    }
+
+    /// Where this platform refuses a read-only destination, as Windows does with raw error
+    /// 5, the refusal comes after the delays and leaves the destination (S22).
+    #[test]
+    fn a_read_only_destination_refused_spends_the_delays_and_stays() {
+        let scratch = Scratch::new("read-only");
+        let destination = scratch.0.join("exclude");
+        fs::write(&destination, "old\n").unwrap();
+        let mut read_only = fs::metadata(&destination).unwrap().permissions();
+        read_only.set_readonly(true);
+        fs::set_permissions(&destination, read_only).unwrap();
+        let began = Instant::now();
+        let replaced = whole(&scratch.0.join("private"), &destination, b"new\n", None);
+        let took = began.elapsed();
+        if let Err(cause) = replaced {
+            assert_eq!(cause.raw_os_error(), Some(5));
+            assert!(took >= Duration::from_millis(311), "it took {took:?}");
+            assert_eq!(fs::read(&destination).unwrap(), b"old\n");
+            assert_eq!(fs::read_dir(scratch.0.join("private")).unwrap().count(), 0);
+        }
     }
 
     #[test]

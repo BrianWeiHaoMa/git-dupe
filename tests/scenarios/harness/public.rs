@@ -1,6 +1,7 @@
 //! The public repository across a `git dupe` command: everything inside the project's
-//! `.git` but `.git/dupe` and `.git/info/exclude`, the two places git-dupe writes there
-//! of its own accord once `.git/info` exists, must be byte for byte what it was (G5, R2).
+//! `.git` but `.git/dupe`, `.git/info/exclude`, and the lock file, the three places
+//! git-dupe writes there of its own accord once `.git/info` exists, must be byte for byte
+//! what it was (G5, R2).
 //! The story's own public commands change the public repository rightly, so the
 //! comparison is made around each `git dupe` command, never across a whole story. When a
 //! story ends, the public repository holds no object of the private history and no path
@@ -13,17 +14,19 @@ use super::output::{End, Output, records};
 use super::scenario::{Git, Scenario};
 use super::tree::Tree;
 
-/// The public `.git` of the workspace at `dir`, without `.git/dupe` and
-/// `.git/info/exclude`.
+/// The public `.git` of the workspace at `dir`, without `.git/dupe`,
+/// `.git/info/exclude`, and the lock file.
 pub fn public_git(dir: &Path) -> Tree {
     let git = dir.join(".git");
     let written = [git.join("dupe"), git.join("info/exclude")];
-    Tree::of(&git).without(&written.each_ref().map(|path| path.as_path()))
+    Tree::of(&git)
+        .without(&written.each_ref().map(|path| path.as_path()))
+        .without_the_lock_file(&git)
 }
 
 /// Runs `git`, a `git dupe` command in the workspace at `dir`, and returns what it
-/// printed, once it has left the public `.git` as it was but for the private repository
-/// and the exclude file.
+/// printed, once it has left the public `.git` as it was but for the private repository,
+/// the exclude file, and the lock file.
 pub fn leaving_public_git(dir: &Path, git: Git<'_>) -> Output {
     let before = public_git(dir);
     let output = git.run();

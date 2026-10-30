@@ -99,7 +99,13 @@ fn a_templates_config_left_partly_copied_is_started_over_by_detach_force_then_in
 
         dupe_succeeds(s, &killed, &["detach", "--force"]);
         detached(&killed);
-        unchanged(&before.without(&[&private]), &killed);
+        let git = killed.join(".git");
+        let after = Tree::of(&killed).without_the_lock_file(&git);
+        let changed = before
+            .without(&[&private])
+            .without_the_lock_file(&git)
+            .changed_in(&after);
+        assert!(changed.is_empty(), "changed: {changed:?}");
         let started_over = init_under(s, &template_dir, &killed);
         assert_eq!(started_over.end, End::Code(0), "{started_over:?}");
         for (key, expected) in [

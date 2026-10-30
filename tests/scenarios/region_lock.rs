@@ -1,5 +1,5 @@
-//! The lock on the common Git directory under which `.git/info/exclude` is replaced and
-//! its region deleted (G28, `Holds/G28`, `State` "Region replacement"). The harness holds
+//! The lock on the one lock file under which `.git/info/exclude` is replaced and its
+//! region deleted (G28, `Holds/G28`, `State` "Region replacement"). The harness holds
 //! the lock as another worktree's command would: settle's replacement and `detach`'s
 //! deletion wait for it, and keep the other worktree's region as that command left it
 //! under the lock. A command killed while it holds the lock holds up none after it,
@@ -14,8 +14,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::harness::{
-    End, Output, Point, Scenario, entry_names, inode, lock_is_free, mode, region, region_rules,
-    under_each_release, write,
+    End, Output, Point, Scenario, Tree, entry_names, inode, lock_is_free, lock_path, mode, names,
+    refused_stash_untracked, region, region_rules, under_each_release, write,
 };
 
 /// How long a command is given to end.
@@ -29,6 +29,103 @@ fn other_region(rules: &[&str]) -> Vec<u8> {
     let rules: String = rules.iter().map(|rule| format!("{rule}\n")).collect();
     format!("# BEGIN git-dupe worktree {OTHER}\n{rules}# END git-dupe worktree {OTHER}\n")
         .into_bytes()
+}
+
+/// Asserts that the lock file of `common` stands empty and regular.
+fn empty_regular(common: &Path) {
+    let file = lock_path(common);
+    let found = fs::symlink_metadata(&file).unwrap();
+    assert!(found.is_file(), "{}", file.display());
+    assert_eq!(found.len(), 0, "{}", file.display());
+}
+
+/// The first command in a workspace makes the one file, in the common Git directory
+/// whichever worktree asks, and `detach --force` leaves it while it removes the private
+/// repository and the region (G5, G28, `Done when`).
+#[test]
+fn the_first_command_makes_the_lock_file_and_detach_leaves_it() {
+    under_each_release(|s| {
+        let dir = s.dir().join("project");
+        s.unattached_project(&dir);
+        let common = dir.join(".git");
+        assert!(!lock_path(&common).exists());
+        s.git(["dupe", "init"]).from(&dir).succeeds();
+        empty_regular(&common);
+        assert!(lock_is_free(&common));
+
+        let linked = s.dir().join(OTHER);
+        s.linked_worktree(&dir, &linked);
+        s.init(&linked);
+        assert!(!lock_path(&common.join("worktrees").join(OTHER)).exists());
+        s.git(["dupe", "hide", "scratch"]).from(&linked).succeeds();
+        empty_regular(&common);
+
+        s.git(["dupe", "detach", "--force"]).from(&dir).succeeds();
+        assert!(!common.join("dupe").exists());
+        assert_eq!(region(&dir), None);
+        empty_regular(&common);
+        s.git(["dupe", "detach", "--force"])
+            .from(&linked)
+            .succeeds();
+        empty_regular(&common);
+    });
+}
+
+/// A refusal settles, and so makes a lock file removed by hand; of `.git` it changes
+/// nothing else (G5, G28, `Done when`).
+#[test]
+fn a_refusal_makes_a_missing_lock_file_and_changes_nothing_else_in_git() {
+    under_each_release(|s| {
+        let dir = s.dir().join("project");
+        s.attached_project(&dir);
+        s.git(["dupe", "status"]).from(&dir).succeeds();
+        let common = dir.join(".git");
+        fs::remove_file(lock_path(&common)).unwrap();
+        let before = Tree::of(&common);
+        let refused = s.git(["dupe", "stash", "-u"]).from(&dir).run();
+        refused_stash_untracked(s, &refused);
+        assert_eq!(before.changed_in(&Tree::of(&common)), [lock_path(&common)]);
+        empty_regular(&common);
+    });
+}
+
+/// What stands at the lock file's path that it cannot be opened through is a lock that
+/// cannot be taken: `status` keeps its status and warns with the region left as it is, and
+/// `detach` refuses with the region and the private repository standing (`Holds/G28`).
+#[test]
+fn a_lock_file_that_cannot_be_opened_is_named_and_leaves_the_region() {
+    under_each_release(|s| {
+        let dir = s.dir().join("project");
+        s.attached_project(&dir);
+        let common = dir.join(".git");
+        let file = lock_path(&common);
+        s.git(["dupe", "status"]).from(&dir).succeeds();
+        fs::remove_file(&file).unwrap();
+        fs::create_dir(&file).unwrap();
+        write(&dir, ".gitdupe", b"scratch\n");
+        let exclude = common.join("info/exclude");
+        let as_it_was = fs::read(&exclude).unwrap();
+
+        let status = s.git(["dupe", "status"]).from(&dir).run();
+        assert_eq!(status.end, End::Code(0), "{status:?}");
+        let warnings = status.lines("warning");
+        assert!(
+            warnings.iter().any(|line| {
+                line.starts_with(b"cannot take the lock on ")
+                    && line.ends_with(b"; private files may be visible to public Git")
+            }),
+            "{status:?}"
+        );
+        assert_eq!(fs::read(&exclude).unwrap(), as_it_was);
+
+        let detach = s.git(["dupe", "detach", "--force"]).from(&dir).run();
+        assert_eq!(detach.end, End::Code(128), "{detach:?}");
+        let fatal = detach.only_line("fatal");
+        names(fatal, b"cannot take the lock on ");
+        names(fatal, b"nothing is detached");
+        assert_eq!(fs::read(&exclude).unwrap(), as_it_was);
+        assert!(common.join("dupe/HEAD").is_file());
+    });
 }
 
 #[test]

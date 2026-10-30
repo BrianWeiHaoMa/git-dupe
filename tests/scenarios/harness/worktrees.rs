@@ -107,16 +107,18 @@ impl Worktree {
     }
 
     /// The public repository as a `git dupe` command in this worktree must leave it:
-    /// everything in the common Git directory but this worktree's private repository and
-    /// `info/exclude`, the two places git-dupe writes there of its own accord once `info`
-    /// exists (G5). The other worktrees' private repositories and Git directories are
-    /// read with it, and so must stand as they were too.
+    /// everything in the common Git directory but this worktree's private repository,
+    /// `info/exclude`, and the lock file, the three places git-dupe writes there of its own
+    /// accord once `info` exists (G5). The other worktrees' private repositories and Git
+    /// directories are read with it, and so must stand as they were too.
     pub fn public_git(&self) -> Tree {
         let written = [
             self.private_directory(),
             self.common_directory.join("info/exclude"),
         ];
-        Tree::of(&self.common_directory).without(&written.each_ref().map(PathBuf::as_path))
+        Tree::of(&self.common_directory)
+            .without(&written.each_ref().map(PathBuf::as_path))
+            .without_the_lock_file(&self.common_directory)
     }
 }
 

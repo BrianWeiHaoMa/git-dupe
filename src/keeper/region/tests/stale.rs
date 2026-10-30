@@ -208,7 +208,7 @@ fn a_replacement_that_maintains_nothing_hands_back_nothing_and_drops_nothing() {
     assert_eq!(replaced.warnings.len(), 1);
     assert!(replaced.others.is_none());
     assert_eq!(fs::read(elsewhere.join("exclude")).unwrap(), FILE);
-    fs::remove_file(scratch.info()).unwrap();
+    remove_link(scratch.info()).unwrap();
     fs::create_dir(scratch.info()).unwrap();
     symlink(scratch.0.join("nothing"), scratch.exclude()).unwrap();
     let replaced = replace(&workspace, &paths(&[b".gitdupe"]));

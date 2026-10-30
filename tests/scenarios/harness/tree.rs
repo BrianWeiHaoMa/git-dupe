@@ -7,6 +7,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use super::exclude_lock::lock_path;
+
 #[derive(PartialEq, Eq)]
 enum Entry {
     Directory { mode: u32 },
@@ -16,6 +18,8 @@ enum Entry {
 
 pub struct Tree {
     entries: BTreeMap<PathBuf, Entry>,
+    /// The lock files left out by `without_the_lock_file`, which `changed_in` holds to.
+    lock_files: BTreeSet<PathBuf>,
 }
 
 impl Tree {
@@ -23,7 +27,10 @@ impl Tree {
     pub fn of(directory: &Path) -> Tree {
         let mut entries = BTreeMap::new();
         read_into(&mut entries, directory);
-        Tree { entries }
+        Tree {
+            entries,
+            lock_files: BTreeSet::new(),
+        }
     }
 
     /// Everything below `directory`, each entry by its path below it, so that the trees of
@@ -34,7 +41,10 @@ impl Tree {
             .into_iter()
             .map(|(path, entry)| (path.strip_prefix(directory).unwrap().to_path_buf(), entry))
             .collect();
-        Tree { entries }
+        Tree {
+            entries,
+            lock_files: BTreeSet::new(),
+        }
     }
 
     /// The working tree of the workspace at `dir`: everything below it but its `.git`.
@@ -50,12 +60,30 @@ impl Tree {
         self
     }
 
+    /// The same tree without the lock file of the common Git directory `common`, which a
+    /// command may make and no command writes or removes (G5, G28): anything standing there
+    /// but an empty regular file fails, and `changed_in` still names one that a later tree
+    /// lacks.
+    pub fn without_the_lock_file(mut self, common: &Path) -> Tree {
+        let path = lock_path(common);
+        if let Some(entry) = self.entries.remove(&path) {
+            assert!(
+                matches!(&entry, Entry::File { content, .. } if content.is_empty()),
+                "{} is no empty regular file",
+                path.display()
+            );
+            self.lock_files.insert(path);
+        }
+        self
+    }
+
     /// The paths that are not the same in `later`: added, removed, or different in kind,
     /// permissions, or content. Empty when nothing changed.
     pub fn changed_in(&self, later: &Tree) -> Vec<PathBuf> {
         let mut changed: Vec<PathBuf> = self
             .differing_from(later)
             .chain(later.differing_from(self))
+            .chain(self.lock_files.difference(&later.lock_files))
             .cloned()
             .collect();
         changed.sort();

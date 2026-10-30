@@ -15,8 +15,8 @@ fn the_lock_is_held_from_before_the_file_is_read_until_after_the_rename() {
     // let go, and what the file held at that moment.
     let taken: RefCell<Option<(bool, Vec<u8>)>> = RefCell::new(None);
     let released: RefCell<Option<(bool, Vec<u8>)>> = RefCell::new(None);
-    let take = |directory: &File| {
-        directory.lock()?;
+    let take = |file: &File| {
+        file.lock()?;
         *taken.borrow_mut() = Some((lock_is_free(&common), fs::read(&exclude)?));
         // Another worktree's command wrote its region just before this one took the lock:
         // the update reads it now, not before.
@@ -25,9 +25,9 @@ fn the_lock_is_held_from_before_the_file_is_read_until_after_the_rename() {
         written.push(b'\n');
         fs::write(&exclude, written)
     };
-    let release = |directory: &File| {
+    let release = |file: &File| {
         *released.borrow_mut() = Some((lock_is_free(&common), fs::read(&exclude)?));
-        directory.unlock()
+        file.unlock()
     };
     let locking = Locking {
         take: &take,
@@ -64,8 +64,8 @@ fn the_lock_is_held_from_before_the_file_is_read_until_after_the_rename() {
 }
 
 /// A lock that cannot be taken, for a reason other than another holder: no locks left.
-fn no_locks(directory: &File) -> io::Result<()> {
-    let _ = directory;
+fn no_locks(file: &File) -> io::Result<()> {
+    let _ = file;
     Err(io::Error::from_raw_os_error(37))
 }
 
@@ -73,15 +73,14 @@ fn no_locks(directory: &File) -> io::Result<()> {
 fn a_lock_that_cannot_be_taken_is_no_wait_and_nothing_follows_it() {
     let scratch = Scratch::new("not-locked");
     let workspace = scratch.workspace();
-    let common = scratch.0.join(".git");
     let file = [FOREIGN, b"\n# BEGIN git-dupe\n/.gitdupe\n# END git-dupe\n"].concat();
     fs::write(scratch.exclude(), &file).unwrap();
     given_the_case(scratch.exclude());
     let before = identity(&scratch.exclude());
     let released = Cell::new(false);
-    let release = |directory: &File| {
+    let release = |file: &File| {
         released.set(true);
-        directory.unlock()
+        file.unlock()
     };
     let failing = Locking {
         take: &no_locks,
@@ -89,7 +88,7 @@ fn a_lock_that_cannot_be_taken_is_no_wait_and_nothing_follows_it() {
     };
     let region = paths(&[b".gitdupe", b"notes"]);
 
-    // The replacement: one warning naming the directory, the cause, and what it may
+    // The replacement: one warning naming the lock file, the cause, and what it may
     // expose, and the file as it was.
     let replaced = replaced(
         &workspace,
@@ -103,7 +102,7 @@ fn a_lock_that_cannot_be_taken_is_no_wait_and_nothing_follows_it() {
         vec![
             [
                 b"cannot take the lock on ",
-                bytes::of(common.as_os_str()),
+                bytes::of(lock_file::path(workspace.common_directory()).as_os_str()),
                 b" to replace the managed region: ",
                 io::Error::from_raw_os_error(37).to_string().as_bytes(),
                 b"; private files may be visible to public Git",
@@ -116,8 +115,8 @@ fn a_lock_that_cannot_be_taken_is_no_wait_and_nothing_follows_it() {
         &workspace,
         update(&workspace, Change::Remove, refused, &failing),
     ) {
-        Err(NotDeleted::NotLocked { directory, cause }) => {
-            assert_eq!(directory, common);
+        Err(NotDeleted::NotLocked { file, cause }) => {
+            assert_eq!(file, lock_file::path(workspace.common_directory()));
             assert_eq!(cause.raw_os_error(), Some(37));
         }
         _ => panic!("the deletion went on without the lock"),
@@ -154,4 +153,125 @@ fn a_lock_that_cannot_be_taken_is_no_wait_and_nothing_follows_it() {
         Err(NotDeleted::NotLocked { cause, .. }) if cause.kind() == io::ErrorKind::NotFound
     ));
     assert!(!scratch.0.join("gone").exists());
+}
+
+#[test]
+fn a_missing_lock_file_is_made_empty_and_the_lock_lies_on_it_until_the_drop() {
+    let scratch = Scratch::new("lock-made");
+    let common = scratch.0.join(".git");
+    let file = lock_file::path(&common);
+    assert!(!file.exists());
+
+    let held = Held::take(&common, &FILE_LOCK).unwrap();
+    let found = fs::symlink_metadata(&file).unwrap();
+    assert!(found.is_file() && found.len() == 0);
+    assert!(!lock_is_free(&common));
+    drop(held);
+    assert!(lock_is_free(&common));
+
+    // A second take finds the file and neither truncates nor replaces it.
+    let before = identity(&file);
+    fs::write(&file, b"bytes nothing reads\n").unwrap();
+    drop(Held::take(&common, &FILE_LOCK).unwrap());
+    assert_eq!(identity(&file), before);
+    assert_eq!(fs::read(&file).unwrap(), b"bytes nothing reads\n");
+}
+
+/// The lock lies on the one file in the common Git directory, whichever worktree asks,
+/// and neither change removes or writes it.
+#[test]
+fn a_replacement_and_a_deletion_leave_the_lock_file_empty_where_it_stands() {
+    let scratch = Scratch::new("lock-left");
+    let workspace = scratch.workspace();
+    let file = lock_file::path(&scratch.0.join(".git"));
+    assert!(
+        replace(&workspace, &paths(&[b".gitdupe"]))
+            .warnings
+            .is_empty()
+    );
+    let before = identity(&file);
+    assert_eq!(fs::read(&file).unwrap(), b"");
+    assert!(delete(&workspace).is_ok());
+    assert_eq!(identity(&file), before);
+    assert_eq!(fs::read(&file).unwrap(), b"");
+    assert!(scratch.lock_is_free());
+}
+
+/// What stands at the lock file's path that it cannot be opened through refuses like a lock
+/// that cannot be taken: a directory here, under every user on every platform.
+#[test]
+fn a_lock_file_that_cannot_be_opened_is_no_lock_and_leaves_the_region() {
+    let scratch = Scratch::new("lock-no-file");
+    let workspace = scratch.workspace();
+    let common = scratch.0.join(".git");
+    let file = b"# BEGIN git-dupe\n/.gitdupe\n# END git-dupe\n";
+    fs::write(scratch.exclude(), file).unwrap();
+    let in_the_way = lock_file::path(&common);
+    fs::create_dir(&in_the_way).unwrap();
+
+    let warnings = replace(&workspace, &paths(&[b".gitdupe", b"notes"])).warnings;
+    assert!(
+        warnings.len() == 1
+            && warnings[0].starts_with(b"cannot take the lock on ")
+            && warnings[0].ends_with(b"; private files may be visible to public Git"),
+        "{warnings:?}"
+    );
+    assert!(matches!(
+        delete(&workspace),
+        Err(NotDeleted::NotLocked { file, .. }) if file == in_the_way
+    ));
+    assert_eq!(fs::read(scratch.exclude()).unwrap(), file);
+}
+
+/// A symbolic link at the lock file's path, one to nothing here, is not followed: its target
+/// is not made, and nothing outside the common Git directory is locked (G5).
+#[test]
+fn a_link_at_the_lock_file_is_no_lock_and_makes_nothing_at_its_target() {
+    let scratch = Scratch::new("lock-link");
+    let workspace = scratch.workspace();
+    let file = b"# BEGIN git-dupe\n/.gitdupe\n# END git-dupe\n";
+    fs::write(scratch.exclude(), file).unwrap();
+    let target = scratch.0.join("unexpected");
+    let link = lock_file::path(workspace.common_directory());
+    symlink(&target, &link).unwrap();
+
+    let warnings = replace(&workspace, &paths(&[b".gitdupe", b"notes"])).warnings;
+    assert!(
+        warnings.len() == 1 && warnings[0].starts_with(b"cannot take the lock on "),
+        "{warnings:?}"
+    );
+    assert!(!target.exists());
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(scratch.exclude()).unwrap(), file);
+}
+
+/// A common Git directory the process cannot write to cannot hold a missing lock file. Run
+/// where the directory can be made read-only to the process, which root's cannot.
+#[test]
+fn a_read_only_common_directory_holding_no_lock_file_is_no_lock_and_leaves_the_region() {
+    let scratch = Scratch::new("lock-read-only");
+    let workspace = scratch.workspace();
+    let common = scratch.0.join(".git");
+    let file = b"# BEGIN git-dupe\n/.gitdupe\n# END git-dupe\n";
+    fs::write(scratch.exclude(), file).unwrap();
+    let writable = fs::metadata(&common).unwrap().permissions();
+    let mut read_only = writable.clone();
+    read_only.set_readonly(true);
+    fs::set_permissions(&common, read_only).unwrap();
+    let held_off = File::create(common.join("probe")).is_err();
+    let warnings = replace(&workspace, &paths(&[b".gitdupe", b"notes"])).warnings;
+    fs::set_permissions(&common, writable).unwrap();
+    if held_off {
+        assert!(
+            warnings.len() == 1 && warnings[0].starts_with(b"cannot take the lock on "),
+            "{warnings:?}"
+        );
+        assert_eq!(fs::read(scratch.exclude()).unwrap(), file);
+        assert!(!lock_file::path(&common).exists());
+    }
 }

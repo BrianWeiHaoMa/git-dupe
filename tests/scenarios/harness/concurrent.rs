@@ -1,7 +1,7 @@
 //! Two commands started together, as two worktrees' commands run at the same time (E2,
 //! G28): the second started as soon as the first has been, before either is waited for,
 //! and each then waited for within a bound. Nothing orders them further, so whether their
-//! runs overlap, and which takes the lock on the common Git directory first, is the
+//! runs overlap, and which takes the lock of the common Git directory first, is the
 //! machine's; the bound guards against a stall and measures nothing.
 //!
 //! Each command is a plain run, `Git::start`, or one to be killed,

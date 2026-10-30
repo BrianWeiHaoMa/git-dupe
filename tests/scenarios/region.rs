@@ -123,7 +123,8 @@ fn info_links_and_dangling_exclude_links_stay_untouched_and_exposure_is_still_as
                     dir.join(".git/info/exclude")
                 };
                 symlink(&target, &link).unwrap();
-                let before = Tree::of(&dir);
+                let git = dir.join(".git");
+                let before = Tree::of(&dir).without_the_lock_file(&git);
                 let output = settled_by_stash_refusal(s, &from);
                 let warnings = output.lines("warning");
                 assert_eq!(warnings.len(), 2, "{output:?}");
@@ -140,7 +141,8 @@ fn info_links_and_dangling_exclude_links_stay_untouched_and_exposure_is_still_as
                 names(warnings[1], b".gitignore");
                 names_number(warnings[1], 2);
                 assert_eq!(fs::read_link(&link).unwrap(), target);
-                assert!(before.changed_in(&Tree::of(&dir)).is_empty());
+                let after = Tree::of(&dir).without_the_lock_file(&git);
+                assert!(before.changed_in(&after).is_empty());
                 assert!(region(&dir).is_none());
             }
         }
@@ -158,7 +160,8 @@ fn a_resolving_exclude_link_is_replaced_and_its_target_is_untouched() {
             fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
             fs::remove_file(&exclude).unwrap();
             symlink(&target, &exclude).unwrap();
-            let before = Tree::of(&dir);
+            let git = dir.join(".git");
+            let before = Tree::of(&dir).without_the_lock_file(&git);
             let output = settled_by_stash_refusal(s, &from);
             let warnings = output.lines("warning");
             assert_eq!(warnings.len(), 1, "{output:?}");
@@ -174,10 +177,11 @@ fn a_resolving_exclude_link_is_replaced_and_its_target_is_untouched() {
                 fs::metadata(&exclude).unwrap().permissions().mode() & 0o7777,
                 0o600
             );
+            let after = Tree::of(&dir).without_the_lock_file(&git);
             assert!(
                 before
                     .without(&[&exclude])
-                    .changed_in(&Tree::of(&dir).without(&[&exclude]))
+                    .changed_in(&after.without(&[&exclude]))
                     .is_empty()
             );
         }
@@ -245,7 +249,8 @@ fn an_exclude_directory_warns_and_changes_nothing_under_git() {
             fs::write(exclude.join("kept"), b"untouched\n").unwrap();
             // Give the hidden path a public rule independently of the failed region.
             fs::write(dir.join(".gitignore"), b"/.gitdupe\n").unwrap();
-            let before = Tree::of(&dir.join(".git"));
+            let git = dir.join(".git");
+            let before = Tree::of(&git).without_the_lock_file(&git);
             let private_before = Tree::of(&dir.join(".git/dupe"));
             let output = s.git(["dupe", "stash", "-u"]).from(&from).run();
             stash_refusal_first(s, &output);
@@ -258,7 +263,8 @@ fn an_exclude_directory_warns_and_changes_nothing_under_git() {
             let warnings = output.lines("warning");
             assert_eq!(warnings.len(), 2, "{output:?}");
             names(warnings[0], b".git/info/exclude");
-            assert!(before.changed_in(&Tree::of(&dir.join(".git"))).is_empty());
+            let after = Tree::of(&git).without_the_lock_file(&git);
+            assert!(before.changed_in(&after).is_empty());
             assert!(
                 private_before
                     .changed_in(&Tree::of(&dir.join(".git/dupe")))

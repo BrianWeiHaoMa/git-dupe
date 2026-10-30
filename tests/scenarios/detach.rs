@@ -267,13 +267,17 @@ fn force_does_not_create_an_absent_info_directory() {
         let root = s.dir().join("absent-info");
         s.attached_repository(&root);
         fs::remove_dir_all(root.join(".git/info")).unwrap();
-        let before = Tree::of(&root).without(&[&root.join(".git/dupe")]);
+        let git = root.join(".git");
+        let before = Tree::of(&root)
+            .without(&[&git.join("dupe")])
+            .without_the_lock_file(&git);
         let output = s.git(["dupe", "detach", "--force"]).from(&root).run();
         succeeded(&output);
         warnings(&output, vec![]);
         detached(&root);
-        assert!(!root.join(".git/info").exists());
-        assert!(before.changed_in(&Tree::of(&root)).is_empty());
+        assert!(!git.join("info").exists());
+        let after = Tree::of(&root).without_the_lock_file(&git);
+        assert!(before.changed_in(&after).is_empty());
     });
 }
 

@@ -33,12 +33,12 @@
 //! region absent included, and leaves out a stale region there too.
 //!
 //! All of `update` happens under the lock every worktree's command shares (`Holds/G28`):
-//! an exclusive `flock` on a descriptor of the common Git directory, opened read-only,
-//! taken before anything is looked at, waited for while another command holds it, and let
-//! go when `update` returns, whichever way it returns, so that no Git run, settle's
-//! exposure question or `detach`'s removal of the private repository, starts while it is
-//! held (R10). A lock that cannot be taken is no wait: nothing is looked at, and the
-//! caller says why.
+//! an exclusive `File::lock` on the one lock file `lock` opens, taken before anything is
+//! looked at, waited for while another command holds it, and let go when `update` returns,
+//! whichever way it returns, so that no Git run, settle's exposure question or `detach`'s
+//! removal of the private repository, starts while it is held (R10). A lock that cannot be
+//! taken, its file neither opened nor created included, is no wait: nothing is looked at,
+//! and the caller says why.
 //!
 //! The file is full at one concern, the one replacement of `.git/info/exclude` and what
 //! it reads there; a new keeper concern goes in a sibling file.
@@ -50,7 +50,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::foreign::{self, Owner};
-use super::replace;
+use super::{lock, replace};
 use crate::bytes;
 use crate::runner::locate::{Workspace, private_directory};
 use sections::{Sections, Worktree};
@@ -132,7 +132,10 @@ fn replaced(workspace: &Workspace, updated: Result<Updated, NotUpdated>) -> Repl
             };
         }
         Err(NotUpdated::NotLocked(cause)) => {
-            vec![not_locked(workspace.common_directory(), &cause.to_string())]
+            vec![not_locked(
+                &lock::path(workspace.common_directory()),
+                &cause.to_string(),
+            )]
         }
         Err(NotUpdated::InfoLink) => {
             vec![unmaintainable(
@@ -171,12 +174,8 @@ pub enum NotDeleted {
     /// The exclude file could not be looked at or read, or the fresh file could not be
     /// written or renamed over it.
     Failed { file: PathBuf, cause: io::Error },
-    /// The lock on the common Git directory, at this path, could not be taken: nothing
-    /// was looked at.
-    NotLocked {
-        directory: PathBuf,
-        cause: io::Error,
-    },
+    /// The lock on the lock file, at this path, could not be taken: nothing was looked at.
+    NotLocked { file: PathBuf, cause: io::Error },
 }
 
 /// Deletes the region with its markers, every other byte kept as it stands but a stale
@@ -208,7 +207,7 @@ fn deleted(
             others,
         }),
         Err(NotUpdated::NotLocked(cause)) => Err(NotDeleted::NotLocked {
-            directory: workspace.common_directory().to_path_buf(),
+            file: lock::path(workspace.common_directory()),
             cause,
         }),
         Err(NotUpdated::InfoLink) => Err(NotDeleted::BeyondALink(info_directory(workspace))),
@@ -241,7 +240,7 @@ struct Updated {
 
 /// Why `update` left the file as it stands.
 enum NotUpdated {
-    /// The common Git directory could not be opened, or its lock taken.
+    /// The lock file could not be opened or created, or its lock taken.
     NotLocked(io::Error),
     /// `.git/info` is a symbolic link by `lstat`: for the deletion, one through which the
     /// file holds the region.
@@ -256,33 +255,32 @@ enum NotUpdated {
 /// make it first.
 type MakeInfo = fn(&Path) -> io::Result<()>;
 
-/// How `update` takes the lock on the common Git directory and lets it go: `FILE_LOCK`,
+/// How `update` takes the lock on the lock file and lets it go: `FILE_LOCK`,
 /// except in a unit check that makes taking it fail or looks on while it is held.
 struct Locking<'l> {
     take: &'l dyn Fn(&File) -> io::Result<()>,
     release: &'l dyn Fn(&File) -> io::Result<()>,
 }
 
-/// `flock(LOCK_EX)`, which waits while another descriptor holds the lock, and
-/// `flock(LOCK_UN)` (S16).
+/// `File::lock`, which waits while another handle holds the lock, and `File::unlock` (S16).
 const FILE_LOCK: Locking<'static> = Locking {
     take: &File::lock,
     release: &File::unlock,
 };
 
-/// The lock on the common Git directory, held while this lives: taken on the one
-/// descriptor `take` opens, read-only, and let go when it is dropped.
+/// The lock on the lock file, held while this lives: taken on the one handle `take` opens,
+/// and let go when it is dropped.
 struct Held<'l> {
-    directory: File,
+    file: File,
     release: &'l dyn Fn(&File) -> io::Result<()>,
 }
 
 impl<'l> Held<'l> {
     fn take(common_directory: &Path, locking: &Locking<'l>) -> io::Result<Held<'l>> {
-        let directory = File::open(common_directory)?;
-        (locking.take)(&directory)?;
+        let file = lock::open(common_directory)?;
+        (locking.take)(&file)?;
         Ok(Held {
-            directory,
+            file,
             release: locking.release,
         })
     }
@@ -294,7 +292,7 @@ impl Drop for Held<'_> {
     /// inherits it, and closing it lets the lock go all the same (S16). Whatever the
     /// update wrote stands.
     fn drop(&mut self) {
-        let _ = (self.release)(&self.directory);
+        let _ = (self.release)(&self.file);
     }
 }
 
@@ -542,10 +540,10 @@ fn unmaintainable(path: &Path, what: &[u8]) -> Vec<u8> {
     .concat()
 }
 
-fn not_locked(directory: &Path, cause: &str) -> Vec<u8> {
+fn not_locked(file: &Path, cause: &str) -> Vec<u8> {
     [
         b"cannot take the lock on ",
-        bytes::of(directory.as_os_str()),
+        bytes::of(file.as_os_str()),
         b" to replace the managed region: ",
         cause.as_bytes(),
         b"; private files may be visible to public Git",

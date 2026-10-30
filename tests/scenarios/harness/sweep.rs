@@ -20,6 +20,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
+use super::exclude_lock::lock_is_free;
 use super::files::copy;
 use super::kill::{Killing, Point};
 use super::output::{End, Output};
@@ -137,6 +138,9 @@ impl<'s> Sweep<'s> {
     }
 
     fn sweeping(s: &'s Scenario, fixture: &Path, words: &'s [&'s str], writes: bool) -> Sweep<'s> {
+        // The lock file stands from the start, a kill before the first settle leaving it as
+        // the uninterrupted run does, so that every copy compares with it held in the tree.
+        lock_is_free(&fixture.join(".git"));
         let links = s.dir().join("links");
         let before = files(fixture);
 

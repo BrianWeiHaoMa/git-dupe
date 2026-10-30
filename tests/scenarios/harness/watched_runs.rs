@@ -1,5 +1,5 @@
 //! The Git runs of one watched `git dupe` command, each recorded as it starts and answered
-//! with a request for the lock on the common Git directory before it goes on
+//! with a request for the lock of the common Git directory before it goes on
 //! (`exclude_lock.rs`), with nothing added to the product (N6).
 //!
 //! As in the kill harness (`kill.rs`), `GIT_EXEC_PATH` names a control directory holding
@@ -8,7 +8,7 @@
 //! harness's answer to it, and becomes the release's own `git`, so that how Git's run ends,
 //! an exit status or a signal, reaches git-dupe as it would without the script; a run's
 //! end is read from `ps`. A thread of the harness reads the log and answers each run
-//! started: first one `try_lock` on the common Git directory from a descriptor of its own,
+//! started: first one `try_lock` on the lock file from a handle of its own,
 //! let go at once (S16), then the file the run waits for. git-dupe waits for the script, so
 //! the request finds the lock as git-dupe held it when it started the run; one it took and
 //! let go between starting the run and the script's first step is not seen. A lock found
@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use super::exclude_lock::lock_file;
 use super::executable::write_executable;
 use super::running::parent_name;
 use super::scenario::Scenario;
@@ -100,19 +101,19 @@ impl Holders {
         self.others().scenario
     }
 
-    /// What one request for the lock on `common`, from a descriptor of the harness's own,
-    /// finds, where nothing but git-dupe can hold it. The descriptor is closed before the
+    /// What one request for the lock of `common`, from a handle of the harness's own,
+    /// finds, where nothing but git-dupe can hold it. The handle is closed before the
     /// verdict is returned, which lets the lock go where the request took it.
     fn asked(&self, common: &Path) -> Verdict {
         let others = self.others();
         if others.scenario || others.commands > 1 {
             return Verdict::Unjudged;
         }
-        let directory = match File::open(common) {
-            Ok(directory) => directory,
+        let file = match lock_file(common) {
+            Ok(file) => file,
             Err(cause) => return Verdict::Failed(format!("{}: {cause}", common.display())),
         };
-        match directory.try_lock() {
+        match file.try_lock() {
             Ok(()) => Verdict::Free,
             Err(TryLockError::WouldBlock) => Verdict::Held,
             Err(TryLockError::Error(cause)) => {
@@ -156,7 +157,7 @@ pub(super) struct WatchedRuns {
 
 impl WatchedRuns {
     /// Makes the control directory `control`, which must not exist, and starts answering
-    /// the runs it records with requests for the lock on `common`, judged as `holders`
+    /// the runs it records with requests for the lock of `common`, judged as `holders`
     /// allows. Where not `answered`, for a check of the harness itself, nothing answers
     /// them, and each gives up once it has looked for its answer `looks` times.
     pub(super) fn through(

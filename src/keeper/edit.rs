@@ -3,11 +3,12 @@
 //!
 //! An edit starts from the bytes the hidden paths were read from — the file on disk, else
 //! its staged version, else nothing — keeps every line it does not add or remove byte for
-//! byte, and replaces the file whole only when a line changes, from a fresh file inside
+//! byte, its carriage return and the byte order mark at the file's start included, whatever
+//! line goes, and replaces the file whole only when a line changes, from a fresh file inside
 //! the private Git directory with the existing file's permissions. A symbolic link at
 //! `.gitdupe` is replaced by a regular file, its target untouched. Something standing at
-//! `.gitdupe` that cannot be read as a file is not written over, because its lines are
-//! not known. The file is staged whenever it stands on disk as a regular file, whether or
+//! `.gitdupe` that cannot be read as a file, or that begins with a UTF-16 byte order mark,
+//! is not written over, because its lines are not known. The file is staged whenever it stands on disk as a regular file, whether or
 //! not a line changed, so that a rerun stages what a killed run wrote.
 
 use std::collections::BTreeSet;
@@ -56,7 +57,7 @@ pub struct Edited {
 
 /// Why an edit wrote nothing.
 pub enum NotEdited {
-    /// Something stands at `.gitdupe` that cannot be read as a file.
+    /// `.gitdupe` is unreadable, as `gitdupe` says.
     Unreadable(io::Error),
     /// The fresh file could not be written or renamed onto `.gitdupe`.
     NotWritten(io::Error),
@@ -148,7 +149,7 @@ fn stage(workspace: &Workspace) -> Result<(), Failed> {
 }
 
 /// `bytes` with one line per path appended, a last line lacking its newline given one
-/// first.
+/// first. The first line of a new file is written so that it reads as that path.
 fn appended(bytes: &[u8], paths: &[Vec<u8>]) -> Vec<u8> {
     let mut appended = bytes.to_vec();
     if !appended.is_empty() && !appended.ends_with(b"\n") {
@@ -158,15 +159,21 @@ fn appended(bytes: &[u8], paths: &[Vec<u8>]) -> Vec<u8> {
         appended.extend_from_slice(path);
         appended.push(b'\n');
     }
-    appended
+    if bytes.is_empty() {
+        gitdupe::unmistaken(appended)
+    } else {
+        appended
+    }
 }
 
 /// `bytes` without each line whose cleaned path equals one of `paths`, every other line
-/// byte for byte; and the paths that named a line, in the order given, each once.
+/// byte for byte, the file's byte order mark too; and the paths that named a line, in the
+/// order given, each once. The line that comes first still reads as the path it names.
 fn removed(bytes: &[u8], paths: &[Vec<u8>]) -> (Vec<u8>, Vec<Vec<u8>>) {
-    let mut kept = Vec::with_capacity(bytes.len());
+    let (mark, lines) = gitdupe::marked(bytes);
+    let mut kept = Vec::with_capacity(lines.len());
     let mut named = BTreeSet::new();
-    for piece in bytes.split_inclusive(|&byte| byte == b'\n') {
+    for piece in lines.split_inclusive(|&byte| byte == b'\n') {
         let line = piece.strip_suffix(b"\n").unwrap_or(piece);
         match gitdupe::path_of(line) {
             Some(Cleaned::Inside(path)) if paths.contains(&path) => {
@@ -181,6 +188,11 @@ fn removed(bytes: &[u8], paths: &[Vec<u8>]) -> (Vec<u8>, Vec<Vec<u8>>) {
             removed.push(path.clone());
         }
     }
+    let kept = if mark.is_empty() {
+        gitdupe::unmistaken(kept)
+    } else {
+        [mark, &kept].concat()
+    };
     (kept, removed)
 }
 
@@ -290,6 +302,69 @@ mod tests {
         assert_eq!(
             removed(b"/\n../x\n.\n", &paths(&[b"x"])),
             (b"/\n../x\n.\n".to_vec(), Vec::new())
+        );
+    }
+
+    /// `hide` appends a line and keeps the rest: it does not write `\r\n` to match.
+    #[test]
+    fn appending_keeps_a_mark_and_carriage_returns_and_writes_a_newline_alone() {
+        assert_eq!(appended(b"notes\r\n", &paths(&[b"x"])), b"notes\r\nx\n");
+        assert_eq!(
+            appended(b"\xef\xbb\xbfnotes\n", &paths(&[b"scratch"])),
+            b"\xef\xbb\xbfnotes\nscratch\n"
+        );
+    }
+
+    #[test]
+    fn removing_reads_a_line_without_the_mark_and_its_carriage_return_and_keeps_them() {
+        let file = b"\xef\xbb\xbfnotes\r\nscratch\r\n";
+        assert_eq!(
+            removed(file, &paths(&[b"notes"])),
+            (b"\xef\xbb\xbfscratch\r\n".to_vec(), paths(&[b"notes"]))
+        );
+        assert_eq!(
+            removed(file, &paths(&[b"scratch"])),
+            (b"\xef\xbb\xbfnotes\r\n".to_vec(), paths(&[b"scratch"]))
+        );
+        // Unhiding one path rewrites no other line.
+        assert_eq!(
+            removed(b"a\r\nb\nc\r\n", &paths(&[b"b"])),
+            (b"a\r\nc\r\n".to_vec(), paths(&[b"b"]))
+        );
+        // The mark stays with the last line gone, and a mark on a later line is the path's.
+        assert_eq!(
+            removed(b"\xef\xbb\xbfnotes\n", &paths(&[b"notes"])),
+            (b"\xef\xbb\xbf".to_vec(), paths(&[b"notes"]))
+        );
+        assert_eq!(
+            removed(b"a\n\xef\xbb\xbfnotes\n", &paths(&[b"notes"])),
+            (b"a\n\xef\xbb\xbfnotes\n".to_vec(), Vec::new())
+        );
+    }
+
+    /// A line that comes first by an edit keeps naming its path, its bytes unchanged.
+    #[test]
+    fn a_first_line_that_would_read_as_a_mark_is_written_after_one() {
+        assert_eq!(
+            appended(b"", &paths(&[b"\xef\xbb\xbfscratch"])),
+            b"\xef\xbb\xbf\xef\xbb\xbfscratch\n"
+        );
+        assert_eq!(
+            removed(b"notes\n\xef\xbb\xbfscratch\n", &paths(&[b"notes"])).0,
+            b"\xef\xbb\xbf\xef\xbb\xbfscratch\n"
+        );
+        assert_eq!(
+            removed(b"notes\n\xff\xfescratch\nsafe\n", &paths(&[b"notes"])).0,
+            b"\xef\xbb\xbf\xff\xfescratch\nsafe\n"
+        );
+        // Below a mark of the file's own, nothing is added.
+        assert_eq!(
+            removed(
+                b"\xef\xbb\xbfnotes\n\xef\xbb\xbfscratch\n",
+                &paths(&[b"notes"])
+            )
+            .0,
+            b"\xef\xbb\xbf\xef\xbb\xbfscratch\n"
         );
     }
 }
