@@ -6,7 +6,7 @@
 //! `manual_page_commands` runs, in the state the texts describe. A change to the page's
 //! command lines as far as the README shows them fails here until the README follows it;
 //! a line after the last one it shows is not compared. Its other command line, the
-//! install line, is pinned by `install`.
+//! install line, is pinned by `install_lines`.
 
 use std::path::Path;
 

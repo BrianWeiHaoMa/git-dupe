@@ -64,10 +64,11 @@ project/
   call it the private repository: private to you, as a repository of your own is, and
   not encrypted. Plain Git can read it, and clone, fetch, or push from it. It has its own
   object store, which the project's Git never opens, so the project's `git gc` and
-  `git prune` leave it alone; and every Git process git-dupe runs has the
-  object-directory variables cleared, so a hook or alias of the project cannot redirect
-  your objects into the project's store. Being inside `.git`, it is never committed and
-  never cloned with the project; `git dupe clone` is the deliberate way back.
+  `git prune` leave it alone; and every Git process git-dupe runs against the dupe has
+  the object-directory variables cleared, so a hook or alias of the project cannot
+  redirect your objects into the project's store. Being inside `.git`, it is never
+  committed and never cloned with the project; `git dupe clone` is the deliberate way
+  back.
 - A **hidden path** is one the project's Git ignores through rules git-dupe maintains in
   `.git/info/exclude`, so that `git status`, `git add -A`, and a public commit never see
   it. The hidden paths are `.gitdupe`, a file of yours at the root that lists the paths
