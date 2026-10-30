@@ -19,6 +19,15 @@ Every change a user of git-dupe would notice, newest first, in the form of
   installing from source, the Git git-dupe needs, and uninstalling, which the README's
   Install section now points to.
 
+### Changed
+
+- The README is now a short page for a reader who knows what git-dupe is: what it is,
+  the demo, the install line, the quick start, the few things to know, and where to read
+  more. What it said beyond that is in `docs/how-it-works.md` (what git-dupe runs and
+  writes, its limits, the specification it is built to), `docs/use-cases.md` (what it is
+  for, and how it compares with other tools), and `docs/questions.md`. The demo image
+  names beside each command the repository it acts on, the public or the private one.
+
 ## [0.3.2] - 2026-10-18
 
 ### Added

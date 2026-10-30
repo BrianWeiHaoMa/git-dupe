@@ -34,7 +34,11 @@
 //! `install_lines` pin the install lines `README.md` and `docs/install.md` show: the
 //! pasted line, and in `docs/install.md` the install note's lines, all of them, which
 //! `release_archive` follows, so that a change to any of them fails there until the
-//! documents follow it.
+//! documents follow it. The plain `#[test]`s of `docs` hold every `git dupe` line of a
+//! `sh` block in a page under `docs/` to the manual page: each is a command line of one
+//! of the page's own texts or a whole command in its prose, in any order, so that a
+//! change to the page's texts that drops a form the docs show fails there until the
+//! docs follow it.
 
 mod harness;
 
@@ -64,6 +68,7 @@ mod clone_runs;
 mod detach;
 mod detach_killed;
 mod detach_refusals;
+mod docs;
 mod done_when;
 mod done_when_bare_worktrees;
 mod done_when_two_machines;

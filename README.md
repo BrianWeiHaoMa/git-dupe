@@ -13,13 +13,20 @@ machines through a remote of your own. You already know how to drive it: public 
 `git …`, your own is `git dupe …`, with Git's own commands, options, output, and exit
 codes.
 
-"Dupe" as in a duplicate of your checkout that only you see: a second repository laid
-over the same working tree, each path belonging to one repository or the other. It has
-nothing to do with duplicate files. It runs on Linux and macOS with Git 2.43 or newer.
-What it does not do yet is under [Limits](#limits), and `git dupe detach` takes it back
-out.
+<img src="docs/demo.png" width="880" alt="A terminal transcript, each command followed by a comment naming the repository it acts on. git status --short, on the public repo, lists AGENTS.md and notes/ as untracked. After git dupe init, git dupe add notes/ AGENTS.md, and git dupe commit -m 'Notes and agent instructions', each on the private repo, git status --short on the public repo prints nothing, and git dupe log --oneline on the private repo shows that one commit.">
 
-<img src="docs/demo.png" width="880" alt="A terminal transcript. git status --short lists AGENTS.md and notes/ as untracked. After git dupe init, git dupe add notes/ AGENTS.md, and git dupe commit -m 'Notes and agent instructions', git status --short prints nothing, and git dupe log --oneline shows that one commit.">
+## Install
+
+On x86-64 Linux or macOS, with Git 2.43.0 or newer, below 3.0.0:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BrianWeiHaoMa/git-dupe/main/install.sh | sh
+```
+
+It puts the latest release's executable in `~/.local/bin` and its manual page in
+`~/.local/share/man/man1`, once the download matches its published digest.
+[Installing](docs/install.md) has the rest: the archives by hand, from source, the Git
+it needs, and uninstalling.
 
 ## Quick start
 
@@ -35,270 +42,57 @@ git dupe push -u origin HEAD                       # send the history there
 git dupe clone <url>                               # in a clone elsewhere: the files come back
 ```
 
-The project then holds:
+`<url>` is an empty repository on a host or a disk you trust, with the project's branch
+as its default branch, which `git dupe clone` checks out unless `-b` names another; on a
+disk, `git init --bare -b main` makes one for a project on `main`. A URL of the
+project's repository, or of any of its remotes, is refused. From then on,
+`git dupe pull` and `git dupe push` move your work between machines. A file the
+project's `.gitignore` ignores is added with `-f`, as `git add` adds one.
 
-```text
-project/
-├── .git/dupe/     the dupe: the second repository
-├── .gitdupe       yours: lists notes, the directory you hid
-├── AGENTS.md      yours
-├── notes/         yours
-├── README.md      the project's
-└── src/           the project's
-```
+## Things to know
 
-`git status` lists none of your files, `git log` shows none of your commits, and
-`git dupe status` lists none of the project's. `<url>` is an empty repository on a host
-or a disk you trust, with the project's branch as its default branch, which
-`git dupe clone` checks out unless `-b` names another; on a disk, `git init --bare -b main`
-makes one for a project on `main`. A URL of the project's repository, or of any of its
-remotes, is refused. From then on, `git dupe pull` and `git dupe push` move your work
-between machines. A file the project's `.gitignore` ignores is added with `-f`, as
-`git add` adds one.
-
-Your history lives in `.git/dupe`, or, in a linked worktree, in that worktree's own Git
-directory under `.git/worktrees/`. Delete the clone, or remove the worktree, and
-unpushed history goes with it, so push first. `git dupe detach` is the way out: it
-leaves every file on disk, and refuses, without `--force`, while a change is uncommitted
-or a commit of a branch, a tag, a stash entry, or `HEAD` is on no remote.
-
-## If you know Git, you know git-dupe
-
-git-dupe is Git, run against the dupe. `git dupe commit`, `diff`, `log`, `blame`,
-`branch`, `switch`, `merge`, `rebase`, `stash`, `tag`, `remote`, `push`, `pull`,
-`restore`, `rm`, `config`, `bisect`: each, the few refused forms below aside, is Git's
-own command with Git's own options, output, pager, editor, hooks, aliases, and exit
-status, on the paths of the working tree and the revisions of your own history, and a
-branch switch in one repository never moves the other. Git's global options go before `dupe`, as in `git -C project dupe status` and
-`git --no-pager dupe log`, and plain Git reads the dupe too: `git --git-dir=.git/dupe log`.
-What there is to learn fits the one screen of `git dupe help`:
-
-- **Seven commands added.** `init` and `clone` attach the dupe and `detach` removes it;
-  `hide` and `unhide` edit the list of hidden paths; `git` runs Git against the dupe with
-  your words and no guard; `help` prints the texts.
-- **Three commands changed** to fit a shared working tree. `status` and `add` act on the
-  hidden paths instead of every file of the project, and `clean` cleans the project while
-  sparing them.
-- **A few forms refused.** `stash -u` and `-a`, which would stash the whole project, and
+- **It is Git.** Every command but the few below is Git's own, with Git's options,
+  output, and exit status, run against the dupe; Git's global options go before `dupe`.
+- **Seven commands added:** `init` and `clone` attach the dupe and `detach` removes it,
+  `hide` and `unhide` edit the list of hidden paths, `git` runs Git against the dupe
+  with no guard, and `help` prints the texts.
+- **Three commands changed:** `status` and `add` act on the hidden paths instead of
+  every file of the project, and `clean` cleans the project while sparing them.
+- **A few forms refused:** `stash -u` and `-a`, which would stash the whole project, and
   a `push`, `pull`, `fetch`, `remote`, or `clone` naming the project's repository or any
-  of its remotes. `git dupe git <words>` is the route to any of them when you mean it.
-
-## What it is for
-
-- **Your own agent instructions in someone else's project.** An open-source project that
-  takes no `AGENTS.md`, `CLAUDE.md`, skills, or notes from a contributor's own workflow:
-  keep yours in the worktree all the same, `git dupe add AGENTS.md .claude/skills/ notes/`,
-  and your agent reads them where it expects them, while `git push` sends the branch and
-  none of these files. Where the project has its own `AGENTS.md`, yours is a
-  `CLAUDE.local.md` or another path the project does not use: a path belongs to one
-  repository or the other, and `git dupe add` refuses a file the project tracks.
-- **A team's agent kit, in every repository.** Keep the team's skills, instruction files,
-  and scripts in one Git repository of the team's, at paths a project does not track
-  itself. In a clone of any project, `git dupe clone <kit-url>` brings them in, hidden
-  from that project, and `git dupe pull` takes the kit's updates; what you add on top
-  goes on a branch or a remote of your own, as in any Git repository. `git dupe clone`
-  keeps a file the project already has at one of the kit's paths, as it is, and names it
-  in a warning.
-- **Notes, plans, and scratch scripts that follow you.** A `notes/` and a `scripts/` of
-  your own in each project, with the history of your thinking, on every machine you work
-  on, and never in a pull request by accident.
-- **Settings for your tools.** `.vscode/`, a local configuration file, whatever the
-  project's `.gitignore` already ignores: `git dupe add -f` versions it, so that a fresh
-  clone does not start from nothing.
-- **Agents working several branches at once.** Each linked worktree that
-  `git worktree add` made is a workspace of its own, attached from the main worktree's
-  dupe or from your remote, and your work moves between worktrees as between machines
-  ([Questions](#questions) has the commands).
-- **Agents and scripts.** git-dupe adds no prompts of its own. `git dupe status
-  --porcelain` lists the changes under the hidden paths, a refusal is one `fatal:` line
-  with exit status 128, and a usage error exits 129.
-
-## Install
-
-On x86-64 Linux or macOS, with Git 2.43.0 or newer, below 3.0.0:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/BrianWeiHaoMa/git-dupe/main/install.sh | sh
-```
-
-It puts the latest release's executable in `~/.local/bin` and its manual page in
-`~/.local/share/man/man1`, once the download matches its published digest.
-[Installing](docs/install.md) has the rest: the archives by hand, from source, the Git
-it needs, and uninstalling.
-
-## How it works
-
-- The **dupe** is an ordinary Git repository inside the project's own `.git`, one per
-  worktree: `.git/dupe` in the main worktree, and `.git/worktrees/<name>/dupe` in a
-  linked one, whose working tree is that worktree's. The help texts and the manual page
-  call it the private repository: private to you, as a repository of your own is, and
-  not encrypted. Plain Git can read it, and clone, fetch, or push from it. It has its own
-  object store, which the project's Git never opens, so the project's `git gc` and
-  `git prune` leave it alone; and every Git process git-dupe runs has the
-  object-directory variables cleared, so a hook or alias of the project cannot redirect
-  your objects into the project's store. Being inside `.git`, it is never committed and
-  never cloned with the project; `git dupe clone` is the deliberate way back.
-- A **hidden path** is one the project's Git ignores through rules git-dupe maintains in
-  `.git/info/exclude`, so that `git status`, `git add -A`, and a public commit never see
-  it. The hidden paths are `.gitdupe`, a file of yours at the root that lists the paths
-  you hide, one per line; every path it lists; and every file the dupe tracks, as a file
-  you add is. Nothing versioned is added to the project.
-- Three commands are changed to fit a shared working tree: `git dupe status` and
-  `git dupe add` act on the hidden paths instead of every file of the project, and
-  `git dupe clean` cleans the project while sparing them. `git dupe stash -u` and `-a`,
-  which would stash the whole project, are refused, and so are a `push`, `pull`,
-  `fetch`, `remote`, or `clone` naming the project's repository or any of its remotes.
-  Every other Git command, `commit`, `diff`, `log`, `restore`, `switch`, `merge`, runs
-  against the dupe unchanged.
-- **What it writes.** Of its own accord, git-dupe writes the worktree's dupe, its own
-  marked region of `.git/info/exclude` (and `.git/info` when it is missing, and the
-  removal of a region whose worktree's dupe is gone), and `.gitdupe`; `git dupe clone`
-  also writes the files it checks out, and `git dupe clean` runs your `git clean`,
-  never deleting a hidden path, or refuses the few forms that could take one. Beyond
-  that, a Git command writes where your words tell Git to. No hook, no daemon, no edit
-  to `.gitignore` or to the project's configuration, no dependency beyond Rust's
-  standard library, and the only program it runs is `git`.
-
-## Limits
-
-- **Paths are compared as spelled, on macOS's case-insensitive volume too.** That
-  volume, macOS's default, makes one difference: git-dupe compares paths as spelled, so
-  a path spelled in another case is another path to it, while the project's Git ignores
-  a hidden path in every spelling of its ASCII case.
-- **Git 2.43.0 or newer, below 3.0.0.** No single feature needs it; it is the floor the
-  suite covers, and Ubuntu 24.04's stock Git. [Installing](docs/install.md#git) says
-  what older distributions ship.
-- **Nothing is encrypted.** The dupe's remote is an ordinary Git remote: what you push
-  is stored there as you pushed it, for whoever can read that repository. Push to one
-  you would trust with the files, and keep out what you would not push to any Git
-  repository, credentials and keys above all, or encrypt them before you add them.
-- **Plain `git` is not guarded.** To the project's Git a file of yours is an ignored
-  file: `git clean -x` deletes it, `git stash -a` stashes it, `git add -f` makes it
-  public, and a public pull or checkout that brings a file to its path overwrites it.
-  Commit first; `git dupe restore .`, from the root, brings back every file the dupe
-  tracks as last staged, and `git dupe clean` cleans the project while sparing them.
-  Public `git stash -u`, `git add -A`, and `git add .` leave them alone, as they leave
-  any ignored file.
-- **One command at a time in a worktree.** git-dupe commands in one worktree must not
-  overlap each other or a public Git command that writes to that worktree, and one
-  person or agent works in a worktree at a time; nothing is promised when they do.
-  Commands in different worktrees may run at the same time.
+  of its remotes. `git dupe git <words>` runs them when you mean it.
+- **Plain `git` is not guarded.** To the project's Git your files are ignored files:
+  `git clean -x` deletes them, `git stash -a` stashes them, `git add -f` makes them
+  public, and a public pull or checkout that brings a file to one of their paths
+  overwrites yours. Commit first: `git dupe restore .`, from the root, brings back every
+  file the dupe tracks as last staged.
 - **Each worktree on its own.** A linked worktree is attached by its own `git dupe init`
-  or `git dupe clone`, and has its own dupe, hidden paths, and history. Its exclude rules
-  apply in every worktree, since `.git/info/exclude` is shared: a path one worktree hides
-  is ignored by the project's Git in the others too. `git worktree remove` and
-  `git worktree prune` delete a linked worktree's dupe with it, whatever files of yours
-  stand on disk, so push first.
-- **Up to 1,000 hidden paths, a few thousand files.** That is the envelope the suite
-  covers. The hidden paths not below another one are passed to Git on one command line;
-  a list that does not fit is refused, naming the count, never truncated. Files below a
-  hidden directory do not count toward the paths: `notes/` is one path.
+  or `git dupe clone`, and `git worktree remove` and `git worktree prune` delete its
+  dupe with it, whatever files of yours stand there, so push first.
+- **Nothing is encrypted.** Push to a remote you would trust with the files.
 
-## Compared with what you may already use
-
-- **`.git/info/exclude` by hand.** Hides a path from the project and nothing else: no
-  history, and nothing on the next machine. git-dupe maintains that file for you and
-  adds the history and the sync.
-- **The bare-repository dotfiles trick, vcsh, yadm, chezmoi.** The first three are the
-  same mechanism as git-dupe's, a Git directory kept elsewhere with a working tree it
-  does not own, and all four are built for `$HOME`: none knows about a project's exclude
-  file or its remotes. git-dupe is that pattern scoped to one project and kept inside
-  its `.git`, with the exclude rules maintained for you, `status` and `add` confined to
-  your files, and the forms that would stash the whole project or push to the project's
-  remote refused. If the trick already works for you, keep it; and yadm and chezmoi can
-  encrypt, which git-dupe does not.
-- **A submodule.** Its gitlink and `.gitmodules` are committed, so the project sees it,
-  and it holds a subdirectory, never a file at the root such as `AGENTS.md`.
-- **A gitignored folder, or symlinks from a dotfiles repository.** Hidden only where the
-  team's `.gitignore` happens to name it, versioned only if the dotfiles repository knows
-  every project, and gone from every fresh clone until you set it up again.
-- **git-crypt, sops, age.** git-crypt and sops encrypt files that stay in the project's
-  repository, and age encrypts a file wherever it is; git-dupe keeps files out of the
-  project and encrypts nothing. If you want both, encrypt before you add.
-
-## Questions
-
-- **Does the dupe come along when someone clones the project?** No. `.git` is not part
-  of a clone, so nothing of yours is in the project. In a fresh clone,
-  `git dupe clone <url>` writes the files that are missing, keeps any already there, and
-  names the ones that differ.
-- **Two people on the same project?** Each clone has its own `.git/dupe`, its own
-  `.gitdupe`, and its own remote, one person per clone; nothing shows in the project for
-  anyone else. What a team shares, it shares through a remote, as the kit under
-  [What it is for](#what-it-is-for) does.
-- **Agents working several branches at once, in linked worktrees?** Each worktree is a
-  workspace of its own. In one that `git worktree add` made, run
-  `git dupe clone "$(git rev-parse --git-common-dir)/dupe"` to attach it from the main
-  worktree's dupe, or `git dupe clone <url>`; your work then moves between worktrees as
-  between machines, `git dupe push origin HEAD:agent` there and `git dupe merge agent` in
-  the main worktree. After `git worktree move`, run `git dupe init` in the new place so
-  that plain Git finds it again.
-- **My agent runs `git add -A` all day.** Anything that finds files through the ignore
-  rules, `add -A`, `add .`, `commit -a`, `status`, never picks up a hidden path. What
-  writes the index from an explicit tree or patch can: `add -f`, or a merge, rebase, or
-  patch that brings a file to that path. The path is then tracked by both repositories,
-  stays hidden, and every git-dupe command warns until one side lets go.
-- **What if the team's `.gitignore` has a `!` rule for my path?** `.gitignore` outranks
-  `info/exclude`, so the path is exposed. git-dupe names it, and the deciding rule with
-  its file and line, after every command until the rule or the path changes. Nothing is
-  lost, but until then a public `git add -A` would stage it, so move the path or change
-  the rule.
-- **What if the project later adds a file at my path?** A public pull or checkout
-  overwrites yours. Commit first; `git dupe restore` brings it back; then one repository
-  has to give the path up.
-- **How do I get out?** `git dupe detach` removes the worktree's dupe and its own region
-  of `.git/info/exclude`, leaving the rest of that file but the region of a worktree
-  whose dupe is gone, leaves every file on disk, `.gitdupe` included, and warns which
-  paths the project can now see and which another worktree still hides. Without
-  `--force` it refuses while a change is uncommitted or a commit of a branch, a tag, a
-  stash entry, or `HEAD` is on no remote; history removed by `detach --force` is gone,
-  since git-dupe keeps no copy. Then delete
-  `~/.local/bin/git-dupe` and `~/.local/share/man/man1/git-dupe.1`, or
-  `cargo uninstall git-dupe`.
-
-## Built to a specification
-
-git-dupe is new, and a tool that writes inside `.git` has to earn trust, so it is held to
-a specification. [`PRODUCT_SPECIFICATION.md`](PRODUCT_SPECIFICATION.md) says, in
-numbered lines, what git-dupe does, the guarantees it keeps, and what it never does;
-[`TECHNICAL_SPECIFICATION.md`](TECHNICAL_SPECIFICATION.md) says how each guarantee holds.
-The code follows both, and a change of behavior amends the specification first. The
-scenario suite, the specification's own `Done when` among it, runs on every push on
-Linux, on an Apple silicon Mac, and on an Intel Mac, under Git 2.43.0 and 2.56.0, the
-oldest and the newest release it lists
-([CI](https://github.com/BrianWeiHaoMa/git-dupe/actions/workflows/ci.yml)), all but
-its timing of six commands among 100,000 files, which a shared runner decides as much
-as git-dupe does, and in full before each release, on Linux and on macOS, under every
-minor release between them, fourteen at this writing, each built from source there.
-
-**How it was built.** I wrote the product specification and own every decision in it:
-the command surface, what is refused, what is left to plain Git, and the tradeoffs
-behind each. Coding agents wrote most of the Rust and the scenarios, to those two
-documents and under my direction, and I reviewed each change against them before it
-landed. The rules they worked under are the ones in [`CONTRIBUTING.md`](CONTRIBUTING.md):
-one directory of code per part of the technical specification's `Composition`; code,
-checks, and documents citing the lines they serve by label; a change of behavior
-amending the specification before it touches the code; and no check weakened or skipped
-to get to green. The first commit is a squash of the history before the tag.
-
-Read the specification beside the code and judge for yourself whether git-dupe keeps
-what it promises inside its `Operating envelope`. When something you ran does not go as
-a line says, [`CONTRIBUTING.md`](CONTRIBUTING.md) says how to report it, and the issue
-form asks for exactly that.
+More of what it does not do is under [Limits](docs/how-it-works.md#limits), and
+`git dupe detach` takes it back out, leaving every file on disk.
 
 ## Read more
 
+- [How it works](docs/how-it-works.md): the dupe, the hidden paths, what git-dupe
+  writes, its limits, and the specification it is built to.
+- [What it is for](docs/use-cases.md): the uses it was made for, and how it compares
+  with what you may already use.
+- [Questions](docs/questions.md): worktrees, teams, clones, and getting out.
+- [Installing](docs/install.md): the script, the archives by hand, from source, and the
+  Git it needs.
 - `git dupe help`, and `git dupe help <command>` for each command git-dupe adds or
   changes: a screen each, from the executable alone.
 - `man git-dupe`, where the manual page is installed: the commands, a quick start,
   examples, and explanations.
 - [`PRODUCT_SPECIFICATION.md`](PRODUCT_SPECIFICATION.md): what git-dupe does and
-  guarantees, and what it does not.
-- [`TECHNICAL_SPECIFICATION.md`](TECHNICAL_SPECIFICATION.md): how each guarantee holds.
+  guarantees, and what it does not; [`TECHNICAL_SPECIFICATION.md`](TECHNICAL_SPECIFICATION.md):
+  how each guarantee holds.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): what governs a change, how to report a problem,
-  and how to run the checks.
-- [`CHANGELOG.md`](CHANGELOG.md): what changed in each release.
-- [`RELEASING.md`](RELEASING.md): what a release holds and how one is made.
+  and how to run the checks; [`CHANGELOG.md`](CHANGELOG.md): what changed in each
+  release; [`RELEASING.md`](RELEASING.md): what a release holds and how one is made.
 
 ## License
 

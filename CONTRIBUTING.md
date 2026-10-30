@@ -20,7 +20,9 @@ changing it or reporting a problem.
   `git dupe` lines `README.md` shows are those lines (`readme`); the install line
   `README.md` and `docs/install.md` show runs `install.sh` as a scenario runs it
   (`install`), and the lines `docs/install.md` quotes from `INSTALL` stand as `INSTALL`
-  holds them (`install_lines`).
+  holds them (`install_lines`); every `git dupe` line of a `sh` block in a page under
+  `docs/` is a command line of the page's texts or a whole command in their prose
+  (`docs`).
 - What git-dupe gives Git or reads from it exists in Git 2.43.0 and is unchanged through
   the newest release the checks list, apart from the differences
   `TECHNICAL_SPECIFICATION.md` records; a doubt is settled in the source of both (R6).

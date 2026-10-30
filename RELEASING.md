@@ -107,8 +107,9 @@ release and as a change of its own; `<new>` is the newest of them:
    the opening of `Substrate assumptions`, and an assumption bounded "through `<old>`",
    as S11 is; in `PRODUCT_SPECIFICATION.md`, F4's newest "at this writing"; in
    [`CONTRIBUTING.md`](CONTRIBUTING.md), the examples of the `Checks` table and the
-   count of releases the paragraph after it gives; in `README.md`, the newest release
-   and the count under `Built to a specification`. This lists every line that names
+   count of releases the paragraph after it gives; in
+   [`docs/how-it-works.md`](docs/how-it-works.md), the newest release and the count
+   under `Built to a specification`. This lists every line that names
    `<old>`, to read one by one:
 
    ```console
