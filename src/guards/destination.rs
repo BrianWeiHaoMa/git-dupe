@@ -36,7 +36,8 @@
 //!   Git takes that user's home from the password database, which the standard library
 //!   cannot ask, and the product admits it as not seen through.
 //! - A relative local path is one `Path::is_absolute` does not call absolute: `C:\proj` is
-//!   absolute on Windows alone, `/x` on Linux and macOS alone (`Holds/G18`).
+//!   absolute on Windows alone, `/x` on Linux and macOS alone (`Holds/G18`). On Windows
+//!   `\x` and `/x` are read from the root as the platform joins them, on its drive.
 //! - The canonical path is the real path, asked of the path as written, so that on Linux
 //!   and macOS `link/..` is where the link's target's parent is; where the real path cannot
 //!   be had — nothing there, or a path Git cannot open either, as one beyond a component it
@@ -135,12 +136,16 @@ pub fn canonical(path: &[u8]) -> Vec<u8> {
 }
 
 /// The `<letter>:/<path>` of what a `file:///<letter>:/<path>` or `file://<letter>:/<path>`
-/// word holds after its `://`, decoded.
+/// word holds after its `://`, decoded, a separator after the colon being what the platform
+/// calls one, so that `file://C:\proj`, which Git for Windows opens, reads the same.
 fn on_a_drive(after_the_scheme: &[u8]) -> Option<&[u8]> {
     let path = after_the_scheme
         .strip_prefix(b"/")
         .unwrap_or(after_the_scheme);
-    matches!(path, [letter, b':', b'/', ..] if letter.is_ascii_alphabetic()).then_some(path)
+    let drive = |letter: &u8, separator: &u8| {
+        letter.is_ascii_alphabetic() && path::is_separator(char::from(*separator))
+    };
+    matches!(path, [letter, b':', separator, ..] if drive(letter, separator)).then_some(path)
 }
 
 /// The scheme and what follows its `://`, when the word is a URL as Git's `is_url` reads
@@ -295,17 +300,36 @@ fn local(path: &[u8], from: ReadFrom) -> Vec<Form> {
         .collect()
 }
 
-/// `path` itself when absolute, else joined to each place `from` reads a relative one
-/// from.
+/// `path` itself when absolute, else joined to each place `from` reads a relative one from:
+/// a root and no drive, which only Windows has, on that place's drive, where Git opens it;
+/// and any other path after that place, a drive and no root staying a name in it. A path
+/// of the form `drive_as_directory` reads is also that path.
 fn joined(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
     if operand::absolute(path) {
         return vec![path.to_vec()];
     }
+    let rooted = bytes::name(path).filter(|name| Path::new(name).has_root());
     [Some(from.root), from.outside]
         .into_iter()
         .flatten()
-        .map(|base| [bytes::of(base.as_os_str()), b"/", path].concat())
+        .map(|base| match rooted {
+            Some(name) => bytes::of(base.join(name).as_os_str()).to_vec(),
+            None => [bytes::of(base.as_os_str()), b"/", path].concat(),
+        })
+        .chain(drive_as_directory(path))
         .collect()
+}
+
+/// The `<letter>:/<path>` of a `/<letter>/<path>` that `Path::is_absolute` does not call
+/// absolute, which only Windows has: Git for Windows's shell opens that path on that drive
+/// when Git starts a transport program there.
+fn drive_as_directory(path: &[u8]) -> Option<Vec<u8>> {
+    match path {
+        [b'/', letter, rest @ ..] if letter.is_ascii_alphabetic() && rest.starts_with(b"/") => {
+            Some([&[*letter, b':'][..], rest].concat())
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

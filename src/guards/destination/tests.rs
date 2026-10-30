@@ -12,13 +12,9 @@ fn root() -> String {
 }
 
 /// What a word or a URL's path that begins with `/` is read as: itself where the platform
-/// calls it absolute, and on Windows, where a root and no drive is not, from the root.
+/// calls it absolute, and on Windows, where a root and no drive is not, on the root's drive.
 fn read(path: &str) -> String {
-    if Path::new(path).is_absolute() {
-        path.to_owned()
-    } else {
-        format!("{}{path}", root())
-    }
+    top(path)
 }
 
 fn from(root: &Path) -> ReadFrom<'_> {
@@ -238,17 +234,24 @@ fn a_path_is_absolute_as_the_platform_says_and_only_then_stands_alone() {
         outside: Some(Path::new(&outside)),
         home: None,
     };
-    for word in ["C:\\proj", "/x"] {
-        let expected = if Path::new(word).is_absolute() {
-            vec![word.as_bytes().to_vec()]
-        } else {
-            vec![
-                format!("{root}/{word}").into_bytes(),
-                format!("{outside}/{word}").into_bytes(),
-            ]
-        };
-        assert_eq!(joined(word.as_bytes(), from), expected, "{word}");
-    }
+    let word = "C:\\proj";
+    let expected = if Path::new(word).is_absolute() {
+        vec![word.as_bytes().to_vec()]
+    } else {
+        vec![
+            format!("{root}/{word}").into_bytes(),
+            format!("{outside}/{word}").into_bytes(),
+        ]
+    };
+    assert_eq!(joined(word.as_bytes(), from), expected, "{word}");
+    // A root and no drive stands on the drive it is read from; on Linux and macOS it is
+    // absolute and stands alone.
+    let expected = if Path::new("/srv").is_absolute() {
+        vec![b"/srv".to_vec()]
+    } else {
+        vec![top("/srv").into_bytes(), top("/srv").into_bytes()]
+    };
+    assert_eq!(joined(b"/srv", from), expected);
     // The top keeps what makes it absolute when trailing slashes are dropped.
     let top_of_all = top("/");
     let expected = Form::Local(canonical(top_of_all.as_bytes()));
@@ -422,6 +425,57 @@ fn a_file_url_on_a_drive_also_has_the_path_on_that_drive() {
     assert_eq!(of("file:///C:repo"), expected);
     // Any other scheme opens no path on a drive.
     assert_eq!(of("https://example.com/C:/repo")[1..], []);
+}
+
+#[test]
+fn a_root_and_no_drive_is_opened_on_the_drive_it_is_read_from() {
+    let path = "/nonexistent-git-dupe/p";
+    let spelled = path.replace('/', "\\");
+    for word in [path, &spelled] {
+        let expected = if path::is_separator('\\') || word == path {
+            local_forms(&top(path))
+        } else {
+            local_forms(&format!("{}/{word}", root()))
+        };
+        assert_eq!(of(word), expected, "{word}");
+    }
+}
+
+#[test]
+fn a_drive_written_as_a_directory_is_also_the_drive_where_a_root_alone_is_not_absolute() {
+    let on_the_drive = |path: &str| {
+        Form::Local(canonical(
+            joined(path.as_bytes(), from(Path::new(&root())))[0].as_slice(),
+        ))
+    };
+    for word in ["/c/repo", "/C/repo/", "file:///c/repo"] {
+        let forms = of(word);
+        let shell =
+            forms.contains(&on_the_drive("c:/repo")) || forms.contains(&on_the_drive("C:/repo"));
+        assert_eq!(shell, !Path::new("/").is_absolute(), "{word}");
+    }
+    // Only a first component of one letter: anything else names no drive there.
+    for word in ["/ab/repo", "/1/repo", "/c:repo"] {
+        assert!(
+            locals(of(word))
+                .iter()
+                .all(|form| { !matches!(form, Form::Local(path) if path.starts_with(b"C:/repo")) })
+        );
+    }
+}
+
+#[test]
+fn a_backslash_after_a_file_urls_drive_is_a_separator_where_the_platform_says_so() {
+    let on_the_drive = Form::Local(canonical(
+        joined(b"C:\\repo", from(Path::new(&root())))[0].as_slice(),
+    ));
+    for word in ["file://C:\\repo", "file:///C:\\repo", "file:///C:%5Crepo"] {
+        assert_eq!(
+            of(word).contains(&on_the_drive),
+            path::is_separator('\\'),
+            "{word}"
+        );
+    }
 }
 
 /// A directory of the test's own below the system's temporary one, removed after.
