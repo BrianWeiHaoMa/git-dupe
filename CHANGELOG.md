@@ -8,6 +8,8 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-30
+
 ### Added
 
 - An install script: `curl -fsSL https://raw.githubusercontent.com/BrianWeiHaoMa/git-dupe/main/install.sh | sh`
