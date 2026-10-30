@@ -422,7 +422,8 @@ fn each_commands_text_says_what_it_does_and_how_it_differs_from_git() {
             &[
                 r#"with any other COMMAND, it runs "git help COMMAND""#,
                 "The manual page of git-dupe, where it is installed, holds these texts and more: a quick start, examples of daily use, and what one screen has no room for, such as hidden and private paths, worktrees, a file the project ignores, what plain git does to private files, and the refused commands in full.",
-                r#""man git-dupe" shows it, and so does "git dupe --help" while Git's help format is man, its default."#,
+                r#"On Linux and macOS "man git-dupe" shows it, and so does "git dupe --help" while Git's help format is man, its default there."#,
+                r#"Windows has no man and ships no page: there "git dupe --help" is Git's own failure for a page it lacks, and "git dupe help" and -h are the documentation."#,
             ],
         ),
         (

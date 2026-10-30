@@ -11,10 +11,8 @@
 //! not a line changed, so that a rerun stages what a killed run wrote.
 
 use std::collections::BTreeSet;
-use std::ffi::OsStr;
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
 
 use super::gitdupe::{self, Listed, NAME, Source};
 use super::hidden::HiddenPaths;
@@ -22,7 +20,7 @@ use super::{Failed, listing, replace};
 use crate::guards::operand::{self, Cleaned};
 use crate::guards::pathspec;
 use crate::runner::locate::Workspace;
-use crate::runner::{End, Failure, Run};
+use crate::runner::{End, Failure, Run, Word};
 
 /// The hidden paths as a handler reads them before an edit: `.gitdupe` with the bytes it
 /// was read from, and the hidden paths of it and the private index.
@@ -105,16 +103,16 @@ fn write_and_stage(
     content: Option<Vec<u8>>,
     changed: Vec<Vec<u8>>,
 ) -> Result<Edited, NotEdited> {
-    let file = workspace.root().join(OsStr::from_bytes(NAME));
-    let mode = match source {
+    let file = gitdupe::file(workspace);
+    let link_replaced = content.is_some() && matches!(source, Source::Link(_));
+    let permissions = match source {
         Source::Unreadable(cause) => return Err(NotEdited::Unreadable(cause)),
-        Source::File(mode) | Source::Link(mode) => Some(mode),
+        Source::File(permissions) | Source::Link(permissions) => Some(permissions),
         Source::Absent => None,
     };
-    let link_replaced = content.is_some() && matches!(source, Source::Link(_));
     if let Some(content) = content {
         let private = workspace.private_directory();
-        replace::whole(&private, &file, &content, mode).map_err(NotEdited::NotWritten)?;
+        replace::whole(&private, &file, &content, permissions).map_err(NotEdited::NotWritten)?;
     }
     let on_disk = fs::symlink_metadata(&file).is_ok_and(|found| found.file_type().is_file());
     let not_staged = if on_disk {
@@ -133,12 +131,10 @@ fn write_and_stage(
 /// Git's own output and message.
 fn stage(workspace: &Workspace) -> Result<(), Failed> {
     let private = workspace.private_directory();
-    let words = [
-        "add".into(),
-        "-f".into(),
-        "--".into(),
-        pathspec::top_literal(NAME),
-    ];
+    let words = ["add", "-f", "--"]
+        .map(Word::from)
+        .into_iter()
+        .chain([pathspec::top_literal(NAME).into()]);
     let run = Run::private(&private, workspace.root(), words)
         .from(workspace.root())
         .own_paths()

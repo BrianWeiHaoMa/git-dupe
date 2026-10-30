@@ -29,9 +29,6 @@
 //!   outside any repository there are no facts and no public place, and the words run at
 //!   once (`Holds/G18`).
 
-use std::ffi::OsString;
-use std::os::unix::ffi::OsStrExt;
-
 use super::advice;
 use super::outcome::{self, Outcome};
 use super::stash;
@@ -46,13 +43,13 @@ pub enum Passed<'w> {
     /// A word F6 does not name that passes through, then the words after it, as received;
     /// then the words the hint after its run reads: the same words, or, where an alias
     /// chain reached the command Git runs, the words it reached (`alias`).
-    Word(&'w [OsString], &'w [OsString]),
+    Word(&'w [Vec<u8>], &'w [Vec<u8>]),
     /// `stash`, then the words after it, as received.
-    Stash(&'w [OsString]),
+    Stash(&'w [Vec<u8>]),
     /// `push`, `pull`, `fetch`, or `remote`, then the words after it, as received.
-    Transfer(&'w [OsString]),
+    Transfer(&'w [Vec<u8>]),
     /// `WORDS` of `git dupe git WORDS`.
-    Git(&'w [OsString]),
+    Git(&'w [Vec<u8>]),
 }
 
 impl Passed<'_> {
@@ -91,11 +88,11 @@ impl Passed<'_> {
     /// usage (`Holds/G18`). Never after `git`, whose own form reads only its first word
     /// (`Composition/Front`).
     pub fn asks_for_help(self) -> bool {
-        let help = |word: &OsString| matches!(word.as_bytes(), b"-h" | b"--help");
+        let help = |word: &Vec<u8>| matches!(word.as_slice(), b"-h" | b"--help");
         match self {
             Passed::Word(words, _) | Passed::Stash(words) => words[1..]
                 .iter()
-                .take_while(|word| word.as_bytes() != b"--")
+                .take_while(|word| word.as_slice() != b"--")
                 .any(help),
             Passed::Transfer(words) => words[1..].iter().any(help),
             Passed::Git(_) => false,
@@ -104,7 +101,7 @@ impl Passed<'_> {
 }
 
 /// The run of `words` as Git itself.
-fn run(against: Against, words: &[OsString]) -> Outcome {
+fn run(against: Against, words: &[Vec<u8>]) -> Outcome {
     match Run::against(against, words).users_command().start() {
         Ok(finished) => Outcome::Git(finished.end),
         Err(failure) => outcome::not_started(failure),
@@ -115,8 +112,8 @@ fn run(against: Against, words: &[OsString]) -> Outcome {
 mod tests {
     use super::*;
 
-    fn words(words: &[&str]) -> Vec<OsString> {
-        words.iter().map(OsString::from).collect()
+    fn words(words: &[&str]) -> Vec<Vec<u8>> {
+        words.iter().map(|word| word.as_bytes().to_vec()).collect()
     }
 
     #[test]

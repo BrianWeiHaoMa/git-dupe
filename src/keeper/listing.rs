@@ -9,7 +9,7 @@ use super::Failed;
 use crate::guards::pathspec;
 use crate::runner::locate::Workspace;
 use crate::runner::records;
-use crate::runner::{End, Failure, Run};
+use crate::runner::{End, Failure, Run, Word};
 
 /// Every file the private index holds, from one private `ls-files` from the root.
 pub fn private(workspace: &Workspace) -> Result<BTreeSet<Vec<u8>>, Failed> {
@@ -71,9 +71,13 @@ pub fn users_index(query: &[Vec<u8>]) -> Result<BTreeSet<Vec<u8>>, Failed> {
 /// `:(top,literal)<path>`, which name the same paths from any directory (S4).
 fn public_listing<'r>(query: &[Vec<u8>]) -> Run<'r> {
     let words = ["ls-files", "-z", "--full-name", "--"]
-        .map(Into::into)
+        .map(Word::from)
         .into_iter()
-        .chain(query.iter().map(|path| pathspec::top_literal(path)));
+        .chain(
+            query
+                .iter()
+                .map(|path| Word::naming(pathspec::top_literal(path), path)),
+        );
     Run::public(words).own_paths().capture_output()
 }
 

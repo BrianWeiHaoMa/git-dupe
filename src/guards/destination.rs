@@ -37,10 +37,10 @@
 //!   `places` are the only parts of `Guards` that read the filesystem, and they only read.
 
 use std::fs;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 
 use super::operand;
+use crate::bytes;
 
 /// Where a relative local path is read from: the root, because Git runs a command from
 /// the top of its work tree, and also the user's directory when that lies outside the
@@ -101,9 +101,10 @@ pub fn forms(destination: &[u8], from: ReadFrom) -> Vec<Form> {
 /// The canonical path of `path`, absolute: its real path when it can be had, and the
 /// path cleaned as text otherwise.
 pub fn canonical(path: &[u8]) -> Vec<u8> {
-    match fs::canonicalize(Path::new(std::ffi::OsStr::from_bytes(path))) {
-        Ok(real) => real.into_os_string().into_vec(),
-        Err(_) => operand::clean_absolute(path),
+    let real = bytes::name(path).and_then(|name| fs::canonicalize(Path::new(name)).ok());
+    match real {
+        Some(real) => bytes::of(real.as_os_str()).to_vec(),
+        None => operand::clean_absolute(path),
     }
 }
 
@@ -261,7 +262,7 @@ fn joined(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
     [Some(from.root), from.outside]
         .into_iter()
         .flatten()
-        .map(|base| [base.as_os_str().as_bytes(), b"/", path].concat())
+        .map(|base| [bytes::of(base.as_os_str()), b"/", path].concat())
         .collect()
 }
 

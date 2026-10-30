@@ -28,10 +28,10 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use super::{Against, End, Failure, Run};
+use crate::bytes;
 
 const LOCATE: [&str; 6] = [
     "rev-parse",
@@ -121,7 +121,6 @@ impl Workspace {
         else {
             return None;
         };
-        let absolute = |path: &[u8]| path.starts_with(b"/");
         let submodule_checkout = superproject && absolute(prefix);
         if submodule_checkout {
             let (_, after) = prefix.split_at(prefix.iter().position(|&b| b == b'\n')?);
@@ -132,9 +131,9 @@ impl Workspace {
             return None;
         }
         let mut workspace = Workspace {
-            git_directory: PathBuf::from(OsStr::from_bytes(git_directory)),
-            common_directory: PathBuf::from(OsStr::from_bytes(common_directory)),
-            root: PathBuf::from(OsStr::from_bytes(root)),
+            git_directory: path_of(git_directory)?,
+            common_directory: path_of(common_directory)?,
+            root: path_of(root)?,
             prefix: prefix.to_vec(),
             attached: false,
             submodule_checkout,
@@ -240,7 +239,7 @@ impl Workspace {
     /// The main working tree at `root`, absolute, as the locate run names it from the
     /// root: for unit checks of what a part does on disk there.
     pub fn at_root(root: &Path) -> Workspace {
-        let root = root.as_os_str().as_bytes();
+        let root = bytes::of(root.as_os_str());
         let answer = [root, b"/.git\n", root, b"/.git\n", root, b"\n\n"].concat();
         Workspace::read(&answer, false).expect("an absolute root without a newline")
     }
@@ -248,8 +247,8 @@ impl Workspace {
     /// The linked worktree `name` of the common Git directory `common`, at `root`, all
     /// absolute, as the locate run names it from that root.
     pub fn linked_at(common: &Path, name: &[u8], root: &Path) -> Workspace {
-        let common = common.as_os_str().as_bytes();
-        let root = root.as_os_str().as_bytes();
+        let common = bytes::of(common.as_os_str());
+        let root = bytes::of(root.as_os_str());
         let answer = [
             common,
             b"/worktrees/",
@@ -285,21 +284,37 @@ pub fn obstructed(private_directory: &Path) -> bool {
 /// or a symbolic link, a dangling one included; an `lstat` that fails for any cause finds
 /// nothing (G9, G27, `Holds/G3`, `Holds/G13`).
 pub fn present(root: &Path, path: &[u8]) -> bool {
-    fs::symlink_metadata(root.join(OsStr::from_bytes(path))).is_ok()
+    lstat(root, path).is_some()
 }
 
 /// Whether `lstat` finds a directory at the root-relative `path`: a symbolic link to one
 /// is none (`Holds/G13`, `Holds/G16`, `Holds/G2`).
 pub fn directory_at(root: &Path, path: &[u8]) -> bool {
-    fs::symlink_metadata(root.join(OsStr::from_bytes(path))).is_ok_and(|found| found.is_dir())
+    lstat(root, path).is_some_and(|found| found.is_dir())
 }
 
 /// Whether `lstat` finds at the root-relative `path` a directory holding a `.git` entry of
 /// any kind, a dangling link included: a nested repository as G16 counts one, whether or
 /// not Git would open it, a submodule's checkout among them (`Holds/G12`, `Holds/G16`).
 pub fn nested_repository_at(root: &Path, path: &[u8]) -> bool {
-    directory_at(root, path)
-        && fs::symlink_metadata(root.join(OsStr::from_bytes(path)).join(".git")).is_ok()
+    directory_at(root, path) && lstat(root, &[path, b"/.git"].concat()).is_some()
+}
+
+/// What `lstat` finds at the root-relative `path`; bytes that are no name stand nowhere, so
+/// that such a path is present to no check (`Holds/G30`).
+fn lstat(root: &Path, path: &[u8]) -> Option<fs::Metadata> {
+    fs::symlink_metadata(bytes::under(root, path)?).ok()
+}
+
+/// Whether bytes Git printed are a path this platform calls absolute: `/x` on Linux and
+/// macOS, `C:/x` or `//server/share/x` on Windows (S23).
+fn absolute(path: &[u8]) -> bool {
+    bytes::name(path).is_some_and(|name| Path::new(name).is_absolute())
+}
+
+/// The path Git printed, where it is a name.
+fn path_of(path: &[u8]) -> Option<PathBuf> {
+    bytes::owned(path.to_vec()).map(PathBuf::from)
 }
 
 /// Where a destination is compared from (`Holds/G18`), all absolute: the root a relative
@@ -365,12 +380,12 @@ impl Unlocated {
         else {
             return None;
         };
-        if !(git_directory.starts_with(b"/") && common_directory.starts_with(b"/")) {
+        if !(absolute(git_directory) && absolute(common_directory)) {
             return None;
         }
         Some(Unlocated::InGitDirectory {
-            git_directory: private_directory(Path::new(OsStr::from_bytes(git_directory))),
-            common_directory: PathBuf::from(OsStr::from_bytes(common_directory)),
+            git_directory: private_directory(&path_of(git_directory)?),
+            common_directory: path_of(common_directory)?,
         })
     }
 

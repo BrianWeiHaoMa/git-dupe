@@ -20,13 +20,12 @@
 //! beyond one instead.
 
 use std::collections::{BTreeSet, HashMap};
-use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use super::Failed;
 use super::foreign::{self, Owner};
+use crate::bytes;
 use crate::guards::operand;
 use crate::guards::quoted::{quoted, shell_word};
 use crate::runner::locate::Workspace;
@@ -308,8 +307,9 @@ pub fn link_above<'p>(
 ) -> Option<&'p [u8]> {
     operand::ancestors(path).find(|ancestor| {
         *known.entry(ancestor.to_vec()).or_insert_with(|| {
-            fs::symlink_metadata(root.join(OsStr::from_bytes(ancestor)))
-                .is_ok_and(|found| found.file_type().is_symlink())
+            bytes::under(root, ancestor)
+                .and_then(|ancestor| fs::symlink_metadata(ancestor).ok())
+                .is_some_and(|found| found.file_type().is_symlink())
         })
     })
 }
@@ -392,7 +392,7 @@ mod tests {
         let root = scratch.0.join("root");
         fs::create_dir_all(root.join("a/other")).unwrap();
         fs::create_dir_all(scratch.0.join("elsewhere")).unwrap();
-        std::os::unix::fs::symlink(scratch.0.join("elsewhere"), root.join("a/link")).unwrap();
+        crate::links_and_modes::symlink(scratch.0.join("elsewhere"), root.join("a/link")).unwrap();
 
         assert!(beyond_a_link(&root, b"a/link/secret", &mut HashMap::new()));
         assert!(!beyond_a_link(&root, b"a/other/file", &mut HashMap::new()));
@@ -404,7 +404,7 @@ mod tests {
         assert!(beyond_a_link(&root, b"a/link/deeper/secret", &mut known));
         // The outermost link is the one named, whatever lies beyond it.
         fs::create_dir_all(scratch.0.join("elsewhere/inner-target")).unwrap();
-        std::os::unix::fs::symlink(
+        crate::links_and_modes::symlink(
             scratch.0.join("elsewhere/inner-target"),
             scratch.0.join("elsewhere/inner"),
         )

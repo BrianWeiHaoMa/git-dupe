@@ -15,15 +15,18 @@
 //! (`Holds/G3`). A listing that fails is one warning, as a question that fails is, and,
 //! as a failed question names no path as still hidden, no path is then named as one
 //! public Git ignores because another worktree hides it: whether public Git tracks it,
-//! and so sees it, is not known (G7).
+//! and so sees it, is not known (G7). A path among them that is no name stands nowhere by
+//! `lstat`, so that the filter of what is present would drop it silently: it is named
+//! instead of asked about (G3, G30).
 
 use std::collections::{BTreeSet, HashMap};
 
 use super::exposure::{self, Answered, Asked};
 use super::foreign::Foreign;
-use super::hidden::HiddenPaths;
+use super::hidden::{self, HiddenPaths};
 use super::region::{self, NotDeleted};
 use super::{Failed, gitdupe, listing};
+use crate::bytes;
 use crate::runner::End;
 use crate::runner::locate::{Workspace, present};
 
@@ -57,10 +60,12 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
         }
     }
     let answered = exposure::warnings(workspace, &asked, &listed.tracked, &mut HashMap::new());
+    let unnamed = unnamed(hidden, &deleted.paths);
     let warnings = deleted
         .warning
         .into_iter()
         .chain(listed.warning)
+        .chain(unnamed.iter().map(|path| hidden::unnamed_line(path)))
         .chain(answered.warnings)
         .collect();
     Ok(Answered {
@@ -69,6 +74,20 @@ pub fn remove(workspace: &Workspace, hidden: Option<&HiddenPaths>) -> Result<Ans
         refused: listed.refused.or(answered.refused),
         killed: listed.killed.or(answered.killed),
     })
+}
+
+/// The paths named instead of asked about: each hidden path as it stood that is no name, and
+/// each path of the deleted region that is none and is neither among them nor below one.
+fn unnamed<'p>(hidden: &'p HiddenPaths, deleted: &'p [Vec<u8>]) -> Vec<&'p [u8]> {
+    let released = deleted
+        .iter()
+        .filter(|path| !hidden.hides(path) && bytes::name(path).is_none());
+    hidden
+        .unnamed
+        .iter()
+        .chain(released)
+        .map(Vec::as_slice)
+        .collect()
 }
 
 /// The paths the question asks about, in order: each hidden path as it stood that is still
@@ -159,4 +178,37 @@ fn public_listing(workspace: &Workspace, hidden: &HiddenPaths, asked: &[(&[u8], 
         }
     }
     listed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::links_and_modes::names_every_byte_string;
+
+    #[test]
+    fn a_path_that_is_no_name_is_named_though_lstat_finds_nothing_there() {
+        let listed = vec![b"notes".to_vec(), b"a/\xff".to_vec()];
+        let hidden = HiddenPaths::of(listed, BTreeSet::new());
+        let deleted = [
+            b".gitdupe".to_vec(),
+            b"a/\xff".to_vec(),
+            b"gone/\xff".to_vec(),
+            b"notes".to_vec(),
+        ];
+        let named = unnamed(&hidden, &deleted);
+        if names_every_byte_string() {
+            assert!(named.is_empty());
+        } else {
+            assert_eq!(named, [&b"a/\xff"[..], b"gone/\xff"]);
+        }
+    }
+
+    #[test]
+    fn under_force_the_paths_on_disk_and_the_region_are_named_the_same() {
+        // What `remove` builds where the private repository could not be listed.
+        let deleted = [b"a/\xff".to_vec()];
+        let unlisted = HiddenPaths::of([vec![], deleted.to_vec()].concat(), BTreeSet::new());
+        let named = unnamed(&unlisted, &deleted);
+        assert_eq!(named.len(), usize::from(!names_every_byte_string()));
+    }
 }

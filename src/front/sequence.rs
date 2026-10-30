@@ -50,9 +50,6 @@
 //!   both directories: no edit there.
 //! - `tests/scenarios/<word>.rs` and its `mod` line in `tests/scenarios/main.rs`.
 
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::OsStrExt;
-
 use super::add;
 use super::alias::{self, Resolved};
 use super::clean;
@@ -80,12 +77,12 @@ const DASHED_FIRST_WORD: &[u8] = b"after 'dupe' only -h alone or --version may b
     Git's own options go before it: git <options> dupe <command>";
 
 /// Runs the words after `dupe` through the sequence and returns the exit status.
-pub fn run(words: &[OsString]) -> u8 {
+pub fn run(words: &[Vec<u8>]) -> u8 {
     // (9) The exit status: the one place an outcome becomes one.
     sequence(words).status()
 }
 
-fn sequence(words: &[OsString]) -> Outcome {
+fn sequence(words: &[Vec<u8>]) -> Outcome {
     // (1) Bare `git dupe`, `--version`, `-h` alone, and every other dashed first word.
     let first = match first_word(words) {
         Ok(first) => first,
@@ -165,12 +162,12 @@ fn sequence(words: &[OsString]) -> Outcome {
 
 /// Step (1): the first word, or the outcome the command ends with before anything runs:
 /// bare `git dupe`, `--version`, `-h` alone, and every other dashed first word.
-fn first_word(words: &[OsString]) -> Result<&[u8], Outcome> {
+fn first_word(words: &[Vec<u8>]) -> Result<&[u8], Outcome> {
     let usage_line = help::general_usage_line();
     let Some((first, rest)) = words.split_first() else {
         return Err(outcome::print(usage_line, Outcome::BareUsage));
     };
-    let first = first.as_bytes();
+    let first = first.as_slice();
     if first == b"--version" {
         return Err(outcome::print(VERSION_LINE.as_bytes(), Outcome::Answered));
     }
@@ -193,7 +190,7 @@ fn first_word(words: &[OsString]) -> Result<&[u8], Outcome> {
 /// repository Git's own message ends the command, and in an unattached one a command that
 /// requires attachment is refused naming `git dupe init` first. The words of a command
 /// Git runs as itself are not read here: its guard reads them when it runs.
-fn read_words(command: Command, words: &[OsString]) -> Words<'_> {
+fn read_words(command: Command, words: &[Vec<u8>]) -> Words<'_> {
     let word = command.word();
     let rest = &words[1..];
     match command {
@@ -254,7 +251,7 @@ fn read_words(command: Command, words: &[OsString]) -> Words<'_> {
 /// directory, nothing is looked up or run through it, and a help request is refused there.
 fn answered_unlocated(
     read: Option<Result<Read, Vec<u8>>>,
-    words: &[OsString],
+    words: &[Vec<u8>],
     not_located: &NotLocated,
 ) -> Option<Outcome> {
     let NotLocated::Refused {
@@ -288,10 +285,10 @@ fn answered_unlocated(
 /// the expansion, which `expanded` keeps, as step (2) reads that command typed; it keeps
 /// too the words a chain that passes through reaches, for the hint after the run.
 fn through_aliases<'w>(
-    words: &'w [OsString],
+    words: &'w [Vec<u8>],
     against: Against,
     obstructed: bool,
-    expanded: &'w mut Option<Vec<OsString>>,
+    expanded: &'w mut Option<Vec<Vec<u8>>>,
 ) -> Reached<'w> {
     let resolved = if obstructed {
         Ok(Resolved::PassThrough)
@@ -319,7 +316,7 @@ fn through_aliases<'w>(
             }
         }
         Ok(Resolved::Ambiguous(reached)) => {
-            Reached::Read(None, Err(alias::ambiguous(&reached, words[0].as_bytes())))
+            Reached::Read(None, Err(alias::ambiguous(&reached, words[0].as_slice())))
         }
     }
 }
@@ -329,8 +326,8 @@ fn through_aliases<'w>(
 /// at its path, the word passes through unresolved, and step (5) refuses it.
 fn aliased<'w>(
     workspace: &Workspace,
-    words: &'w [OsString],
-    expanded: &'w mut Option<Vec<OsString>>,
+    words: &'w [Vec<u8>],
+    expanded: &'w mut Option<Vec<Vec<u8>>>,
 ) -> Reached<'w> {
     let private = workspace.private_directory();
     let against = Against::Private {
@@ -444,7 +441,7 @@ fn with_table<'w>(
     table: &'static [Entry],
     operands: Operands,
     first: &[u8],
-    rest: &'w [OsString],
+    rest: &'w [Vec<u8>],
     read: impl FnOnce(table::Read<'w>) -> Read<'w>,
 ) -> Words<'w> {
     match table::read(table, rest) {
@@ -499,34 +496,34 @@ enum Reached<'w> {
 /// reported before step (6).
 enum Read<'w> {
     /// `init`, with the initial branch when one was given.
-    Init(Option<&'w OsStr>),
+    Init(Option<&'w [u8]>),
     /// `clone`, with every word after it, the `URL`, and the branch when one was given.
     Clone {
-        words: &'w [OsString],
-        url: &'w OsStr,
-        branch: Option<&'w OsStr>,
+        words: &'w [Vec<u8>],
+        url: &'w [u8],
+        branch: Option<&'w [u8]>,
     },
     /// `detach`, with `--force` or without.
     Detach(bool),
     /// `hide` or `unhide`, with its operands as typed.
-    Edit(Command, Vec<&'w OsStr>),
+    Edit(Command, Vec<&'w [u8]>),
     /// `status`, with the words its table holds.
     Status(table::Read<'w>),
     /// `add`, with the words its table holds and the words as typed.
-    Add(table::Read<'w>, &'w [OsString]),
+    Add(table::Read<'w>, &'w [Vec<u8>]),
     /// `clean`, with the words its table holds and the words as typed.
-    Clean(table::Read<'w>, &'w [OsString]),
+    Clean(table::Read<'w>, &'w [Vec<u8>]),
     /// A command Git runs as itself once its guard has passed.
     Passed(Passed<'w>),
 }
 
 /// The handler step (7) runs.
 enum Handler<'w> {
-    Init(Option<&'w OsStr>),
+    Init(Option<&'w [u8]>),
     Clone {
-        words: &'w [OsString],
-        url: &'w OsStr,
-        branch: Option<&'w OsStr>,
+        words: &'w [Vec<u8>],
+        url: &'w [u8],
+        branch: Option<&'w [u8]>,
     },
     /// `detach`, with `--force` or without: no command G6 covers.
     Detach(bool),
@@ -537,9 +534,9 @@ enum Handler<'w> {
     Status(table::Read<'w>, Option<Vec<Vec<u8>>>),
     /// `add`, with the words as typed and its operands, each a form or a root-relative
     /// path.
-    Add(table::Read<'w>, &'w [OsString], Vec<add::Operand>),
+    Add(table::Read<'w>, &'w [Vec<u8>], Vec<add::Operand>),
     /// `clean`, with the words as typed.
-    Clean(table::Read<'w>, &'w [OsString]),
+    Clean(table::Read<'w>, &'w [Vec<u8>]),
     Passed(Passed<'w>),
 }
 
@@ -553,7 +550,7 @@ fn handler<'w>(
     command: Option<Command>,
 ) -> Result<Handler<'w>, Vec<u8>> {
     let command = command.map_or(&b""[..], Command::word);
-    let paths = |words: &[&OsStr]| hide::resolve(workspace, words).map_err(|fault| fault.text());
+    let paths = |words: &[&[u8]]| hide::resolve(workspace, words).map_err(|fault| fault.text());
     Ok(match read {
         Read::Init(branch) => Handler::Init(branch),
         Read::Clone { words, url, branch } => Handler::Clone { words, url, branch },

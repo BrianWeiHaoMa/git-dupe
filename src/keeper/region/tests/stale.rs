@@ -53,7 +53,7 @@ fn a_region_whose_repository_is_not_a_directory_is_left_out_of_an_equal_composit
         fs::create_dir_all(&gone).unwrap();
         stand_in(&gone.join("dupe"));
         fs::write(scratch.exclude(), FILE).unwrap();
-        fs::set_permissions(scratch.exclude(), fs::Permissions::from_mode(0o640)).unwrap();
+        given_the_case(scratch.exclude());
         let before = identity(&scratch.exclude());
 
         // This worktree's own composition is unchanged; the stale region alone is written
@@ -61,8 +61,11 @@ fn a_region_whose_repository_is_not_a_directory_is_left_out_of_an_equal_composit
         let replaced = replace(&workspace, &region);
         assert!(replaced.warnings.is_empty(), "{:?}", replaced.warnings);
         assert_eq!(fs::read(scratch.exclude()).unwrap(), PRUNED);
-        assert_ne!(identity(&scratch.exclude()), before);
-        assert_eq!(mode(&scratch.exclude()), 0o640);
+        // Written: another file, where this platform can tell.
+        if before.is_some() {
+            assert_ne!(identity(&scratch.exclude()), before);
+        }
+        assert_eq!(mode(&scratch.exclude()), case_mode());
         assert_eq!(owners(&replaced.others.unwrap()), [agent()]);
         assert!(scratch.lock_is_free());
     }
@@ -170,14 +173,14 @@ fn a_replacement_that_maintains_nothing_hands_back_nothing_and_drops_nothing() {
     let workspace = scratch.workspace();
     fs::remove_dir(scratch.0.join(".git/dupe")).unwrap();
     fs::write(scratch.exclude(), FILE).unwrap();
-    fs::set_permissions(scratch.exclude(), fs::Permissions::from_mode(0o640)).unwrap();
+    given_the_case(scratch.exclude());
     let before = identity(&scratch.exclude());
     let replaced = replace(&workspace, &paths(&[b".gitdupe", b"other"]));
     assert_eq!(replaced.warnings.len(), 1);
     assert!(replaced.others.is_none());
     assert_eq!(fs::read(scratch.exclude()).unwrap(), FILE);
     assert_eq!(identity(&scratch.exclude()), before);
-    assert_eq!(mode(&scratch.exclude()), 0o640);
+    assert_eq!(mode(&scratch.exclude()), case_mode());
     // The retry, once it can write, makes the whole new composition.
     fs::create_dir(scratch.0.join(".git/dupe")).unwrap();
     let replaced = replace(&workspace, &paths(&[b".gitdupe", b"other"]));

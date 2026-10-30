@@ -35,19 +35,18 @@
 //!   (S4), so the two must agree on it (`Holds/G16`).
 
 use std::collections::{BTreeSet, HashMap};
-use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 
 use super::lines;
 use super::outcome::{self, Outcome};
 use super::table::{Entry, Read, Value};
+use crate::bytes;
 use crate::guards::clean::{self as patterns, Arrangement};
 use crate::guards::operand;
 use crate::keeper;
 use crate::runner::locate::{Workspace, directory_at, nested_repository_at};
-use crate::runner::{Failure, Run};
+use crate::runner::{Failure, Run, Word};
 
 const DIRECTORIES: Entry = Entry::short(b'd', Value::None);
 
@@ -72,7 +71,7 @@ const REFUSED: &[u8] = b"git dupe clean takes -X or -e, not both: under -X it sp
     hidden paths through exclude patterns of its own";
 
 /// The `clean` handler. `words` are the words after `clean` as typed.
-pub fn clean(workspace: &Workspace, read: &Read, words: &[OsString]) -> Outcome {
+pub fn clean(workspace: &Workspace, read: &Read, words: &[Vec<u8>]) -> Outcome {
     let hidden = match keeper::hidden(workspace) {
         Ok(hidden) => hidden,
         Err(failed) => return outcome::failed(failed),
@@ -92,7 +91,7 @@ pub fn clean(workspace: &Workspace, read: &Read, words: &[OsString]) -> Outcome 
     let non_literal = read
         .operands
         .iter()
-        .find(|word| patterns::non_literal(word.as_bytes()));
+        .find(|word| patterns::non_literal(word));
     let keep_directories_whole =
         only_ignored && !read.spells(&DIRECTORIES) && read.operands.is_empty();
     let holding_git = holding_a_git_entry(root, region);
@@ -115,17 +114,12 @@ pub fn clean(workspace: &Workspace, read: &Read, words: &[OsString]) -> Outcome 
     if let Some(word) = non_literal
         && let Some((path, directory)) = patterns::loose(region, &tracked)
     {
-        return outcome::refuse(&over_a_loose_directory(
-            word.as_bytes(),
-            directory,
-            path,
-            only_ignored,
-        ));
+        return outcome::refuse(&over_a_loose_directory(word, directory, path, only_ignored));
     }
     // After the refusals, which hold in every form: Git refuses these words before it
     // deletes anything, and a pattern of git-dupe's after them would be their value.
     if read.lacking_a_value() == Some(&EXCLUDE) {
-        return run(words.to_vec(), 0);
+        return run(words.iter().map(Word::from).collect(), 0);
     }
     let nested = patterns::nested(&holding_git, &tracked);
     let spared = patterns::spared(region, &nested);
@@ -152,10 +146,24 @@ pub fn clean(workspace: &Workspace, read: &Read, words: &[OsString]) -> Outcome 
 
     // Before the `--` that ended the reading, else after every word.
     let at = read.end_of_options().unwrap_or(words.len());
-    let mut run_words: Vec<OsString> = words[..at].to_vec();
-    run_words.extend(added.into_iter().map(OsString::from_vec));
-    run_words.extend_from_slice(&words[at..]);
-    run(run_words, spared.len() + ignored_ancestors.len())
+    run(
+        with_patterns(words, at, added),
+        spared.len() + ignored_ancestors.len(),
+    )
+}
+
+/// `words` with an `-e` and a pattern, each naming the path its rule is written from, for
+/// each of `added`, at `at`.
+fn with_patterns(words: &[Vec<u8>], at: usize, added: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<Word> {
+    let options = added
+        .into_iter()
+        .flat_map(|(pattern, path)| [Word::from("-e"), Word::naming(pattern, &path)]);
+    words[..at]
+        .iter()
+        .map(Word::from)
+        .chain(options)
+        .chain(words[at..].iter().map(Word::from))
+        .collect()
 }
 
 /// The refusal while the hidden path `path` has the symbolic link `link`, the outermost,
@@ -201,8 +209,8 @@ fn over_a_loose_directory(
 
 /// The one public `git clean` with `words`, whose `-e` patterns were written for
 /// `carried` paths: the count a refusal names when the words do not fit (G23).
-fn run(words: Vec<OsString>, carried: usize) -> Outcome {
-    let words = [OsString::from("clean")].into_iter().chain(words);
+fn run(words: Vec<Word>, carried: usize) -> Outcome {
+    let words = [Word::from("clean")].into_iter().chain(words);
     match Run::public(words).users_command().start() {
         Ok(finished) => Outcome::Git(finished.end),
         Err(Failure::TooLong) => outcome::list_too_long(carried),
@@ -276,9 +284,9 @@ fn askable(root: &Path, ancestors: &BTreeSet<Vec<u8>>) -> Vec<Vec<u8>> {
     ancestors
         .iter()
         .filter(|ancestor| {
-            let other_than_a_directory =
-                fs::symlink_metadata(root.join(OsStr::from_bytes(ancestor)))
-                    .is_ok_and(|found| !found.is_dir());
+            let other_than_a_directory = bytes::under(root, ancestor)
+                .and_then(|ancestor| fs::symlink_metadata(ancestor).ok())
+                .is_some_and(|found| !found.is_dir());
             !other_than_a_directory && !keeper::beyond_a_link(root, ancestor, &mut known)
         })
         .cloned()
@@ -291,8 +299,12 @@ mod tests {
     use crate::front::table::{self, Reading};
 
     fn read(words: &[&str]) -> Read<'static> {
-        let words: &'static [OsString] =
-            Box::leak(words.iter().map(OsString::from).collect::<Box<[_]>>());
+        let words: &'static [Vec<u8>] = Box::leak(
+            words
+                .iter()
+                .map(|word| word.as_bytes().to_vec())
+                .collect::<Box<[_]>>(),
+        );
         match table::read(&TABLE, words) {
             Reading::Read(read) => read,
             other => panic!("{other:?}"),
@@ -346,16 +358,28 @@ mod tests {
     fn the_users_end_of_options_is_never_the_value_of_e() {
         let given = read(&["-f", "-e", "--", "--", "x"]);
         assert_eq!(given.end_of_options(), Some(3));
-        assert_eq!(given.operands, [OsStr::new("x")]);
+        assert_eq!(given.operands, ["x".as_bytes()]);
         assert_eq!(read(&["-f", "x"]).end_of_options(), None);
     }
 
     #[test]
+    fn a_spared_path_that_is_no_name_refuses_the_run_naming_the_path_and_not_its_pattern() {
+        let rule = keeper::rule(b"notes/\xff");
+        let added = vec![
+            ([b"!", &rule[..]].concat(), b"notes/\xff".to_vec()),
+            ([&rule[..], b"/**"].concat(), b"notes/\xff".to_vec()),
+        ];
+        let words = with_patterns(&[b"-n".to_vec(), b"-X".to_vec()], 2, added);
+        let run = Run::public(words).capture_output().capture_errors().start();
+        match run {
+            Err(Failure::NotAName(path)) => assert_eq!(path, b"notes/\xff"),
+            _ => assert!(crate::links_and_modes::names_every_byte_string()),
+        }
+    }
+
+    #[test]
     fn no_long_word_spells_a_letter_without_a_long_name() {
-        let words: Vec<OsString> = ["--d", "--X", "--x", "--=x", "--"]
-            .iter()
-            .map(OsString::from)
-            .collect();
+        let words: Vec<Vec<u8>> = ["--d", "--X", "--x", "--=x", "--"].map(Vec::from).to_vec();
         for word in &words[..4] {
             assert_eq!(
                 table::read(&TABLE, std::slice::from_ref(word)),
@@ -378,10 +402,10 @@ mod tests {
             "--no-exclude",
             "--force=1",
         ] {
-            let words = [OsString::from("-f"), OsString::from(word)];
+            let words = [b"-f".to_vec(), word.as_bytes().to_vec()];
             assert_eq!(
                 table::read(&TABLE, &words),
-                Reading::NotHeld(OsStr::new(word)),
+                Reading::NotHeld(word.as_bytes()),
                 "{word}"
             );
         }
@@ -412,11 +436,12 @@ mod tests {
             fs::create_dir_all(root.join(directory)).unwrap();
         }
         fs::write(root.join("file/.git"), b"").unwrap();
-        std::os::unix::fs::symlink(scratch.0.join("nowhere"), root.join("dangling/.git")).unwrap();
+        crate::links_and_modes::symlink(scratch.0.join("nowhere"), root.join("dangling/.git"))
+            .unwrap();
         fs::create_dir_all(root.join("outer/.git")).unwrap();
         // A link to a directory that holds a `.git` entry is no nested repository.
         fs::create_dir_all(scratch.0.join("target/.git")).unwrap();
-        std::os::unix::fs::symlink(scratch.0.join("target"), root.join("link")).unwrap();
+        crate::links_and_modes::symlink(scratch.0.join("target"), root.join("link")).unwrap();
         // A file standing at an ancestor's path ends the look.
         fs::write(root.join("blocked"), b"").unwrap();
 

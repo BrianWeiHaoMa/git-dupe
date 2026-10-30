@@ -45,22 +45,20 @@
 
 mod sections;
 
-use std::ffi::OsStr;
-use std::fs::{self, File};
+use std::fs::{self, File, Permissions};
 use std::io;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use super::foreign::{self, Owner};
 use super::replace;
+use crate::bytes;
 use crate::runner::locate::{Workspace, private_directory};
 use sections::{Sections, Worktree};
 
 /// This worktree's markers: the main worktree's, or the linked worktree's of its name.
 fn own(workspace: &Workspace) -> Worktree<'_> {
     match workspace.worktree_name() {
-        Some(name) => Worktree::Linked(name.as_bytes()),
+        Some(name) => Worktree::Linked(bytes::of(name)),
         None => Worktree::Main,
     }
 }
@@ -314,13 +312,18 @@ fn update(
     let exclude = exclude_file(workspace);
     let own = own(workspace);
     let creates = matches!(change, Change::Set(_)).then_some(make_info);
-    let (bytes, mode, link) = match inspect(&info, &exclude, creates).map_err(NotUpdated::Failed)? {
-        Found::File { bytes, mode, link } => (bytes, mode, link),
-        Found::InfoLink => return beyond_the_info_link(workspace, &exclude, change),
-        Found::DanglingLink => return Err(NotUpdated::DanglingLink),
-        // Only the deletion finds no `.git/info`: the replacement has made it.
-        Found::NoInfo => return Ok(Updated::default()),
-    };
+    let (bytes, permissions, link) =
+        match inspect(&info, &exclude, creates).map_err(NotUpdated::Failed)? {
+            Found::File {
+                bytes,
+                permissions,
+                link,
+            } => (bytes, permissions, link),
+            Found::InfoLink => return beyond_the_info_link(workspace, &exclude, change),
+            Found::DanglingLink => return Err(NotUpdated::DanglingLink),
+            // Only the deletion finds no `.git/info`: the replacement has made it.
+            Found::NoInfo => return Ok(Updated::default()),
+        };
 
     let found = sections::split(&bytes, own);
     let paths = found.paths();
@@ -339,7 +342,7 @@ fn update(
     // deletion writes only a stale region's removal. Either way the region's paths are as
     // read, none without the region.
     let unchanged = match change {
-        Change::Set(_) => mode.is_some() && !link,
+        Change::Set(_) => permissions.is_some() && !link,
         Change::Remove => found.rules.is_none(),
     };
     if unchanged && composed == bytes {
@@ -349,8 +352,13 @@ fn update(
             others,
         });
     }
-    replace::whole(&workspace.private_directory(), &exclude, &composed, mode)
-        .map_err(NotUpdated::Failed)?;
+    replace::whole(
+        &workspace.private_directory(),
+        &exclude,
+        &composed,
+        permissions,
+    )
+    .map_err(NotUpdated::Failed)?;
     Ok(Updated {
         paths,
         warning: link.then(|| link_replaced(&exclude, holding)),
@@ -420,9 +428,11 @@ fn standing(common_directory: &Path, found: &Sections) -> (Vec<bool>, Vec<foreig
 fn repository_stands(common_directory: &Path, worktree: Worktree) -> bool {
     let git_directory = match worktree {
         Worktree::Main => common_directory.to_path_buf(),
-        Worktree::Linked(name) => common_directory
-            .join("worktrees")
-            .join(OsStr::from_bytes(name)),
+        Worktree::Linked(name) => match bytes::under(&common_directory.join("worktrees"), name) {
+            Some(directory) => directory,
+            // Bytes that are no name stand nowhere by `lstat` (`Holds/G30`).
+            None => return false,
+        },
     };
     match fs::symlink_metadata(private_directory(&git_directory)) {
         Ok(found) => found.is_dir(),
@@ -445,7 +455,7 @@ enum Found {
     /// the link's target; no bytes and no permissions where no file stands.
     File {
         bytes: Vec<u8>,
-        mode: Option<u32>,
+        permissions: Option<Permissions>,
         link: bool,
     },
 }
@@ -463,7 +473,7 @@ fn inspect(info: &Path, exclude: &Path, make_info: Option<MakeInfo>) -> io::Resu
     match make_info(info) {
         Ok(()) => Ok(Found::File {
             bytes: Vec::new(),
-            mode: None,
+            permissions: None,
             link: false,
         }),
         Err(cause) if cause.kind() == io::ErrorKind::AlreadyExists => match find(info, exclude)? {
@@ -487,7 +497,7 @@ fn find(info: &Path, exclude: &Path) -> io::Result<Found> {
         Err(cause) if cause.kind() == io::ErrorKind::NotFound => {
             return Ok(Found::File {
                 bytes: Vec::new(),
-                mode: None,
+                permissions: None,
                 link: false,
             });
         }
@@ -496,12 +506,12 @@ fn find(info: &Path, exclude: &Path) -> io::Result<Found> {
     };
     let link = found.file_type().is_symlink();
     // A link is read through; its target's permissions are the original's.
-    let read = fs::metadata(exclude)
-        .and_then(|target| Ok((fs::read(exclude)?, target.permissions().mode())));
+    let read =
+        fs::metadata(exclude).and_then(|target| Ok((fs::read(exclude)?, target.permissions())));
     match read {
-        Ok((bytes, mode)) => Ok(Found::File {
+        Ok((bytes, permissions)) => Ok(Found::File {
             bytes,
-            mode: Some(mode),
+            permissions: Some(permissions),
             link,
         }),
         Err(cause) if link && cause.kind() == io::ErrorKind::NotFound => Ok(Found::DanglingLink),
@@ -513,7 +523,7 @@ fn find(info: &Path, exclude: &Path) -> io::Result<Found> {
 /// holds, its target untouched.
 fn link_replaced(exclude: &Path, holding: &[u8]) -> Vec<u8> {
     [
-        exclude.as_os_str().as_bytes(),
+        bytes::of(exclude.as_os_str()),
         b" was a symbolic link; it is now a regular file holding ",
         holding,
         b", and its target is untouched",
@@ -524,7 +534,7 @@ fn link_replaced(exclude: &Path, holding: &[u8]) -> Vec<u8> {
 fn unmaintainable(path: &Path, what: &[u8]) -> Vec<u8> {
     [
         b"the managed region cannot be maintained: ",
-        path.as_os_str().as_bytes(),
+        bytes::of(path.as_os_str()),
         b" ",
         what,
         b"; private files may be visible to public Git",
@@ -535,7 +545,7 @@ fn unmaintainable(path: &Path, what: &[u8]) -> Vec<u8> {
 fn not_locked(directory: &Path, cause: &str) -> Vec<u8> {
     [
         b"cannot take the lock on ",
-        directory.as_os_str().as_bytes(),
+        bytes::of(directory.as_os_str()),
         b" to replace the managed region: ",
         cause.as_bytes(),
         b"; private files may be visible to public Git",
@@ -546,7 +556,7 @@ fn not_locked(directory: &Path, cause: &str) -> Vec<u8> {
 fn not_written(exclude: &Path, cause: &str) -> Vec<u8> {
     [
         b"cannot replace the managed region of ",
-        exclude.as_os_str().as_bytes(),
+        bytes::of(exclude.as_os_str()),
         b": ",
         cause.as_bytes(),
         b"; private files may be visible to public Git",

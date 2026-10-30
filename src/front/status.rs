@@ -11,8 +11,7 @@
 //!   What confines it is decided in `guards::status` over the listings taken here and,
 //!   for each exclusion, whether `lstat` finds a nested repository at it.
 
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
@@ -21,7 +20,7 @@ use crate::guards::operand::{self, Cleaned};
 use crate::guards::{pathspec, status as confinement};
 use crate::keeper::{self, GITDUPE};
 use crate::runner::locate::{Workspace, nested_repository_at};
-use crate::runner::{Failure, Run};
+use crate::runner::{Failure, Run, Word};
 
 const UNTRACKED_FILES: Entry = Entry::both(b'u', "untracked-files", Value::Attached);
 
@@ -56,20 +55,20 @@ const NOTHING: &[u8] = b".git";
 /// an operand. An operand that resolves outside the working tree is the fault.
 pub fn resolve<'w>(
     workspace: &Workspace,
-    operands: &[&'w OsStr],
+    operands: &[&'w [u8]],
 ) -> Result<Option<Vec<Vec<u8>>>, Fault<'w>> {
     if operands.is_empty() {
         return Ok(None);
     }
     operands
         .iter()
-        .map(|&word| {
-            match operand::resolve_rooted(word.as_bytes(), workspace.prefix(), workspace.root()) {
+        .map(
+            |&word| match operand::resolve_rooted(word, workspace.prefix(), workspace.root()) {
                 Cleaned::Inside(path) => Ok(path),
                 Cleaned::Root => Ok(Vec::new()),
                 Cleaned::Outside(_) => Err(Fault::Outside(word)),
-            }
-        })
+            },
+        )
         .collect::<Result<_, _>>()
         .map(Some)
 }
@@ -104,17 +103,17 @@ pub fn status(workspace: &Workspace, read: &Read, paths: Option<&[Vec<u8>]>) -> 
     let exclusions =
         confinement::exclusions(&scope, &publicly_tracked, privately_tracked, &deletions);
 
-    let confined: Vec<OsString> = if scope.is_empty() {
-        vec![pathspec::top_literal(NOTHING)]
+    let confined: Vec<Word> = if scope.is_empty() {
+        vec![pathspec::top_literal(NOTHING).into()]
     } else {
         scope
             .iter()
-            .map(|path| pathspec::top_literal(path))
+            .map(|path| Word::naming(pathspec::top_literal(path), path))
             .collect()
     };
     let carried = confined.len() + exclusions.len();
-    let mut words: Vec<OsString> = vec!["status".into()];
-    words.extend(read.options().map(OsStr::to_owned));
+    let mut words: Vec<Word> = vec!["status".into()];
+    words.extend(read.options().map(Word::from));
     if !read.spells(&UNTRACKED_FILES) {
         words.push("--untracked-files=normal".into());
     }
@@ -124,11 +123,7 @@ pub fn status(workspace: &Workspace, read: &Read, paths: Option<&[Vec<u8>]>) -> 
     words.push("--".into());
     words.extend(confined);
     let root = workspace.root();
-    words.extend(
-        exclusions
-            .iter()
-            .map(|path| confinement::excluded(path, nested_repository_at(root, path))),
-    );
+    words.extend(exclusions.iter().map(|path| exclusion(root, path)));
 
     let private = workspace.private_directory();
     match Run::private(&private, workspace.root(), words)
@@ -147,5 +142,35 @@ pub fn status(workspace: &Workspace, read: &Read, paths: Option<&[Vec<u8>]>) -> 
         }
         Err(Failure::TooLong) => outcome::list_too_long(carried),
         Err(failure) => outcome::not_started(failure),
+    }
+}
+
+/// The word that leaves the publicly tracked `path` out, naming it.
+fn exclusion(root: &Path, path: &[u8]) -> Word {
+    let nested_repository = nested_repository_at(root, path);
+    Word::naming(confinement::excluded(path, nested_repository), path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::links_and_modes::names_every_byte_string;
+
+    #[test]
+    fn a_tracked_path_that_is_no_name_refuses_the_run_naming_the_path_and_not_its_exclusion() {
+        let exclusion = exclusion(&std::env::temp_dir(), b"docs/\xff");
+        let run = Run::public(
+            ["ls-files", "--"]
+                .map(Word::from)
+                .into_iter()
+                .chain([exclusion]),
+        )
+        .capture_output()
+        .capture_errors()
+        .start();
+        match run {
+            Err(Failure::NotAName(path)) => assert_eq!(path, b"docs/\xff"),
+            _ => assert!(names_every_byte_string()),
+        }
     }
 }

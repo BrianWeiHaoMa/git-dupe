@@ -6,7 +6,7 @@ struct Configured {
     records: Vec<(&'static str, Option<&'static str>)>,
     listed: Vec<&'static str>,
     /// The prefix of each lookup, in order.
-    lookups: Vec<Vec<OsString>>,
+    lookups: Vec<Vec<Vec<u8>>>,
     lists: usize,
     failing: bool,
     /// An option Git cannot evaluate: a lookup carrying it fails.
@@ -30,12 +30,12 @@ fn configured(records: &[(&'static str, &'static str)]) -> Configured {
 impl Questions for Configured {
     type Failure = &'static str;
 
-    fn aliases(&mut self, prefix: &[OsString]) -> Result<Vec<Record>, &'static str> {
+    fn aliases(&mut self, prefix: &[Vec<u8>]) -> Result<Vec<Record>, &'static str> {
         self.lookups.push(prefix.to_vec());
         if self.failing
             || self
                 .refused
-                .is_some_and(|refused| prefix.iter().any(|word| word == refused))
+                .is_some_and(|refused| prefix.iter().any(|word| word == refused.as_bytes()))
         {
             return Err("lookup");
         }
@@ -50,8 +50,8 @@ impl Questions for Configured {
             })
             .collect();
         for pair in prefix.windows(2) {
-            let setting = pair[1].as_bytes();
-            if pair[0] == "-c"
+            let setting = pair[1].as_slice();
+            if pair[0] == b"-c"
                 && let Some(setting) = setting.strip_prefix(b"alias.")
             {
                 let at = setting.iter().position(|&b| b == b'=').expect("a value");
@@ -71,8 +71,8 @@ impl Questions for Configured {
     }
 }
 
-fn owned(words: &[&str]) -> Vec<OsString> {
-    words.iter().map(OsString::from).collect()
+fn owned(words: &[&str]) -> Vec<Vec<u8>> {
+    words.iter().map(|word| word.as_bytes().to_vec()).collect()
 }
 
 fn resolved(config: &mut Configured, typed: &[&str]) -> Resolved {

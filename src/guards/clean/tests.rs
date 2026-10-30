@@ -23,11 +23,11 @@ fn set(paths: &[&str]) -> BTreeSet<Vec<u8>> {
     paths.iter().map(|path| path.as_bytes().to_vec()).collect()
 }
 
-/// The options as the strings they are, `-e` words included.
-fn written(options: Vec<Vec<u8>>) -> Vec<String> {
-    options
+/// The patterns as the options they become, `-e` words included.
+fn written(patterns: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<String> {
+    patterns
         .into_iter()
-        .map(|word| String::from_utf8(word).unwrap())
+        .flat_map(|(pattern, _)| ["-e".to_string(), String::from_utf8(pattern).unwrap()])
         .collect()
 }
 
@@ -318,4 +318,23 @@ fn with_x_and_d_or_a_pathspec_no_directory_is_kept_out_whole() {
             "!/ign/keep/**"
         ]
     );
+}
+
+#[test]
+fn each_pattern_carries_the_path_its_rule_is_written_from() {
+    let spared = paths(&["ign/keep"]);
+    let ignored = set(&["ign"]);
+    let tracked = set(&[]);
+    let arrangement = Arrangement::Unignored {
+        ignored_ancestors: &ignored,
+        keep_directories_whole: true,
+        publicly_tracked: &tracked,
+    };
+    let carried: Vec<String> = patterns(&spared, &arrangement, rule)
+        .into_iter()
+        .map(|(_, path)| String::from_utf8(path).unwrap())
+        .collect();
+    assert_eq!(carried, ["ign", "ign", "ign/keep", "ign/keep", "ign/keep"]);
+    let excluded = patterns(&spared, &Arrangement::Excluded, rule);
+    assert_eq!(excluded, [(b"/ign/keep".to_vec(), b"ign/keep".to_vec())]);
 }

@@ -23,8 +23,9 @@
 
 use std::collections::BTreeSet;
 use std::ops::Bound;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+
+use crate::bytes;
 
 /// Where a cleaned path lies.
 #[derive(Debug, PartialEq, Eq)]
@@ -105,7 +106,7 @@ pub fn resolve(word: &[u8], prefix: &[u8], root: &Path) -> Cleaned {
         return clean(&[prefix, word].concat());
     }
     let absolute = clean_absolute(word);
-    let root = clean_absolute(root.as_os_str().as_bytes());
+    let root = clean_absolute(bytes::of(root.as_os_str()));
     let below = if root == b"/" {
         absolute.strip_prefix(b"/")
     } else if absolute == root {
@@ -389,8 +390,9 @@ mod tests {
         // Every absolute path lies at or below a root that is `/`.
         assert_eq!(resolve(b"/etc/x", b"", Path::new("/")), inside(b"etc/x"));
         assert_eq!(resolve(b"/", b"", Path::new("/")), Cleaned::Root);
-        let root = Path::new(std::ffi::OsStr::from_bytes(b"/caf\xe9"));
-        assert_eq!(resolve(b"/caf\xe9/r", b"", root), inside(b"r"));
+        if let Some(root) = bytes::name(b"/caf\xe9") {
+            assert_eq!(resolve(b"/caf\xe9/r", b"", Path::new(root)), inside(b"r"));
+        }
     }
 
     #[test]

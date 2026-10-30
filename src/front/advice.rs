@@ -76,9 +76,7 @@
 //!   what its commands do where the amend would have left the commit empty; it names
 //!   `reset HEAD^` for a commit with a parent, because a root commit has none.
 
-use std::ffi::OsString;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use super::lines::{self, Level};
@@ -297,7 +295,7 @@ pub struct Then(Vec<&'static Family>);
 
 /// What may follow the run of `words`, the command word first, against the repository
 /// `against` names.
-pub fn before(words: &[OsString], against: Against) -> Then {
+pub fn before(words: &[Vec<u8>], against: Against) -> Then {
     if against.private_repository().is_none() {
         return Then(Vec::new());
     }
@@ -317,7 +315,7 @@ pub fn after(then: Then, ended: &Outcome, against: Against) {
 
 /// The entries `words` admit, those for a detached `HEAD` only where `ask` finds `HEAD` on
 /// a branch before the run.
-fn before_asking(words: &[OsString], ask: impl FnOnce(Question) -> Answer) -> Vec<&'static Family> {
+fn before_asking(words: &[Vec<u8>], ask: impl FnOnce(Question) -> Answer) -> Vec<&'static Family> {
     let mut families = admitted(words);
     let detached = |family: &&Family| family.trigger == Trigger::Detached;
     if families.iter().any(detached) && ask(Question::OnABranch) != Answer::Yes {
@@ -329,13 +327,13 @@ fn before_asking(words: &[OsString], ask: impl FnOnce(Question) -> Answer) -> Ve
 /// The entries whose word begins `words` and whose hint the rest admit, in the table's
 /// order: before the first `--`, no help request, no word an entry excludes, and a word
 /// that spells what it requires.
-fn admitted(words: &[OsString]) -> Vec<&'static Family> {
+fn admitted(words: &[Vec<u8>]) -> Vec<&'static Family> {
     let Some((command, rest)) = words.split_first() else {
         return Vec::new();
     };
     let before_the_end: Vec<&[u8]> = rest
         .iter()
-        .map(|word| word.as_bytes())
+        .map(|word| word.as_slice())
         .take_while(|word| *word != b"--")
         .collect();
     let spelled = |spells: fn(&[u8]) -> bool| before_the_end.iter().any(|word| spells(word));
@@ -344,7 +342,7 @@ fn admitted(words: &[OsString]) -> Vec<&'static Family> {
     }
     FAMILIES
         .iter()
-        .filter(|family| family.word == command.as_bytes())
+        .filter(|family| family.word == command.as_slice())
         .filter(|family| !family.excluding.is_some_and(spelled))
         .filter(|family| family.requiring.is_none_or(spelled))
         .collect()

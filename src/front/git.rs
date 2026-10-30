@@ -6,16 +6,13 @@
 //! read: `git dupe git log -h` is Git's usage of `log`, run in an attached workspace. No
 //! `WORDS` at all is a misuse of the command's form, reported after locating.
 
-use std::ffi::OsString;
-use std::os::unix::ffi::OsStrExt;
-
 /// What `git dupe git`'s words ask for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Asked<'w> {
     /// `-h` or `--help` as the first word.
     Help,
     /// `WORDS`, run unread.
-    Run(&'w [OsString]),
+    Run(&'w [Vec<u8>]),
     /// A dashed first word other than a help request.
     GlobalOption,
     /// No word.
@@ -30,8 +27,8 @@ pub const GLOBAL_OPTION: &[u8] = b"'git dupe git' takes a Git command or alias f
 pub const EMPTY: &[u8] = b"'git dupe git' needs a Git command or alias to run";
 
 /// Reads the words after `git`, the first of them alone.
-pub fn read(words: &[OsString]) -> Asked<'_> {
-    match words.first().map(|word| word.as_bytes()) {
+pub fn read(words: &[Vec<u8>]) -> Asked<'_> {
+    match words.first().map(|word| word.as_slice()) {
         None => Asked::Empty,
         Some(b"-h" | b"--help") => Asked::Help,
         Some(first) if first.starts_with(b"-") => Asked::GlobalOption,
@@ -43,8 +40,8 @@ pub fn read(words: &[OsString]) -> Asked<'_> {
 mod tests {
     use super::*;
 
-    fn owned(words: &[&str]) -> Vec<OsString> {
-        words.iter().map(OsString::from).collect()
+    fn owned(words: &[&str]) -> Vec<Vec<u8>> {
+        words.iter().map(|word| word.as_bytes().to_vec()).collect()
     }
 
     #[test]

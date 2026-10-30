@@ -8,9 +8,6 @@
 //! message or a file named `-u` is never read as an option and an option after one is.
 //! A help request changes nothing here, because Git may read `-h` as a value.
 
-use std::ffi::OsString;
-use std::os::unix::ffi::OsStrExt;
-
 use crate::guards::stash::untracked;
 
 /// The refusal of an untracked form: `git dupe add` first, then `git dupe stash`.
@@ -19,7 +16,7 @@ pub const REFUSAL: &[u8] = b"-u, -a, and their long forms would stash, and remov
     run 'git dupe add' on what to keep first, then 'git dupe stash'";
 
 /// Whether `git dupe stash` with `words`, those after `stash`, is refused (G17).
-pub fn refused(words: &[OsString]) -> bool {
+pub fn refused(words: &[Vec<u8>]) -> bool {
     options(words).into_iter().any(untracked)
 }
 
@@ -27,8 +24,8 @@ pub fn refused(words: &[OsString]) -> bool {
 /// another subcommand: every word up to an end of options — `--` or `--end-of-options`,
 /// where Git's option parser stops alike — skipping the separate value of an option that
 /// takes one, even when that value is one of those two.
-fn options(words: &[OsString]) -> Vec<&[u8]> {
-    let words: Vec<&[u8]> = words.iter().map(|word| word.as_bytes()).collect();
+fn options(words: &[Vec<u8>]) -> Vec<&[u8]> {
+    let words: Vec<&[u8]> = words.iter().map(|word| word.as_slice()).collect();
     let form = match words.first() {
         None => &[][..],
         Some(&(b"push" | b"save")) => &words[1..],
@@ -74,7 +71,12 @@ mod tests {
     use super::*;
 
     fn refuses(words: &[&str]) -> bool {
-        refused(&words.iter().map(OsString::from).collect::<Vec<_>>())
+        refused(
+            &words
+                .iter()
+                .map(|word| word.as_bytes().to_vec())
+                .collect::<Vec<_>>(),
+        )
     }
 
     /// The forms of `stash` that take an untracked file, under every listed release.

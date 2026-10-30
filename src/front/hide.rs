@@ -8,15 +8,14 @@
 //! cleaned root-relative bytes, never a word as typed.
 
 use std::collections::{BTreeSet, HashMap};
-use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use super::help;
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
+use crate::bytes;
 use crate::guards::hide::{self as decision, Refusal};
 use crate::guards::operand::{self, Cleaned, NotLiteral};
 use crate::guards::pathspec;
@@ -30,7 +29,7 @@ pub enum Asked<'w> {
     /// `-h` or `--help` before `--`.
     Help,
     /// The operands, in order, each a literal path as typed.
-    Paths(Vec<&'w OsStr>),
+    Paths(Vec<&'w [u8]>),
     Misused(Fault<'w>),
 }
 
@@ -38,19 +37,19 @@ pub enum Asked<'w> {
 /// holding a newline is never named, because no one line can hold it.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Fault<'w> {
-    Option(&'w OsStr),
+    Option(&'w [u8]),
     NoPath,
-    Pattern(&'w OsStr),
-    Magic(&'w OsStr),
+    Pattern(&'w [u8]),
+    Magic(&'w [u8]),
     Newline,
-    Root(&'w OsStr),
-    Outside(&'w OsStr),
+    Root(&'w [u8]),
+    Outside(&'w [u8]),
 }
 
 impl Fault<'_> {
     /// The text of the `error:` line: the word as typed, then the fault.
     pub fn text(&self) -> Vec<u8> {
-        let (word, fault): (Option<&OsStr>, &[u8]) = match self {
+        let (word, fault): (Option<&[u8]>, &[u8]) = match self {
             Fault::Option(word) => (
                 Some(word),
                 b"is an option, and hide and unhide take none; a path beginning with '-' \
@@ -79,7 +78,7 @@ impl Fault<'_> {
             ),
         };
         match word {
-            Some(word) => [b"'", word.as_bytes(), b"' ", fault].concat(),
+            Some(word) => [b"'", word, b"' ", fault].concat(),
             None => fault.to_vec(),
         }
     }
@@ -87,17 +86,17 @@ impl Fault<'_> {
 
 /// Reads `hide PATH...` or `unhide PATH...`: no option, at least one path, each literal.
 /// `--` ends the options, and every word after it is a path.
-pub fn read(words: &[OsString]) -> Asked<'_> {
+pub fn read(words: &[Vec<u8>]) -> Asked<'_> {
     if help::requested(words) {
         return Asked::Help;
     }
     let end_of_options = words
         .iter()
-        .position(|word| word.as_bytes() == b"--")
+        .position(|word| word.as_slice() == b"--")
         .unwrap_or(words.len());
     let mut paths = Vec::new();
     for (index, word) in words.iter().enumerate() {
-        let bytes = word.as_bytes();
+        let bytes = word.as_slice();
         if index == end_of_options {
             continue;
         }
@@ -110,7 +109,7 @@ pub fn read(words: &[OsString]) -> Asked<'_> {
         match operand::literal(bytes) {
             Err(NotLiteral::Pattern) => return Asked::Misused(Fault::Pattern(word)),
             Err(NotLiteral::Magic) => return Asked::Misused(Fault::Magic(word)),
-            Ok(()) => paths.push(word.as_os_str()),
+            Ok(()) => paths.push(word.as_slice()),
         }
     }
     if paths.is_empty() {
@@ -121,11 +120,11 @@ pub fn read(words: &[OsString]) -> Asked<'_> {
 
 /// The root-relative paths the operands name, from the user's directory, or the fault of
 /// the first that names the root or a path outside it.
-pub fn resolve<'w>(workspace: &Workspace, words: &[&'w OsStr]) -> Result<Vec<Vec<u8>>, Fault<'w>> {
+pub fn resolve<'w>(workspace: &Workspace, words: &[&'w [u8]]) -> Result<Vec<Vec<u8>>, Fault<'w>> {
     words
         .iter()
         .map(
-            |word| match operand::resolve(word.as_bytes(), workspace.prefix(), workspace.root()) {
+            |word| match operand::resolve(word, workspace.prefix(), workspace.root()) {
                 Cleaned::Inside(path) => Ok(path),
                 Cleaned::Root => Err(Fault::Root(word)),
                 Cleaned::Outside(_) => Err(Fault::Outside(word)),
@@ -289,7 +288,10 @@ fn stands(root: &Path, path: &[u8]) -> Standing {
 /// Whether nothing stands at `path`, by `lstat`: not found, or a file where a directory
 /// above it would be. Any other failure is not taken to mean nothing stands there.
 fn absent(root: &Path, path: &[u8]) -> bool {
-    fs::symlink_metadata(root.join(OsStr::from_bytes(path))).is_err_and(|failed| {
+    let Some(path) = bytes::under(root, path) else {
+        return true;
+    };
+    fs::symlink_metadata(path).is_err_and(|failed| {
         matches!(
             failed.kind(),
             io::ErrorKind::NotFound | io::ErrorKind::NotADirectory

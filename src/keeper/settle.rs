@@ -28,7 +28,7 @@ use std::io;
 use super::exposure::{self, Asked};
 use super::foreign::Foreign;
 use super::gitdupe::{self, SetAside, Source};
-use super::hidden::HiddenPaths;
+use super::hidden::{self, HiddenPaths};
 use super::region::{self, StartingRegion};
 use super::{Failed, listing};
 use crate::guards::hide as decision;
@@ -83,13 +83,7 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
         exposure::beyond_a_link(root, path, &mut known)
     });
 
-    let query: Vec<Vec<u8>> = hidden
-        .region
-        .iter()
-        .cloned()
-        .chain(released.iter().map(|path| path.to_vec()))
-        .chain(standing.iter().map(|path| path.to_vec()))
-        .collect();
+    let query = query(&hidden, &released, &standing);
     let publicly_tracked = match listing::public(workspace, &query) {
         Ok(tracked) => tracked,
         Err(failed) => return stopped(warnings, failed, Listing::Public),
@@ -104,6 +98,7 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
     // A question that failed, a signal included, is its warning alone: the command keeps
     // its status (`Composition/Keeper`).
     let answered = exposure::warnings(workspace, &asked, &publicly_tracked, &mut known);
+    warnings.extend(hidden.unnamed.iter().map(|path| hidden::unnamed_line(path)));
     warnings.extend(answered.warnings);
     let refused = answered.refused;
 
@@ -111,6 +106,21 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
         warnings.push(tracked_by_both_line(path));
     }
     Settled { warnings, refused }
+}
+
+/// The public listing's query: the region paths, the released paths, and the foreign paths
+/// standing here. A released or a foreign path is present by `lstat`, and so a name; a
+/// region path that is none stays off this command line, which would otherwise refuse the
+/// whole command (G30).
+fn query(hidden: &HiddenPaths, released: &[&[u8]], standing: &[&[u8]]) -> Vec<Vec<u8>> {
+    hidden
+        .region
+        .iter()
+        .filter(|path| hidden.named(path))
+        .cloned()
+        .chain(released.iter().map(|path| path.to_vec()))
+        .chain(standing.iter().map(|path| path.to_vec()))
+        .collect()
 }
 
 /// What settle's two listings and `.gitdupe` said, which each path it asks about is read
@@ -122,8 +132,8 @@ struct Listings<'l> {
 }
 
 impl<'l> Listings<'l> {
-    /// The paths the question asks about, in order, each with its kind: every hidden path,
-    /// tracked by both where the public listing names a privately tracked one (G8); every
+    /// The paths the question asks about, in order, each with its kind: every hidden path
+    /// but one that is no name, which `settle` names instead (G30), tracked by both where the public listing names a privately tracked one (G8); every
     /// released path; every foreign path standing here; the last two with whether `hide`
     /// would take them and the worktrees whose regions hold them (G9, G27).
     fn asked<'o>(
@@ -132,7 +142,12 @@ impl<'l> Listings<'l> {
         standing: &[&'l [u8]],
         foreign: &Foreign<'o>,
     ) -> Vec<(&'l [u8], Asked<'o>)> {
-        let hidden = self.hidden.hidden.iter().map(|path| {
+        let named = self
+            .hidden
+            .hidden
+            .iter()
+            .filter(|path| self.hidden.named(path));
+        let hidden = named.map(|path| {
             let both = self.hidden.privately_tracked.contains(path)
                 && self.publicly_tracked.contains(path);
             let kind = if both {
@@ -242,4 +257,45 @@ fn set_aside_line(set_aside: &SetAside) -> Vec<u8> {
         b", and hides nothing",
     ]
     .concat()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::links_and_modes::names_every_byte_string;
+
+    #[test]
+    fn a_hidden_path_that_is_no_name_is_kept_off_the_query_and_the_question_and_named() {
+        let hidden = HiddenPaths::of(
+            vec![b"notes".to_vec(), b"a/\xff".to_vec()],
+            BTreeSet::from([b"x/y".to_vec()]),
+        );
+        let released: [&[u8]; 1] = [b"gone"];
+        let standing: [&[u8]; 1] = [b"theirs"];
+        let query = query(&hidden, &released, &standing);
+        let tracked = BTreeSet::new();
+        let source = Source::Absent;
+        let listings = Listings {
+            hidden: &hidden,
+            publicly_tracked: &tracked,
+            gitdupe: &source,
+        };
+        let others = Vec::new();
+        let foreign = Foreign::of(&others);
+        let asked = listings.asked(&released, &standing, &foreign);
+        let asked: Vec<&[u8]> = asked.iter().map(|(path, _)| *path).collect();
+
+        let mut named: Vec<&[u8]> = vec![b".gitdupe", b"notes", b"x/y"];
+        if names_every_byte_string() {
+            named.insert(1, b"a/\xff");
+            assert!(hidden.unnamed.is_empty());
+        } else {
+            assert_eq!(hidden.unnamed, [b"a/\xff"]);
+        }
+        assert_eq!(asked, [&named[..], &released, &standing].concat());
+        let queried: Vec<&[u8]> = query.iter().map(Vec::as_slice).collect();
+        assert_eq!(queried, [&named[..], &released, &standing].concat());
+        // Its rule stands either way: bytes in a file.
+        assert!(hidden.region.iter().any(|path| path == b"a/\xff"));
+    }
 }

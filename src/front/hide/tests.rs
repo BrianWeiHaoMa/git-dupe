@@ -1,14 +1,11 @@
 use super::*;
 
-fn words(words: &[&[u8]]) -> Vec<OsString> {
-    words
-        .iter()
-        .map(|word| OsStr::from_bytes(word).to_owned())
-        .collect()
+fn words(words: &[&[u8]]) -> Vec<Vec<u8>> {
+    words.iter().map(|word| word.to_vec()).collect()
 }
 
 fn paths<'w>(words: &[&'w [u8]]) -> Asked<'w> {
-    Asked::Paths(words.iter().map(|word| OsStr::from_bytes(word)).collect())
+    Asked::Paths(words.to_vec())
 }
 
 #[test]
@@ -48,7 +45,7 @@ fn a_help_request_anywhere_before_the_end_of_options_decides() {
 
 #[test]
 fn an_option_no_path_and_a_word_that_is_no_literal_path_are_misuses_naming_it() {
-    let word = |word: &'static [u8]| OsStr::from_bytes(word);
+    let word = |word: &'static [u8]| word;
     for (misuse, fault) in [
         (&[][..], Fault::NoPath),
         (&[&b"--"[..]], Fault::NoPath),
@@ -199,7 +196,7 @@ fn the_route_to_private_names_the_deletion_and_then_add() {
 
 #[test]
 fn a_fault_names_the_word_as_typed_on_one_line() {
-    let word = OsStr::from_bytes(b"caf\xe9 *");
+    let word = &b"caf\xe9 *"[..];
     for fault in [
         Fault::Option(word),
         Fault::Pattern(word),

@@ -21,21 +21,20 @@
 //!   The forms' paths are not asked: the ignored ones lost their pathspec before the run.
 
 use std::collections::{BTreeSet, HashMap};
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use super::hide::{self, Hiding};
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
 use super::table::{Entry, Fault, Read, Value};
+use crate::bytes;
 pub use crate::guards::add::Operand;
 use crate::guards::add::{self as decision, Found, Pathspecs, Scoped};
 use crate::guards::operand::{self, Cleaned};
 use crate::guards::pathspec;
 use crate::keeper::{self, Failed, GITDUPE};
 use crate::runner::locate::{Workspace, directory_at, present};
-use crate::runner::{End, Failure, Run, records};
+use crate::runner::{End, Failure, Run, Word, records};
 
 const DRY_RUN: Entry = Entry::both(b'n', "dry-run", Value::None);
 const PATCH: Entry = Entry::both(b'p', "patch", Value::None);
@@ -102,13 +101,13 @@ fn all_flag(read: &Read) -> bool {
 /// resolves to. An operand that resolves outside the working tree is the fault.
 pub fn resolve<'w>(
     workspace: &Workspace,
-    operands: &[&'w OsStr],
+    operands: &[&'w [u8]],
 ) -> Result<Vec<Operand>, Fault<'w>> {
     operands
         .iter()
         .map(|&word| {
-            let directory = matches!(word.as_bytes(), b"." | b"./");
-            match operand::resolve_rooted(word.as_bytes(), workspace.prefix(), workspace.root()) {
+            let directory = matches!(word, b"." | b"./");
+            match operand::resolve_rooted(word, workspace.prefix(), workspace.root()) {
                 Cleaned::Inside(path) if directory => Ok(Operand::Form(path)),
                 Cleaned::Inside(path) => Ok(Operand::Literal(path)),
                 Cleaned::Root => Ok(Operand::Form(Vec::new())),
@@ -120,12 +119,7 @@ pub fn resolve<'w>(
 
 /// The `add` handler. `words` are the words after `add` as typed, run unchanged when
 /// there is no operand and the all-flag is clear.
-pub fn add(
-    workspace: &Workspace,
-    read: &Read,
-    words: &[OsString],
-    operands: &[Operand],
-) -> Outcome {
+pub fn add(workspace: &Workspace, read: &Read, words: &[Vec<u8>], operands: &[Operand]) -> Outcome {
     let hidden = match keeper::hidden(workspace) {
         Ok(hidden) => hidden,
         Err(failed) => return outcome::failed(failed),
@@ -171,6 +165,12 @@ pub fn add(
         );
     }
 
+    // The listing asked about the scope; a skipped path reaches a command line only at the
+    // run after the hide-first write, which it must not get to (`Holds/G30`).
+    if let Some(path) = unnamed(&skipped) {
+        return outcome::not_started(Failure::NotAName(path.to_vec()));
+    }
+
     let root = workspace.root();
     let to_hide: Vec<Vec<u8>> = scope
         .literals
@@ -201,11 +201,11 @@ pub fn add(
         }
     }
 
-    let first = read.options().map(OsStr::to_owned).collect();
+    let first = read.options().map(<[u8]>::to_vec).collect();
     let second = read
         .options_without(&ALL_FLAG)
         .into_iter()
-        .chain([OsString::from("-u")])
+        .chain([b"-u".to_vec()])
         .collect();
     let mut status = End::Code(0);
     // The first run made carries every literal operand.
@@ -238,6 +238,14 @@ pub fn add(
     Outcome::Git(status)
 }
 
+/// The first of `paths` that is no name, on a platform where a name is valid UTF-8.
+fn unnamed(paths: &[Vec<u8>]) -> Option<&[u8]> {
+    paths
+        .iter()
+        .find(|path| bytes::name(path).is_none())
+        .map(Vec::as_slice)
+}
+
 /// Whether the hint about an ignored path follows: the first run made, which carries every
 /// one of `literals`, exited with `literal_run` 1, the words did not force it, and
 /// `ignores_any`, asked only then, reports one of them ignored.
@@ -251,11 +259,11 @@ fn ignored_hint_owed(
 }
 
 /// The run of the user's words unchanged.
-fn unchanged(workspace: &Workspace, words: &[OsString]) -> Outcome {
+fn unchanged(workspace: &Workspace, words: &[Vec<u8>]) -> Outcome {
     let private = workspace.private_directory();
-    let words = [OsStr::new("add")]
+    let words = ["add".as_bytes()]
         .into_iter()
-        .chain(words.iter().map(OsString::as_os_str));
+        .chain(words.iter().map(Vec::as_slice));
     match Run::private(&private, workspace.root(), words)
         .own_paths()
         .users_command()
@@ -270,18 +278,22 @@ fn unchanged(workspace: &Workspace, words: &[OsString]) -> Outcome {
 /// excluded path, from the user's directory with every stream inherited.
 fn staging(
     workspace: &Workspace,
-    options: Vec<OsString>,
+    options: Vec<Vec<u8>>,
     paths: &[Vec<u8>],
     excluded: &[Vec<u8>],
 ) -> Result<End, Outcome> {
-    let mut words: Vec<OsString> = vec!["add".into()];
-    words.extend(options);
+    let mut words: Vec<Word> = vec!["add".into()];
+    words.extend(options.into_iter().map(Word::from));
     words.push("--".into());
-    words.extend(paths.iter().map(|path| pathspec::top_literal(path)));
+    words.extend(
+        paths
+            .iter()
+            .map(|path| Word::naming(pathspec::top_literal(path), path)),
+    );
     words.extend(
         excluded
             .iter()
-            .map(|path| pathspec::top_literal_exclude(path)),
+            .map(|path| Word::naming(pathspec::top_literal_exclude(path), path)),
     );
     let private = workspace.private_directory();
     match Run::private(&private, workspace.root(), words)
@@ -373,9 +385,10 @@ fn skipped_line(count: usize) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::front::table::{self, Reading};
+    use crate::links_and_modes::names_every_byte_string;
 
-    fn read_add(words: &[&str]) -> Vec<OsString> {
-        words.iter().map(OsString::from).collect()
+    fn read_add(words: &[&str]) -> Vec<Vec<u8>> {
+        words.iter().map(|word| word.as_bytes().to_vec()).collect()
     }
 
     fn all(words: &[&str]) -> bool {
@@ -384,6 +397,18 @@ mod tests {
             Reading::Read(read) => all_flag(&read),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn a_skipped_path_that_is_no_name_is_found_before_anything_is_written() {
+        let skipped = [b"notes/a".to_vec(), b"notes/\xff".to_vec()];
+        let found = unnamed(&skipped);
+        if names_every_byte_string() {
+            assert_eq!(found, None);
+        } else {
+            assert_eq!(found, Some(&b"notes/\xff"[..]));
+        }
+        assert_eq!(unnamed(&skipped[..1]), None);
     }
 
     #[test]

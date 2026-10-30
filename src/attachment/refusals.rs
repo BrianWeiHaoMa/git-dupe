@@ -7,7 +7,6 @@
 //! repository's own directory never gets here: Git's locate run fails there.
 
 use std::fs;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use crate::keeper::{self, Failed};
@@ -23,7 +22,7 @@ pub enum Refusal {
     /// names apart from its repository. `core.worktree` `../..`, relative to `.git/dupe`,
     /// could not name the root.
     NotOwnGitDirectory,
-    /// A linked worktree whose Git directory's parent is not, by device and inode,
+    /// A linked worktree whose Git directory's parent is not, by canonical path,
     /// `worktrees` in the common Git directory: no worktree `git worktree add` made.
     NotUnderWorktrees,
     /// Something other than a directory stands at the private Git directory's path by
@@ -60,20 +59,16 @@ pub fn refusal(workspace: &Workspace) -> Result<Option<Refusal>, Failed> {
 }
 
 /// Whether `<root>/.git` is, by `lstat`, a directory, and the common Git directory
-/// itself. A symbolic link to a directory is not, whatever it points to.
+/// itself. A symbolic link to a directory is not, whatever it points to: the `lstat` comes
+/// first because its canonical path would answer equal.
 fn own_git_directory(workspace: &Workspace) -> bool {
-    let entry = fs::symlink_metadata(workspace.root().join(".git"));
-    let common = fs::metadata(workspace.common_directory());
-    match (entry, common) {
-        (Ok(entry), Ok(common)) => {
-            entry.is_dir() && entry.dev() == common.dev() && entry.ino() == common.ino()
-        }
-        _ => false,
-    }
+    let entry = workspace.root().join(".git");
+    fs::symlink_metadata(&entry).is_ok_and(|found| found.is_dir())
+        && same_directory(&entry, workspace.common_directory())
 }
 
 /// Whether the Git directory's parent is the common Git directory's `worktrees`, by
-/// device and inode, however either path is spelled.
+/// canonical path, however either path is spelled.
 fn under_worktrees(workspace: &Workspace) -> bool {
     let Some(parent) = workspace.git_directory().parent() else {
         return false;
@@ -81,11 +76,82 @@ fn under_worktrees(workspace: &Workspace) -> bool {
     same_directory(parent, &workspace.common_directory().join("worktrees"))
 }
 
+/// Whether the two paths have one canonical path; one that has none is not the same
+/// (`Holds/G1`, S24: a device and inode are no question every platform can ask).
 fn same_directory(one: &Path, other: &Path) -> bool {
-    match (fs::metadata(one), fs::metadata(other)) {
-        (Ok(one), Ok(other)) => {
-            one.is_dir() && one.dev() == other.dev() && one.ino() == other.ino()
-        }
+    match (fs::canonicalize(one), fs::canonicalize(other)) {
+        (Ok(one), Ok(other)) => one == other,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::links_and_modes::symlink;
+
+    /// A directory of the check's own, with a repository's `.git` in `repo`, removed after.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Scratch {
+            let path = std::env::temp_dir()
+                .join(format!("git-dupe-refusals-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(path.join("repo/.git/worktrees/one")).unwrap();
+            Scratch(path)
+        }
+
+        fn common(&self) -> PathBuf {
+            self.0.join("repo/.git")
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn the_git_directory_is_the_common_one_by_canonical_path_and_never_through_a_link() {
+        let scratch = Scratch::new("own");
+        let root = scratch.0.join("repo");
+        assert!(own_git_directory(&Workspace::at_root(&root)));
+        // Another spelling of the root, and a link in an ancestor of it.
+        assert!(own_git_directory(&Workspace::at_root(&root.join("."))));
+        symlink(&root, scratch.0.join("to-repo")).unwrap();
+        let through = Workspace::at_root(&scratch.0.join("to-repo"));
+        assert!(own_git_directory(&through));
+        // A `.git` that is a link to the common directory is not a directory by `lstat`,
+        // though its canonical path is that directory's.
+        let linked_root = scratch.0.join("linked");
+        fs::create_dir(&linked_root).unwrap();
+        symlink(scratch.common(), linked_root.join(".git")).unwrap();
+        assert!(!own_git_directory(&Workspace::at_root(&linked_root)));
+        // No `.git` has no canonical form.
+        let bare_root = scratch.0.join("empty");
+        fs::create_dir(&bare_root).unwrap();
+        assert!(!own_git_directory(&Workspace::at_root(&bare_root)));
+    }
+
+    #[test]
+    fn a_linked_worktree_lies_in_the_common_directorys_worktrees_by_canonical_path() {
+        let scratch = Scratch::new("under");
+        let root = scratch.0.join("one");
+        let linked = Workspace::linked_at(&scratch.common(), b"one", &root);
+        assert!(under_worktrees(&linked));
+        // The common Git directory reached through a link.
+        symlink(scratch.common(), scratch.0.join("to-git")).unwrap();
+        let through = Workspace::linked_at(&scratch.0.join("to-git"), b"one", &root);
+        assert!(under_worktrees(&through));
+        // A directory named `worktrees` of another repository is not it.
+        let other = scratch.0.join("other/.git/worktrees/one");
+        fs::create_dir_all(&other).unwrap();
+        let answered = same_directory(
+            other.parent().expect("a parent"),
+            &scratch.common().join("worktrees"),
+        );
+        assert!(!answered);
     }
 }

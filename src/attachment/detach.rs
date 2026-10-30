@@ -25,7 +25,6 @@
 //!    did not fit and a question killed by a signal, which ends the command with 128 plus
 //!    its number: attached, its region deleted, as a kill after step 4 leaves it.
 
-use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -123,16 +122,15 @@ fn decide(workspace: &Workspace) -> Result<(), NotDetached> {
             .from(root)
             .capture_output()
     };
-    let no_optional_locks = [OsString::from("--no-optional-locks")];
+    let no_optional_locks = ["--no-optional-locks"];
     let history_as_stored = [
         "--no-replace-objects",
         "-c",
         "advice.graftFileDeprecated=false",
-    ]
-    .map(OsString::from);
+    ];
 
     let status =
-        run(&["status", "--porcelain", "-z", "--untracked-files=no"]).prefixed(&no_optional_locks);
+        run(&["status", "--porcelain", "-z", "--untracked-files=no"]).prefixed(no_optional_locks);
     if !step(status, &[0]).map_err(unreadable)?.stdout.is_empty() {
         return Err(NotDetached::Uncommitted);
     }
@@ -162,7 +160,7 @@ fn decide(workspace: &Workspace) -> Result<(), NotDetached> {
     // deprecated whenever it opens a grafts file, `/dev/null` too, and that advice, which
     // names plain `git` commands, is off for this run (`Holds/G3`, S12).
     let walk = run(&words)
-        .prefixed(&history_as_stored)
+        .prefixed(history_as_stored)
         .variable("GIT_GRAFT_FILE", "/dev/null")
         .feed(commits);
     let found = step(walk, &[0]).map_err(unreadable)?;

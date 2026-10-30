@@ -124,9 +124,8 @@ impl Places {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::links_and_modes::symlink;
     use std::fs;
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::symlink;
 
     /// A directory of the test's own below the system's temporary one, removed after.
     struct Scratch(PathBuf);
@@ -138,7 +137,7 @@ mod tests {
     }
 
     fn bytes(path: &Path) -> &[u8] {
-        path.as_os_str().as_bytes()
+        crate::bytes::of(path.as_os_str())
     }
 
     fn remote(url: &[u8]) -> Place {
@@ -186,7 +185,7 @@ mod tests {
         let places = Places::new(remotes, roots, directories, from);
 
         let named = |word: &[u8]| places.named_by(word).cloned();
-        let path = |path: &Path| path.as_os_str().as_bytes().to_vec();
+        let path = |path: &Path| bytes(path).to_vec();
         assert_eq!(named(b"git@EXAMPLE.com:team/project"), Some(remote(https)));
         assert_eq!(
             named(b"--mirror=ssh://example.com/team/project.git/"),

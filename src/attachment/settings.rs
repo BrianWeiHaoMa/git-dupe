@@ -28,17 +28,16 @@
 //! it holds one: `config --local --includes --get` answers nothing, exit 1, for a key set
 //! only globally.
 
-use std::ffi::OsStr;
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
 use super::step;
+use crate::bytes;
 use crate::keeper::Failed;
 use crate::runner::locate::{Workspace, private_directory};
 use crate::runner::records;
-use crate::runner::{End, Run};
+use crate::runner::{End, Run, Word};
 
 /// The keys every private repository gets, whatever a template put there.
 const FIXED: [(&str, &str); 2] = [
@@ -82,7 +81,7 @@ fn relative(from: &Path, to: &Path) -> Vec<u8> {
     let up = from[shared..].iter().map(|_| &b".."[..]);
     let down = to[shared..]
         .iter()
-        .map(|component| component.as_os_str().as_bytes());
+        .map(|component| bytes::of(component.as_os_str()));
     let parts: Vec<&[u8]> = up.chain(down).collect();
     if parts.is_empty() {
         return b".".to_vec();
@@ -178,12 +177,12 @@ pub fn set(
                 .map(|&scope| (scope, "core.worktree", work_tree.to_vec())),
         );
     for (scope, key, value) in keys {
-        let words = [
-            OsStr::new("config"),
-            OsStr::new(scope),
-            OsStr::new("--replace-all"),
-            OsStr::new(key),
-            OsStr::from_bytes(&value),
+        let words: [Word; 5] = [
+            "config".into(),
+            scope.into(),
+            "--replace-all".into(),
+            key.into(),
+            value.into(),
         ];
         step(Run::private(private, workspace.root(), words), &[0])?;
     }
@@ -206,13 +205,6 @@ fn public_local(key: &str) -> Result<Option<Vec<u8>>, Failed> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn relative_of(from: &[u8], to: &[u8]) -> Vec<u8> {
-        relative(
-            Path::new(OsStr::from_bytes(from)),
-            Path::new(OsStr::from_bytes(to)),
-        )
-    }
 
     #[test]
     fn the_relative_work_tree_leaves_the_private_git_directory_for_the_root() {
@@ -250,7 +242,11 @@ mod tests {
                 b"../../../../../x\xff",
             ),
         ] {
-            assert_eq!(relative_of(from, to), expected, "{}", from.escape_ascii());
+            // A row of bytes that are no name here stands for nothing on disk.
+            let (Some(from), Some(to)) = (bytes::name(from), bytes::name(to)) else {
+                continue;
+            };
+            assert_eq!(relative(Path::new(from), Path::new(to)), expected);
         }
     }
 
@@ -283,7 +279,10 @@ mod tests {
     fn components_are_compared_whole() {
         // `/w/re` is no ancestor of `/w/repo`.
         assert_eq!(
-            relative_of(b"/w/repo/.git/worktrees/re/dupe", b"/w/re"),
+            relative(
+                Path::new("/w/repo/.git/worktrees/re/dupe"),
+                Path::new("/w/re")
+            ),
             b"../../../../../re"
         );
     }

@@ -6,14 +6,13 @@
 //! gives it neither the starting region of step (6) nor the settle of step (8), whatever
 //! it returns (R3).
 
-use std::ffi::OsString;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use super::help;
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
 use crate::attachment::{self, NotDetached, NotRemoved};
+use crate::bytes;
 use crate::keeper::NotDeleted;
 use crate::runner::locate::Workspace;
 
@@ -34,13 +33,13 @@ const AN_OPERAND: &[u8] =
 
 /// Reads `detach [--force]`: `--force` as written, given once or more, and nothing else;
 /// `--` ends the options, and nothing may follow.
-pub fn read(words: &[OsString]) -> Asked {
+pub fn read(words: &[Vec<u8>]) -> Asked {
     if help::requested(words) {
         return Asked::Help;
     }
     let end_of_options = words
         .iter()
-        .position(|word| word.as_bytes() == b"--")
+        .position(|word| word.as_slice() == b"--")
         .unwrap_or(words.len());
     let (options, after) = words.split_at(end_of_options);
     if after.len() > 1 {
@@ -48,7 +47,7 @@ pub fn read(words: &[OsString]) -> Asked {
     }
     let mut force = false;
     for word in options {
-        match word.as_bytes() {
+        match word.as_slice() {
             b"--force" => force = true,
             option if option.starts_with(b"-") => return Asked::Misused(AN_OPTION),
             _ => return Asked::Misused(AN_OPERAND),
@@ -93,7 +92,7 @@ pub fn run(workspace: &Workspace, force: bool) -> Outcome {
         Err(NotRemoved::Failed(path, cause)) => outcome::refuse(
             &[
                 b"cannot remove ",
-                path.as_os_str().as_bytes(),
+                bytes::of(path.as_os_str()),
                 b": ",
                 cause.to_string().as_bytes(),
                 b"; the managed region is deleted; run 'git dupe detach --force' to finish",
@@ -156,7 +155,7 @@ fn region_stands(not_deleted: NotDeleted) -> Vec<u8> {
         NotDeleted::BeyondALink(link) => beyond_a_link(&link),
         NotDeleted::Failed { file, cause } => [
             b"cannot delete the managed region of ",
-            file.as_os_str().as_bytes(),
+            bytes::of(file.as_os_str()),
             b": ",
             cause.to_string().as_bytes(),
             b"; nothing is detached",
@@ -164,7 +163,7 @@ fn region_stands(not_deleted: NotDeleted) -> Vec<u8> {
         .concat(),
         NotDeleted::NotLocked { directory, cause } => [
             b"cannot take the lock on ",
-            directory.as_os_str().as_bytes(),
+            bytes::of(directory.as_os_str()),
             b" to delete the managed region: ",
             cause.to_string().as_bytes(),
             b"; nothing is detached",
@@ -176,7 +175,7 @@ fn region_stands(not_deleted: NotDeleted) -> Vec<u8> {
 /// The refusal while the region stands beyond a link at `.git/info` (G3).
 fn beyond_a_link(link: &Path) -> Vec<u8> {
     [
-        link.as_os_str().as_bytes(),
+        bytes::of(link.as_os_str()),
         b" is a symbolic link, and the managed region in the file read through it cannot \
           be deleted there; make .git/info a directory again, then detach",
     ]
@@ -187,8 +186,8 @@ fn beyond_a_link(link: &Path) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    fn words(words: &[&str]) -> Vec<OsString> {
-        words.iter().map(OsString::from).collect()
+    fn words(words: &[&str]) -> Vec<Vec<u8>> {
+        words.iter().map(|word| word.as_bytes().to_vec()).collect()
     }
 
     #[test]
@@ -233,7 +232,7 @@ mod tests {
         let line = region_stands(not_deleted);
         let expected = [
             b"cannot take the lock on ",
-            root.join(".git").as_os_str().as_bytes(),
+            bytes::of(root.join(".git").as_os_str()),
             b" to delete the managed region: ",
         ]
         .concat();

@@ -23,6 +23,11 @@
 //! of the chain itself carries the prefix gathered so far, by `prefixed`. The prefix
 //! stands apart from a run's words, because `environment` reads a run's first word.
 //!
+//! A run's words are bytes until the run starts (`Word`): `start` turns each into a name
+//! through `bytes::name` before it builds the `Command`, so that this is the one way a word
+//! reaches a command line, and the first that is no name is the run's distinct outcome,
+//! `Failure::NotAName`, for which nothing is spawned (`Holds/G30`).
+//!
 //! What a run answers is read in one of Git's machine forms (R5). `records` is the home
 //! of a reader of such a form, below every part that asks; a form that one caller alone
 //! reads, with checks of its own, may stay with that caller.
@@ -39,11 +44,12 @@ pub mod records;
 
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
-use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::OnceLock;
 use std::thread;
+
+use crate::bytes;
 
 pub use environment::Against;
 
@@ -69,16 +75,101 @@ pub enum Failure {
     /// The argument list did not fit, and nothing ran. Distinct, because a list of paths
     /// is never shortened to make it fit.
     TooLong,
+    /// A word that is no name here, on a platform where a name is valid UTF-8, and nothing
+    /// ran: what a line names for that word (G30).
+    NotAName(Vec<u8>),
     Other(io::Error),
 }
 
+/// One word of a run, as bytes until the run starts: Git's options and the paths git-dupe
+/// or the user gives it alike.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Word {
+    bytes: Vec<u8>,
+    /// The root-relative path a pathspec or a pattern was built for, which a refusal names
+    /// instead of the word (G30).
+    names: Option<Vec<u8>>,
+}
+
+impl Word {
+    /// A pathspec or a pattern, `bytes`, built for the root-relative `path`.
+    pub fn naming(bytes: impl Into<Vec<u8>>, path: &[u8]) -> Word {
+        Word {
+            bytes: bytes.into(),
+            names: Some(path.to_vec()),
+        }
+    }
+
+    /// The word as a name, or the outcome of a word that is none.
+    fn name(&self) -> Result<&OsStr, Failure> {
+        bytes::name(&self.bytes).ok_or_else(|| {
+            Failure::NotAName(self.names.clone().unwrap_or_else(|| self.bytes.clone()))
+        })
+    }
+}
+
+impl From<Vec<u8>> for Word {
+    fn from(bytes: Vec<u8>) -> Word {
+        Word { bytes, names: None }
+    }
+}
+
+impl From<&Vec<u8>> for Word {
+    fn from(bytes: &Vec<u8>) -> Word {
+        bytes.clone().into()
+    }
+}
+
+impl From<&[u8]> for Word {
+    fn from(bytes: &[u8]) -> Word {
+        bytes.to_vec().into()
+    }
+}
+
+impl From<&&[u8]> for Word {
+    fn from(bytes: &&[u8]) -> Word {
+        bytes.to_vec().into()
+    }
+}
+
+impl From<&str> for Word {
+    fn from(word: &str) -> Word {
+        word.as_bytes().into()
+    }
+}
+
+impl From<&&str> for Word {
+    fn from(word: &&str) -> Word {
+        word.as_bytes().into()
+    }
+}
+
+impl From<String> for Word {
+    fn from(word: String) -> Word {
+        word.into_bytes().into()
+    }
+}
+
+impl From<&OsStr> for Word {
+    fn from(word: &OsStr) -> Word {
+        bytes::of(word).into()
+    }
+}
+
+impl From<OsString> for Word {
+    fn from(word: OsString) -> Word {
+        word.as_os_str().into()
+    }
+}
+
 /// The prefix of the command an alias chain was dispatched as, once it is.
-static CARRIED: OnceLock<Vec<OsString>> = OnceLock::new();
+static CARRIED: OnceLock<Vec<Word>> = OnceLock::new();
 
 /// Makes `prefix` the prefix of every run started from now on: the global options an
 /// alias chain set before the command it was dispatched as (`Holds/G19`). A command is
 /// dispatched once, so a second prefix is a fault of the caller.
-pub fn carry_prefix(prefix: Vec<OsString>) {
+pub fn carry_prefix<W: Into<Word>>(prefix: impl IntoIterator<Item = W>) {
+    let prefix = prefix.into_iter().map(Into::into).collect();
     assert!(
         CARRIED.set(prefix).is_ok(),
         "a command is dispatched once, with one prefix"
@@ -88,8 +179,8 @@ pub fn carry_prefix(prefix: Vec<OsString>) {
 /// One run of `git`, not yet started.
 pub struct Run<'r> {
     against: Against<'r>,
-    prefix: &'r [OsString],
-    words: Vec<OsString>,
+    prefix: Vec<Word>,
+    words: Vec<Word>,
     directory: Option<&'r Path>,
     capture_output: bool,
     capture_errors: bool,
@@ -97,19 +188,19 @@ pub struct Run<'r> {
     own_paths: bool,
     users_command: bool,
     users_index: bool,
-    variables: Vec<(OsString, OsString)>,
+    variables: Vec<(Word, Word)>,
 }
 
 impl<'r> Run<'r> {
     /// A run against the public repository, from the user's directory, with every
     /// stream inherited.
-    pub fn public<W: AsRef<OsStr>>(words: impl IntoIterator<Item = W>) -> Run<'r> {
+    pub fn public<W: Into<Word>>(words: impl IntoIterator<Item = W>) -> Run<'r> {
         Run::against(Against::Public, words)
     }
 
     /// A run against the private repository at `git_directory`, whose working tree is
     /// `root`, both absolute, from the user's directory, with every stream inherited.
-    pub fn private<W: AsRef<OsStr>>(
+    pub fn private<W: Into<Word>>(
         git_directory: &'r Path,
         root: &'r Path,
         words: impl IntoIterator<Item = W>,
@@ -125,17 +216,14 @@ impl<'r> Run<'r> {
 
     /// A run against the repository `against` names, from the user's directory, with
     /// every stream inherited.
-    pub fn against<W: AsRef<OsStr>>(
+    pub fn against<W: Into<Word>>(
         against: Against<'r>,
         words: impl IntoIterator<Item = W>,
     ) -> Self {
         Run {
             against,
-            prefix: &[],
-            words: words
-                .into_iter()
-                .map(|word| word.as_ref().to_owned())
-                .collect(),
+            prefix: Vec::new(),
+            words: words.into_iter().map(Into::into).collect(),
             directory: None,
             capture_output: false,
             capture_errors: false,
@@ -152,8 +240,8 @@ impl<'r> Run<'r> {
     /// status `detach` reads, `--no-optional-locks`, and for its `rev-list`,
     /// `--no-replace-objects` and the `-c` that turns Git's advice on grafts off
     /// (`Holds/G3`).
-    pub fn prefixed(mut self, prefix: &'r [OsString]) -> Self {
-        self.prefix = prefix;
+    pub fn prefixed<W: Into<Word>>(mut self, prefix: impl IntoIterator<Item = W>) -> Self {
+        self.prefix = prefix.into_iter().map(Into::into).collect();
         self
     }
 
@@ -212,35 +300,46 @@ impl<'r> Run<'r> {
 
     /// `name` set to `value` for this run alone, over what the environment rules give it,
     /// a value received under that name included.
-    pub fn variable(mut self, name: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> Self {
-        self.variables
-            .push((name.as_ref().to_owned(), value.as_ref().to_owned()));
+    pub fn variable(mut self, name: impl Into<Word>, value: impl Into<Word>) -> Self {
+        self.variables.push((name.into(), value.into()));
         self
     }
 
-    /// Runs it to its end.
-    pub fn start(self) -> Result<Finished, Failure> {
+    /// The `Command` of this run: every word and variable turned into a name, the first
+    /// that is none ending it here, before anything is spawned (`Holds/G30`), and the
+    /// environment's changes made on the one this process inherits, so that a name is
+    /// folded where the platform folds it: a received `Git_Dir` is `GIT_DIR` on Windows
+    /// and another variable on Linux and macOS (`Holds/G10`).
+    fn command(&self) -> Result<Command, Failure> {
         let own_command = if self.users_command {
             None
         } else {
-            self.words.first().map(OsString::as_os_str)
+            self.words.first().map(|word| &word.bytes[..])
         };
-        let mut environment = environment::of(
+        let carried = CARRIED.get().map_or(&[][..], Vec::as_slice);
+        let words = arguments(
+            [carried, &self.prefix].concat(),
+            self.users_command,
+            self.words.clone(),
+        );
+        let words = words
+            .iter()
+            .map(Word::name)
+            .collect::<Result<Vec<&OsStr>, Failure>>()?;
+        let variables = self
+            .variables
+            .iter()
+            .map(|(name, value)| Ok((name.name()?, value.name()?)))
+            .collect::<Result<Vec<(&OsStr, &OsStr)>, Failure>>()?;
+        let changes = environment::of(
             &self.against,
             own_command,
             self.own_paths,
             self.users_index,
-            std::env::vars_os(),
+            |name| std::env::var_os(name),
             std::env::current_dir,
         )
         .map_err(Failure::Other)?;
-        environment.extend(self.variables);
-        let carried = CARRIED.get().map_or(&[][..], Vec::as_slice);
-        let words = arguments(
-            [carried, self.prefix].concat(),
-            self.users_command,
-            self.words,
-        );
         let piped = |captured: bool| {
             if captured {
                 Stdio::piped()
@@ -249,20 +348,25 @@ impl<'r> Run<'r> {
             }
         };
         let mut command = Command::new("git");
+        command.args(words);
+        for name in changes.removed {
+            command.env_remove(name);
+        }
         command
-            .args(&words)
-            .env_clear()
-            .envs(environment)
+            .envs(changes.set)
+            .envs(variables)
             .stdin(piped(self.input.is_some()))
             .stdout(piped(self.capture_output))
             .stderr(piped(self.capture_errors));
         if let Some(directory) = self.directory {
             command.current_dir(directory);
         }
-        let mut child = command.spawn().map_err(|cause| match cause.kind() {
-            io::ErrorKind::ArgumentListTooLong => Failure::TooLong,
-            _ => Failure::Other(cause),
-        })?;
+        Ok(command)
+    }
+
+    /// Runs it to its end.
+    pub fn start(self) -> Result<Finished, Failure> {
+        let mut child = self.command()?.spawn().map_err(spawn_failure)?;
         let feeder = match (self.input, child.stdin.take()) {
             (Some(input), Some(mut stdin)) => Some(thread::spawn(move || stdin.write_all(&input))),
             _ => None,
@@ -288,12 +392,23 @@ impl<'r> Run<'r> {
     }
 }
 
+/// What a spawn's failure is: too long where the command line did not fit, which on
+/// Windows is raw error 206, `ERROR_FILENAME_EXCED_RANGE`, that the standard library reports
+/// as a bad file name (G23, S20); on Linux and macOS that number is no outcome of a spawn.
+fn spawn_failure(cause: io::Error) -> Failure {
+    if cause.kind() == io::ErrorKind::ArgumentListTooLong || cause.raw_os_error() == Some(206) {
+        Failure::TooLong
+    } else {
+        Failure::Other(cause)
+    }
+}
+
 /// The arguments of a run: the prefix, then, when the command word is the user's,
 /// `-c help.autocorrect=0`, then the words. A `-c` on the command line outranks the
 /// configuration and every earlier `-c`, a `-c` before `dupe` and one of the prefix
 /// included (S10). This is the one place `help.autocorrect` is written.
-fn arguments(prefix: Vec<OsString>, users_command: bool, words: Vec<OsString>) -> Vec<OsString> {
-    let autocorrect = ["-c", "help.autocorrect=0"].map(OsString::from);
+fn arguments(prefix: Vec<Word>, users_command: bool, words: Vec<Word>) -> Vec<Word> {
+    let autocorrect = ["-c", "help.autocorrect=0"].map(Word::from);
     let autocorrect = if users_command { &autocorrect[..] } else { &[] };
     prefix
         .into_iter()
@@ -302,136 +417,34 @@ fn arguments(prefix: Vec<OsString>, users_command: bool, words: Vec<OsString>) -
         .collect()
 }
 
+/// How a child ended: its signal where it has one, else the low byte of its code, as Git
+/// itself reads a child's status on Windows, where a code runs past 255 (F9, S21).
 fn end(status: ExitStatus) -> Result<End, Failure> {
-    if let Some(signal) = status.signal() {
+    if let Some(signal) = signal(&status) {
         return Ok(End::Signal(signal));
     }
     status
         .code()
-        .and_then(|code| u8::try_from(code).ok())
+        .map(low_byte)
         .map(End::Code)
         .ok_or_else(|| Failure::Other(io::Error::other(format!("git ended as {status}"))))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os::unix::ffi::OsStrExt;
-
-    #[test]
-    fn an_argument_the_kernel_refuses_is_the_too_long_outcome_and_nothing_runs() {
-        // One argument both kernels refuse (S2): above Linux's 128 KiB for one argument and
-        // macOS's 1 MiB for all of them together, which a smaller one stays within.
-        let argument = "a".repeat(2 * 1024 * 1024);
-        for captured in [false, true] {
-            let mut run = Run::public([&argument]);
-            if captured {
-                run = run.capture_output().capture_errors();
-            }
-            let run = run.start();
-            assert!(matches!(run, Err(Failure::TooLong)), "{:?}", run.err());
-        }
-    }
-
-    fn owned(words: &[&str]) -> Vec<OsString> {
-        words.iter().map(OsString::from).collect()
-    }
-
-    #[test]
-    fn a_users_command_has_autocorrect_off_before_its_first_word() {
-        let words = owned(&["stahs", "-u", "-c", "x=y"]);
-        assert_eq!(
-            arguments(Vec::new(), true, words),
-            owned(&["-c", "help.autocorrect=0", "stahs", "-u", "-c", "x=y"])
-        );
-        assert_eq!(
-            arguments(Vec::new(), true, Vec::new()),
-            owned(&["-c", "help.autocorrect=0"])
-        );
-    }
-
-    #[test]
-    fn a_prefix_stands_before_autocorrect_and_the_words_and_never_among_them() {
-        let prefix = owned(&["-c", "status.short=true", "--exec-path=/x", "-C", ""]);
-        assert_eq!(
-            arguments(prefix.clone(), true, owned(&["status", "-b"])),
-            owned(&[
-                "-c",
-                "status.short=true",
-                "--exec-path=/x",
-                "-C",
-                "",
-                "-c",
-                "help.autocorrect=0",
-                "status",
-                "-b"
-            ])
-        );
-        assert_eq!(
-            arguments(prefix, false, owned(&["ls-files", "-z"])),
-            owned(&[
-                "-c",
-                "status.short=true",
-                "--exec-path=/x",
-                "-C",
-                "",
-                "ls-files",
-                "-z"
-            ])
-        );
-        assert_eq!(
-            arguments(Vec::new(), false, owned(&["config"])),
-            owned(&["config"])
-        );
-    }
-
-    #[test]
-    fn a_runs_own_variable_reaches_its_git_alone_over_the_value_received() {
-        // The alias prints `HOME` as its `git` received it: the run's own value there,
-        // the value this process received in every other run.
-        let printed = |run: Run| {
-            let finished = run.capture_output().start().expect("a run");
-            assert_eq!(finished.end, End::Code(0));
-            finished.stdout
-        };
-        let print = || Run::public(["-c", "alias.print=!printf %s \"$HOME\"", "print"]);
-        let received = std::env::var_os("HOME").unwrap_or_default();
-        let mut own = received.clone();
-        own.push("/elsewhere");
-        assert_eq!(printed(print().variable("HOME", &own)), own.as_bytes());
-        assert_eq!(printed(print()), received.as_bytes());
-    }
-
-    #[test]
-    fn fed_input_larger_than_a_pipe_reaches_git_whole_while_its_output_is_read() {
-        // `hash-object --stdin` answers only after reading all of its input; `-w` is
-        // absent, so nothing is written.
-        let input = vec![b'x'; 4 * 1024 * 1024];
-        let fed = Run::public(["hash-object", "--stdin"])
-            .feed(input.clone())
-            .capture_output()
-            .start()
-            .expect("a run");
-        let told = Run::public(["hash-object", "--stdin"])
-            .feed([&input[..], b"y"].concat())
-            .capture_output()
-            .start()
-            .expect("a run");
-        assert_eq!(fed.end, End::Code(0));
-        assert_eq!(fed.stdout.len(), 41, "{}", fed.stdout.escape_ascii());
-        assert_ne!(fed.stdout, told.stdout);
-    }
-
-    #[test]
-    fn a_fed_run_killed_by_a_signal_ends_by_the_signal_whatever_it_read() {
-        // The alias kills the `git` that runs it before anything reads the input, so the
-        // input, larger than a pipe holds, cannot be written whole.
-        let fed = Run::public(["-c", "alias.die=!kill -TERM $PPID", "die"])
-            .feed(vec![b'x'; 4 * 1024 * 1024])
-            .capture_output()
-            .capture_errors()
-            .start()
-            .expect("a run that ended");
-        assert_eq!(fed.end, End::Signal(15));
-    }
+fn low_byte(code: i32) -> u8 {
+    (code & 0xff) as u8
 }
+
+/// R11's second site, on Linux and macOS: a signalled child's signal.
+#[cfg(unix)]
+fn signal(status: &ExitStatus) -> Option<i32> {
+    std::os::unix::process::ExitStatusExt::signal(status)
+}
+
+/// R11's second site, on Windows, which has no signals: `End::Signal` is never reached.
+#[cfg(windows)]
+fn signal(_: &ExitStatus) -> Option<i32> {
+    None
+}
+
+#[cfg(test)]
+mod tests;

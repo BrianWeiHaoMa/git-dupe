@@ -22,9 +22,6 @@
 //!   its value and finds none is known as such. The words without some entries are
 //!   written here too, from the same reading.
 
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
-
 use super::lines;
 use crate::guards::operand::{self, NotLiteral};
 
@@ -85,7 +82,7 @@ pub enum Reading<'w> {
     /// `-h` or `--help` came first.
     Help,
     /// An option word the table does not hold came first: the word as typed.
-    NotHeld(&'w OsStr),
+    NotHeld(&'w [u8]),
     Read(Read<'w>),
 }
 
@@ -95,7 +92,7 @@ pub struct Read<'w> {
     /// The option words in the order typed.
     options: Vec<OptionWord<'w>>,
     /// The words before `--` that are no option, then every word after it, in order.
-    pub operands: Vec<&'w OsStr>,
+    pub operands: Vec<&'w [u8]>,
     /// Where the `--` that ended the reading stood among the words read, when one did: a
     /// `--` taken as an option's value ends nothing.
     end_of_options: Option<usize>,
@@ -108,15 +105,15 @@ pub struct Read<'w> {
 /// one per letter read for a bundle; and the next word when it was taken as the value.
 #[derive(Debug, PartialEq, Eq)]
 struct OptionWord<'w> {
-    word: &'w OsStr,
+    word: &'w [u8],
     spelled: Vec<&'static Entry>,
-    value: Option<&'w OsStr>,
+    value: Option<&'w [u8]>,
 }
 
 impl<'w> Read<'w> {
     /// The option words in the order typed, each as typed, a value taken as the next
     /// word standing after its option.
-    pub fn options(&self) -> impl Iterator<Item = &'w OsStr> + '_ {
+    pub fn options(&self) -> impl Iterator<Item = &'w [u8]> + '_ {
         self.options
             .iter()
             .flat_map(|option| [Some(option.word), option.value].into_iter().flatten())
@@ -143,10 +140,10 @@ impl<'w> Read<'w> {
     /// The option words as `options` gives them, without every spelling of `entries`: a
     /// long word spelling one dropped with its value, a letter spelling one taken out of
     /// its bundle, with the value it holds, and a bundle left without letters dropped.
-    pub fn options_without(&self, entries: &[&Entry]) -> Vec<OsString> {
+    pub fn options_without(&self, entries: &[&Entry]) -> Vec<Vec<u8>> {
         let mut kept = Vec::new();
         for option in &self.options {
-            let word = option.word.as_bytes();
+            let word = option.word;
             let spells_one = |entry: &&'static Entry| entries.contains(entry);
             if word.starts_with(b"--") {
                 if !option.spelled.iter().any(spells_one) {
@@ -154,7 +151,7 @@ impl<'w> Read<'w> {
                         [Some(option.word), option.value]
                             .into_iter()
                             .flatten()
-                            .map(OsStr::to_owned),
+                            .map(<[u8]>::to_vec),
                     );
                 }
                 continue;
@@ -177,7 +174,7 @@ impl<'w> Read<'w> {
             if last_kept {
                 rewritten.extend_from_slice(attached);
             }
-            kept.push(OsString::from_vec(rewritten));
+            kept.push(rewritten);
             if last_kept && let Some(value) = option.value {
                 kept.push(value.to_owned());
             }
@@ -201,7 +198,7 @@ impl<'w> Read<'w> {
     pub fn not_literal(&self) -> Option<Fault<'w>> {
         self.operands
             .iter()
-            .find_map(|&word| match operand::rooted_or_literal(word.as_bytes()) {
+            .find_map(|&word| match operand::rooted_or_literal(word) {
                 Ok(()) => None,
                 Err(NotLiteral::Pattern) => Some(Fault::Pattern(word)),
                 Err(NotLiteral::Magic) => Some(Fault::Magic(word)),
@@ -210,7 +207,7 @@ impl<'w> Read<'w> {
 }
 
 /// Reads `words`, the words after the command, against `table`.
-pub fn read<'w>(table: &'static [Entry], words: &'w [OsString]) -> Reading<'w> {
+pub fn read<'w>(table: &'static [Entry], words: &'w [Vec<u8>]) -> Reading<'w> {
     let mut read = Read {
         options: Vec::new(),
         operands: Vec::new(),
@@ -219,11 +216,10 @@ pub fn read<'w>(table: &'static [Entry], words: &'w [OsString]) -> Reading<'w> {
     };
     let mut words = words.iter().enumerate();
     while let Some((at, word)) = words.next() {
-        let bytes = word.as_bytes();
+        let bytes = word.as_slice();
         if bytes == b"--" {
             read.end_of_options = Some(at);
-            read.operands
-                .extend(words.map(|(_, word)| word.as_os_str()));
+            read.operands.extend(words.map(|(_, word)| word.as_slice()));
             break;
         }
         if !bytes.starts_with(b"-") {
@@ -241,7 +237,7 @@ pub fn read<'w>(table: &'static [Entry], words: &'w [OsString]) -> Reading<'w> {
             return Reading::NotHeld(word);
         };
         let value = if takes_next {
-            let value = words.next().map(|(_, word)| word.as_os_str());
+            let value = words.next().map(|(_, word)| word.as_slice());
             if value.is_none() {
                 read.lacking_a_value = spelled.last().copied();
             }
@@ -299,13 +295,13 @@ fn short_word(table: &'static [Entry], letters: &[u8]) -> Option<(Vec<&'static E
 #[derive(Debug, PartialEq, Eq)]
 pub enum Fault<'w> {
     /// An option word the table does not hold (G26).
-    NotHeld(&'w OsStr),
+    NotHeld(&'w [u8]),
     /// An operand holding `*`, `?`, or `[`.
-    Pattern(&'w OsStr),
+    Pattern(&'w [u8]),
     /// An operand beginning with `:` other than `:/`.
-    Magic(&'w OsStr),
+    Magic(&'w [u8]),
     /// An operand that resolves outside the working tree.
-    Outside(&'w OsStr),
+    Outside(&'w [u8]),
 }
 
 impl Fault<'_> {
@@ -349,7 +345,7 @@ impl Fault<'_> {
             ),
             Fault::Outside(word) => (word, b"lies outside the working tree".to_vec()),
         };
-        [&lines::typed(word.as_bytes())[..], b" ", &fault].concat()
+        [&lines::typed(word)[..], b" ", &fault].concat()
     }
 }
 

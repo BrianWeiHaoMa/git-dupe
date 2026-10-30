@@ -13,9 +13,6 @@
 //! sequence, whatever this returns: after the refusal in an attached workspace, after a
 //! step that failed once the workspace is attached, and after success.
 
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::OsStrExt;
-
 use super::help;
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
@@ -31,8 +28,8 @@ pub enum Asked<'w> {
     Help,
     /// Attach from `url`, checking out `branch` when one was given.
     Clone {
-        url: &'w OsStr,
-        branch: Option<&'w OsStr>,
+        url: &'w [u8],
+        branch: Option<&'w [u8]>,
     },
     /// Not `clone URL [-b BRANCH]`: the fault, which names nothing typed.
     Misused(&'static [u8]),
@@ -48,7 +45,7 @@ const DASHED_BRANCH: &[u8] = b"the branch name cannot begin with '-'";
 
 /// Reads `clone URL [-b BRANCH]`, the options before or after `URL`, and `URL` after
 /// `--` too.
-pub fn read(words: &[OsString]) -> Asked<'_> {
+pub fn read(words: &[Vec<u8>]) -> Asked<'_> {
     if help::requested(words) {
         return Asked::Help;
     }
@@ -56,10 +53,10 @@ pub fn read(words: &[OsString]) -> Asked<'_> {
     let mut options = true;
     let mut words = words.iter();
     while let Some(word) = words.next() {
-        let bytes = word.as_bytes();
+        let bytes = word.as_slice();
         if options && bytes == b"-b" {
             match words.next() {
-                Some(value) => branch = Some(value.as_os_str()),
+                Some(value) => branch = Some(value.as_slice()),
                 None => return Asked::Misused(NO_BRANCH),
             }
         } else if options && bytes == b"--" {
@@ -67,7 +64,7 @@ pub fn read(words: &[OsString]) -> Asked<'_> {
         } else if options && bytes.starts_with(b"-") {
             return Asked::Misused(AN_OPTION);
         } else if url.is_none() {
-            url = Some(word.as_os_str());
+            url = Some(word.as_slice());
         } else {
             return Asked::Misused(AN_OPERAND);
         }
@@ -75,10 +72,10 @@ pub fn read(words: &[OsString]) -> Asked<'_> {
     let Some(url) = url else {
         return Asked::Misused(NO_URL);
     };
-    if url.as_bytes().starts_with(b"-") {
+    if url.starts_with(b"-") {
         return Asked::Misused(DASHED_URL);
     }
-    if branch.is_some_and(|branch| branch.as_bytes().starts_with(b"-")) {
+    if branch.is_some_and(|branch| branch.starts_with(b"-")) {
         return Asked::Misused(DASHED_BRANCH);
     }
     Asked::Clone { url, branch }
@@ -86,12 +83,7 @@ pub fn read(words: &[OsString]) -> Asked<'_> {
 
 /// The handler: `words` are every word after `clone`, each compared with the public
 /// places.
-pub fn run(
-    workspace: &Workspace,
-    words: &[OsString],
-    url: &OsStr,
-    branch: Option<&OsStr>,
-) -> Outcome {
+pub fn run(workspace: &Workspace, words: &[Vec<u8>], url: &[u8], branch: Option<&[u8]>) -> Outcome {
     let places = match places::take(&workspace.facts()) {
         Ok(places) => places,
         Err(ended) => return ended,
@@ -201,14 +193,14 @@ fn restore_command(path: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    fn words(words: &[&str]) -> Vec<OsString> {
-        words.iter().map(OsString::from).collect()
+    fn words(words: &[&str]) -> Vec<Vec<u8>> {
+        words.iter().map(|word| word.as_bytes().to_vec()).collect()
     }
 
     fn cloned<'w>(url: &'w str, branch: Option<&'w str>) -> Asked<'w> {
         Asked::Clone {
-            url: OsStr::new(url),
-            branch: branch.map(OsStr::new),
+            url: url.as_bytes(),
+            branch: branch.map(str::as_bytes),
         }
     }
 
@@ -231,16 +223,12 @@ mod tests {
             read(&words(&["-b", "x", "u", "-b", "feature/y"])),
             cloned("u", Some("feature/y"))
         );
-        let not_utf8 = [
-            OsStr::from_bytes(b"caf\xe9").to_owned(),
-            OsString::from("-b"),
-            OsStr::from_bytes(b"\xff").to_owned(),
-        ];
+        let not_utf8 = [b"caf\xe9".to_vec(), b"-b".to_vec(), b"\xff".to_vec()];
         assert_eq!(
             read(&not_utf8),
             Asked::Clone {
-                url: OsStr::from_bytes(b"caf\xe9"),
-                branch: Some(OsStr::from_bytes(b"\xff")),
+                url: &b"caf\xe9"[..],
+                branch: Some(&b"\xff"[..]),
             }
         );
     }

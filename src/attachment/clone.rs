@@ -24,9 +24,6 @@
 //! as a misuse, because each reaches a step as a plain word that Git would read as an
 //! option. `clone` never settles: the sequence does, after it, wherever it ends attached.
 
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
-
 use super::init::{self, NotAttached};
 use super::refusals::{self, Refusal};
 use super::settings::Unresolved;
@@ -83,9 +80,9 @@ impl From<NotAttached> for NotCloned {
 pub fn clone(
     workspace: &Workspace,
     places: &Places,
-    words: &[OsString],
-    url: &OsStr,
-    branch: Option<&OsStr>,
+    words: &[Vec<u8>],
+    url: &[u8],
+    branch: Option<&[u8]>,
 ) -> Result<Cloned, NotCloned> {
     if workspace.attached() {
         return Err(NotCloned::Attached);
@@ -94,20 +91,17 @@ pub fn clone(
         return Err(NotCloned::Refused(refusal));
     }
     for word in words {
-        if let Some(place) = places.named_by(word.as_bytes()) {
-            return Err(NotCloned::NamesAPublicPlace(
-                word.as_bytes().to_vec(),
-                place.clone(),
-            ));
+        if let Some(place) = places.named_by(word) {
+            return Err(NotCloned::NamesAPublicPlace(word.clone(), place.clone()));
         }
     }
 
     init::attach(workspace, None)?;
     let private = workspace.private_directory();
     let root = workspace.root();
-    let run = |words: &[&OsStr]| Run::private(&private, root, words).from(root);
-    let quiet = |words: &[&OsStr]| step(run(words).capture_output(), &[0]);
-    let word = OsStr::new;
+    let run = |words: &[&[u8]]| Run::private(&private, root, words).from(root);
+    let quiet = |words: &[&[u8]]| step(run(words).capture_output(), &[0]);
+    let word = str::as_bytes;
 
     quiet(&[word("remote"), word("add"), word("origin"), url])?;
     step(
@@ -123,7 +117,7 @@ pub fn clone(
         return Ok(Cloned::NoBranch);
     }
     let branch = match branch {
-        Some(branch) => branch.to_owned(),
+        Some(branch) => branch.to_vec(),
         None => {
             let answer = quiet(&[
                 word("ls-remote"),
@@ -132,7 +126,7 @@ pub fn clone(
                 word("HEAD"),
             ])?;
             match records::default_branch(&answer.stdout) {
-                Some(named) => OsString::from_vec(named.to_vec()),
+                Some(named) => named.to_vec(),
                 None => return Err(NotCloned::NoDefaultBranch),
             }
         }
@@ -144,8 +138,8 @@ pub fn clone(
     // default branch whose name begins with `-` from being read as an option: Git then
     // refuses it as a branch name, where `--list` would otherwise end the step with
     // nothing created.
-    let tracked = joined(b"refs/remotes/origin/", &branch);
-    let head = joined(b"refs/heads/", &branch);
+    let tracked = [b"refs/remotes/origin/", &branch[..]].concat();
+    let head = [b"refs/heads/", &branch[..]].concat();
     quiet(&[
         word("-c"),
         word("core.warnAmbiguousRefs=false"),
@@ -158,9 +152,4 @@ pub fn clone(
     quiet(&[word("symbolic-ref"), word("HEAD"), &head])?;
     quiet(&[word("reset"), word("-q")])?;
     Ok(Cloned::CheckedOut(write::write(&private, root)?))
-}
-
-/// `prefix` then `branch`, as one word.
-fn joined(prefix: &[u8], branch: &OsStr) -> OsString {
-    OsString::from_vec([prefix, branch.as_bytes()].concat())
 }

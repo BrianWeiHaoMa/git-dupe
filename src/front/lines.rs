@@ -56,7 +56,31 @@ pub fn typed(word: &[u8]) -> Vec<u8> {
 fn to_standard_error(bytes: &[u8]) {
     // One write, so the lines arrive whole. A failed write is dropped: standard error is
     // where a failure would be reported.
-    let _ = io::stderr().write_all(bytes);
+    if let Some(refused) = written(&mut io::stderr(), bytes) {
+        let _ = io::stderr().write_all(&lossy(refused));
+    }
+}
+
+/// Writes `bytes`, and returns what is left of them when `out` refuses them as `InvalidData`:
+/// a Windows console takes UTF-8 alone, and writes what comes before the first byte that is
+/// not (S20), so that this is what the line owes. Any other failure ends the writing, and
+/// only this one is tried again, so that a closed stream neither loops nor doubles a line.
+fn written<'b>(out: &mut impl Write, mut bytes: &'b [u8]) -> Option<&'b [u8]> {
+    while !bytes.is_empty() {
+        match out.write(bytes) {
+            Ok(0) => return None,
+            Ok(count) => bytes = &bytes[count..],
+            Err(cause) if cause.kind() == io::ErrorKind::Interrupted => {}
+            Err(cause) if cause.kind() == io::ErrorKind::InvalidData => return Some(bytes),
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+/// `bytes` with each byte that is not UTF-8 replaced.
+fn lossy(bytes: &[u8]) -> Vec<u8> {
+    String::from_utf8_lossy(bytes).into_owned().into_bytes()
 }
 
 fn line(level: Level, text: &[u8]) -> Vec<u8> {
@@ -79,6 +103,68 @@ mod tests {
             b"warning: notes\r is \xe9\n"
         );
         assert_eq!(line(Level::Hint, b"done"), b"hint: done\n");
+    }
+
+    /// A console as S20 reads it: it takes what comes before a byte that is not UTF-8, and
+    /// refuses that byte.
+    #[derive(Default)]
+    struct Console(Vec<u8>);
+
+    impl Write for Console {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            match std::str::from_utf8(bytes) {
+                Ok(_) => self.0.extend_from_slice(bytes),
+                Err(fault) if fault.valid_up_to() == 0 => {
+                    return Err(io::ErrorKind::InvalidData.into());
+                }
+                Err(fault) => {
+                    self.0.extend_from_slice(&bytes[..fault.valid_up_to()]);
+                    return Ok(fault.valid_up_to());
+                }
+            }
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_console_that_refuses_a_byte_gets_the_rest_of_the_line_lossily_and_none_of_it_twice() {
+        let mut console = Console::default();
+        let refused = written(&mut console, b"warning: caf\xe9 is\n");
+        assert_eq!(refused, Some(&b"\xe9 is\n"[..]));
+        console
+            .write_all(&lossy(refused.expect("refused")))
+            .unwrap();
+        assert_eq!(console.0, "warning: caf\u{fffd} is\n".as_bytes());
+    }
+
+    #[test]
+    fn valid_bytes_are_written_whole_and_any_other_failure_is_dropped() {
+        let mut console = Console::default();
+        assert_eq!(written(&mut console, "caf\u{e9}\n".as_bytes()), None);
+        assert_eq!(console.0, "caf\u{e9}\n".as_bytes());
+
+        struct Closed(usize);
+        impl Write for Closed {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                self.0 += 1;
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut closed = Closed(0);
+        assert_eq!(written(&mut closed, b"caf\xe9\n"), None);
+        assert_eq!(closed.0, 1);
+    }
+
+    #[test]
+    fn each_byte_that_is_not_utf8_is_replaced() {
+        assert_eq!(lossy(b"caf\xe9"), "caf\u{fffd}".as_bytes());
     }
 
     #[test]

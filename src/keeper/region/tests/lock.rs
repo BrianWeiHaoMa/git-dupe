@@ -76,7 +76,7 @@ fn a_lock_that_cannot_be_taken_is_no_wait_and_nothing_follows_it() {
     let common = scratch.0.join(".git");
     let file = [FOREIGN, b"\n# BEGIN git-dupe\n/.gitdupe\n# END git-dupe\n"].concat();
     fs::write(scratch.exclude(), &file).unwrap();
-    fs::set_permissions(scratch.exclude(), fs::Permissions::from_mode(0o640)).unwrap();
+    given_the_case(scratch.exclude());
     let before = identity(&scratch.exclude());
     let released = Cell::new(false);
     let release = |directory: &File| {
@@ -103,7 +103,7 @@ fn a_lock_that_cannot_be_taken_is_no_wait_and_nothing_follows_it() {
         vec![
             [
                 b"cannot take the lock on ",
-                common.as_os_str().as_bytes(),
+                bytes::of(common.as_os_str()),
                 b" to replace the managed region: ",
                 io::Error::from_raw_os_error(37).to_string().as_bytes(),
                 b"; private files may be visible to public Git",
@@ -124,7 +124,7 @@ fn a_lock_that_cannot_be_taken_is_no_wait_and_nothing_follows_it() {
     }
     assert_eq!(fs::read(scratch.exclude()).unwrap(), file);
     assert_eq!(identity(&scratch.exclude()), before);
-    assert_eq!(mode(&scratch.exclude()), 0o640);
+    assert_eq!(mode(&scratch.exclude()), case_mode());
     assert_eq!(
         fs::read_dir(scratch.0.join(".git/dupe")).unwrap().count(),
         0

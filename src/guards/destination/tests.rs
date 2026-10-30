@@ -1,5 +1,5 @@
 use super::*;
-use std::os::unix::fs::symlink;
+use crate::links_and_modes::symlink;
 use std::path::PathBuf;
 
 const ROOT: &str = "/nonexistent-git-dupe/w/repo";
@@ -294,7 +294,7 @@ fn a_path_that_exists_is_its_real_path_asked_as_written() {
     symlink(real.join("repo"), real.join("to-repo")).unwrap();
     symlink(real.join("repo/sub"), real.join("elsewhere/link")).unwrap();
     symlink(real.join("loop"), real.join("loop")).unwrap();
-    let bytes = |path: &Path| path.as_os_str().as_bytes().to_vec();
+    let bytes = |path: &Path| crate::bytes::of(path.as_os_str()).to_vec();
     let repo = bytes(&real.join("repo"));
 
     // Through a link to the root, and `link/..` beyond a link, where `..` is taken

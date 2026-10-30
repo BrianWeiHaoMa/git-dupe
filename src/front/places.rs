@@ -26,8 +26,9 @@
 
 use std::fs;
 use std::io;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
+
+use crate::bytes;
 
 use super::lines;
 use super::outcome::{self, Outcome};
@@ -67,12 +68,12 @@ pub fn take(facts: &Facts) -> Result<Places, Outcome> {
     )?;
     let roots = records::worktree_roots(&listing).ok_or_else(outcome::unreadable)?;
     let worktrees = facts.common_directory().join("worktrees");
-    let mut git_directories = vec![facts.common_directory().as_os_str().as_bytes().to_vec()];
+    let mut git_directories = vec![bytes::of(facts.common_directory().as_os_str()).to_vec()];
     match fs::read_dir(&worktrees) {
         Ok(entries) => {
             for entry in entries {
                 let entry = entry.map_err(|cause| unlisted(&worktrees, &cause))?;
-                git_directories.push(entry.path().into_os_string().into_vec());
+                git_directories.push(bytes::of(entry.path().as_os_str()).to_vec());
             }
         }
         Err(cause) if cause.kind() == io::ErrorKind::NotFound => {}
@@ -81,7 +82,7 @@ pub fn take(facts: &Facts) -> Result<Places, Outcome> {
     let from = ReadFrom {
         root: facts.root(),
         outside: facts.outside(),
-        home: facts.home().map(OsStrExt::as_bytes),
+        home: facts.home().map(bytes::of),
     };
     Ok(Places::new(
         remotes,
@@ -105,7 +106,7 @@ pub fn asked(run: Run, one_is_none: bool) -> Result<Vec<u8>, Outcome> {
 /// The refusal of a `worktrees/` that cannot be listed, whose entries are places.
 fn unlisted(directory: &Path, cause: &io::Error) -> Outcome {
     let mut line = b"cannot list the project's linked worktrees in ".to_vec();
-    line.extend_from_slice(directory.as_os_str().as_bytes());
+    line.extend_from_slice(bytes::of(directory.as_os_str()));
     line.extend_from_slice(format!(": {cause}").as_bytes());
     outcome::refuse(&line)
 }

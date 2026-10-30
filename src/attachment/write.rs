@@ -13,12 +13,11 @@
 //! `lstat` of the paths Git named.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use super::step;
+use crate::bytes;
 use crate::guards::operand;
 use crate::keeper::Failed;
 use crate::runner::Run;
@@ -126,7 +125,7 @@ fn obstruction<'p>(
 
 /// What stands at `path` when it exists and is not a directory, by `lstat`.
 fn standing(root: &Path, path: &[u8]) -> Option<Standing> {
-    let found = fs::symlink_metadata(root.join(OsStr::from_bytes(path))).ok()?;
+    let found = fs::symlink_metadata(bytes::under(root, path)?).ok()?;
     let kind = found.file_type();
     if kind.is_dir() {
         None
@@ -140,7 +139,7 @@ fn standing(root: &Path, path: &[u8]) -> Option<Standing> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
+    use crate::links_and_modes::symlink;
     use std::path::PathBuf;
 
     /// A directory of its own below the system's temporary directory, removed when the

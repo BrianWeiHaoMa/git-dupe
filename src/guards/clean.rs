@@ -157,18 +157,19 @@ pub fn ancestors(spared: &[Vec<u8>]) -> BTreeSet<Vec<u8>> {
         .collect()
 }
 
-/// The `-e` options for `spared`, as the words `-e` and a pattern, in order, `rule` giving
-/// the region rule of a path (`Composition/Keeper`).
+/// The `-e` patterns for `spared`, in order, each with the root-relative path its rule is
+/// written from, a spared path or an ancestor of one, which a refusal names (G30); `rule`
+/// gives the region rule of a path (`Composition/Keeper`).
 pub fn patterns(
     spared: &[Vec<u8>],
     arrangement: &Arrangement,
     rule: impl Fn(&[u8]) -> Vec<u8>,
-) -> Vec<Vec<u8>> {
+) -> Vec<(Vec<u8>, Vec<u8>)> {
     let mut patterns = Vec::new();
     match arrangement {
         Arrangement::Excluded => {
             for path in spared {
-                patterns.push(rule(path));
+                patterns.push((rule(path), path.clone()));
             }
         }
         Arrangement::Unignored {
@@ -179,23 +180,20 @@ pub fn patterns(
             // Byte order puts each ancestor before every path below it: outermost first.
             for ancestor in ignored_ancestors.iter() {
                 let rule = rule(ancestor);
-                patterns.push([b"!", &rule[..]].concat());
-                patterns.push([&rule[..], b"/*"].concat());
+                patterns.push(([b"!", &rule[..]].concat(), ancestor.clone()));
+                patterns.push(([&rule[..], b"/*"].concat(), ancestor.clone()));
             }
             for path in spared {
                 let rule = rule(path);
-                patterns.push([b"!", &rule[..]].concat());
-                patterns.push([b"!", &rule[..], b"/**"].concat());
+                patterns.push(([b"!", &rule[..]].concat(), path.clone()));
+                patterns.push(([b"!", &rule[..], b"/**"].concat(), path.clone()));
                 if *keep_directories_whole && !operand::any_at_or_below(publicly_tracked, path) {
-                    patterns.push([&rule[..], b"/"].concat());
+                    patterns.push(([&rule[..], b"/"].concat(), path.clone()));
                 }
             }
         }
     }
     patterns
-        .into_iter()
-        .flat_map(|pattern| [b"-e".to_vec(), pattern])
-        .collect()
 }
 
 #[cfg(test)]

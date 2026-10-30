@@ -87,9 +87,6 @@
 //!   guard did not let start; and none where the configuration was not asked, where
 //!   there is no private repository.
 
-use std::ffi::OsString;
-use std::os::unix::ffi::OsStrExt;
-
 use super::advice::{self, Answer};
 use super::commands::{self, Command};
 use super::lines::{self, Level};
@@ -186,12 +183,12 @@ pub enum Refused {
 /// names where `facts` locate the project, and what follows its run: `Err` with the
 /// refusal of the first thing that names a public place, or with the end of a run the
 /// guard needed.
-pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then, Outcome> {
+pub fn guard(words: &[Vec<u8>], facts: &Facts, against: Against) -> Result<Then, Outcome> {
     let (command, after) = words
         .split_first()
         .expect("a guarded command's words begin with its word");
-    let after: Vec<&[u8]> = after.iter().map(|word| word.as_bytes()).collect();
-    let moving = match commands::named(command.as_bytes()) {
+    let after: Vec<&[u8]> = after.iter().map(|word| word.as_slice()).collect();
+    let moving = match commands::named(command.as_slice()) {
         Some(Command::Push) => Some(Transfer::Push),
         Some(Command::Pull) => Some(Transfer::Pull),
         Some(Command::Fetch) => Some(Transfer::Fetch),
@@ -235,7 +232,7 @@ pub fn guard(words: &[OsString], facts: &Facts, against: Against) -> Result<Then
         if let Some(found) = found
             && let Some(place) = places.named_by_whole(found.value)
         {
-            return Err(refuse_default(command.as_bytes(), found, place));
+            return Err(refuse_default(command.as_slice(), found, place));
         }
     }
     let current = match &head {

@@ -22,9 +22,6 @@
 //! - It describes only what this build does.
 //! - Every file is embedded below, and nothing is embedded that is not a file.
 
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::OsStrExt;
-
 use super::commands;
 use super::outcome::{self, Outcome};
 use crate::runner::Run;
@@ -114,11 +111,11 @@ fn text_of(word: &[u8]) -> Option<&'static str> {
 /// first `--`, after which every word is an operand, `-h` included (`Composition/Front`).
 /// `git dupe git` reads a help word only as its first word, and a command with a table
 /// reads its words left to right (G26): neither asks here.
-pub fn requested(words: &[OsString]) -> bool {
+pub fn requested(words: &[Vec<u8>]) -> bool {
     words
         .iter()
-        .take_while(|word| word.as_bytes() != b"--")
-        .any(|word| matches!(word.as_bytes(), b"-h" | b"--help"))
+        .take_while(|word| word.as_slice() != b"--")
+        .any(|word| matches!(word.as_slice(), b"-h" | b"--help"))
 }
 
 /// What the words after `help` ask for.
@@ -128,7 +125,7 @@ enum Asked<'w> {
     General,
     /// `-h` or `--help` before `--`: the help of `help` itself.
     HelpOfHelp,
-    About(&'w OsStr),
+    About(&'w [u8]),
     /// Not `help [COMMAND]`: an option, which `help` has none of, or a second command.
     Misused,
 }
@@ -136,26 +133,26 @@ enum Asked<'w> {
 /// `help [COMMAND]`. A help request anywhere before `--` decides first. `--` ends the
 /// reading of dashed words, and a word after it is a command; a command cannot begin
 /// with `-`, there or before it, so that no word is ever an option of `git help`.
-fn read(words: &[OsString]) -> Asked<'_> {
+fn read(words: &[Vec<u8>]) -> Asked<'_> {
     if requested(words) {
         return Asked::HelpOfHelp;
     }
     let end_of_options = words
         .iter()
-        .position(|word| word.as_bytes() == b"--")
+        .position(|word| word.as_slice() == b"--")
         .unwrap_or(words.len());
     let (before, after) = words.split_at(end_of_options);
     let mut commands = before.iter().chain(after.iter().skip(1));
     match (commands.next(), commands.next()) {
         (None, _) => Asked::General,
-        (Some(command), None) if !command.as_bytes().starts_with(b"-") => Asked::About(command),
+        (Some(command), None) if !command.as_slice().starts_with(b"-") => Asked::About(command),
         _ => Asked::Misused,
     }
 }
 
 /// The `help` command. It never locates the workspace: its texts are embedded, and
 /// `git help` needs no repository.
-pub fn run(words: &[OsString]) -> Outcome {
+pub fn run(words: &[Vec<u8>]) -> Outcome {
     match read(words) {
         Asked::General => general(),
         Asked::HelpOfHelp => outcome::print(HELP.as_bytes(), Outcome::Answered),
@@ -167,13 +164,13 @@ pub fn run(words: &[OsString]) -> Outcome {
     }
 }
 
-fn about(command: &OsStr) -> Outcome {
-    if let Some(text) = text_of(command.as_bytes()) {
+fn about(command: &[u8]) -> Outcome {
+    if let Some(text) = text_of(command) {
         return outcome::print(text.as_bytes(), Outcome::Answered);
     }
     // Any other word is Git's to explain, with the streams it needs for its viewer and
     // with its own end.
-    match Run::public([OsStr::new("help"), command]).start() {
+    match Run::public(["help".as_bytes(), command]).start() {
         Ok(run) => Outcome::Git(run.end),
         Err(failure) => outcome::not_started(failure),
     }
@@ -186,24 +183,24 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    fn asked<'w>(words: &'w [OsString]) -> Asked<'w> {
+    fn asked<'w>(words: &'w [Vec<u8>]) -> Asked<'w> {
         read(words)
     }
 
-    fn words(words: &[&str]) -> Vec<OsString> {
-        words.iter().map(OsString::from).collect()
+    fn words(words: &[&str]) -> Vec<Vec<u8>> {
+        words.iter().map(|word| word.as_bytes().to_vec()).collect()
     }
 
     #[test]
     fn help_reads_one_command_at_most_and_no_option() {
         assert_eq!(asked(&words(&[])), Asked::General);
         assert_eq!(asked(&words(&["--"])), Asked::General);
-        assert_eq!(asked(&words(&["log"])), Asked::About(OsStr::new("log")));
+        assert_eq!(asked(&words(&["log"])), Asked::About("log".as_bytes()));
         assert_eq!(
             asked(&words(&["--", "log"])),
-            Asked::About(OsStr::new("log"))
+            Asked::About("log".as_bytes())
         );
-        assert_eq!(asked(&words(&[""])), Asked::About(OsStr::new("")));
+        assert_eq!(asked(&words(&[""])), Asked::About("".as_bytes()));
         for misuse in [
             &["log", "show"][..],
             &["--all"],

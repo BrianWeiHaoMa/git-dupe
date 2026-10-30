@@ -1,8 +1,8 @@
 //! The one site on disk: what it writes, what it leaves, and where it writes nothing.
 
 use super::*;
+use crate::links_and_modes::{identity, mode, permissions_case, symlink};
 use std::fs::TryLockError;
-use std::os::unix::fs::{MetadataExt, symlink};
 
 mod lock;
 mod stale;
@@ -63,15 +63,16 @@ impl Drop for Scratch {
     }
 }
 
-/// The device and inode of what stands at `path`, by `lstat`: the same pair after a
-/// command is the same file, never one renamed over it.
-fn identity(path: &Path) -> (u64, u64) {
-    let found = fs::symlink_metadata(path).unwrap();
-    (found.dev(), found.ino())
+/// `path` given the permissions distinct from a fresh file's, where this platform has them.
+fn given_the_case(path: impl AsRef<Path>) {
+    if let Some(permissions) = permissions_case() {
+        fs::set_permissions(path, permissions).unwrap();
+    }
 }
 
-fn mode(path: &Path) -> u32 {
-    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o7777
+/// The mode of a file given them, where this platform has modes.
+fn case_mode() -> Option<u32> {
+    permissions_case().map(|_| 0o640)
 }
 
 /// The user's text and another worktree's region, as another worktree's command leaves
@@ -135,7 +136,7 @@ fn a_replacement_that_cannot_write_leaves_the_file_as_it_was() {
     let workspace = scratch.workspace();
     fs::remove_dir(scratch.0.join(".git/dupe")).unwrap();
     fs::write(scratch.exclude(), FOREIGN).unwrap();
-    fs::set_permissions(scratch.exclude(), fs::Permissions::from_mode(0o640)).unwrap();
+    given_the_case(scratch.exclude());
     let before = identity(&scratch.exclude());
 
     let warnings = replace(&workspace, &paths(&[b".gitdupe"])).warnings;
@@ -147,7 +148,7 @@ fn a_replacement_that_cannot_write_leaves_the_file_as_it_was() {
     );
     assert_eq!(fs::read(scratch.exclude()).unwrap(), FOREIGN);
     assert_eq!(identity(&scratch.exclude()), before);
-    assert_eq!(mode(&scratch.exclude()), 0o640);
+    assert_eq!(mode(&scratch.exclude()), case_mode());
     assert!(scratch.lock_is_free());
 }
 
@@ -156,7 +157,7 @@ fn a_region_is_appended_after_the_others_and_an_equal_composition_writes_nothing
     let scratch = Scratch::new("equal");
     let workspace = scratch.workspace();
     fs::write(scratch.exclude(), FOREIGN).unwrap();
-    fs::set_permissions(scratch.exclude(), fs::Permissions::from_mode(0o640)).unwrap();
+    given_the_case(scratch.exclude());
     let region = paths(&[b".gitdupe", b"notes"]);
 
     assert!(replace(&workspace, &region).warnings.is_empty());
@@ -166,7 +167,7 @@ fn a_region_is_appended_after_the_others_and_an_equal_composition_writes_nothing
     ]
     .concat();
     assert_eq!(fs::read(scratch.exclude()).unwrap(), composed);
-    assert_eq!(mode(&scratch.exclude()), 0o640);
+    assert_eq!(mode(&scratch.exclude()), case_mode());
 
     // The same region again: the file is the one already there, not a copy of it.
     let written = identity(&scratch.exclude());
@@ -245,7 +246,7 @@ fn a_link_at_the_file_becomes_a_regular_file_even_when_its_target_holds_the_comp
     let composed = b"mine\n# BEGIN git-dupe\n/.gitdupe\n# END git-dupe\n";
     let target = scratch.0.join("shared-exclude");
     fs::write(&target, composed).unwrap();
-    fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+    given_the_case(&target);
     let target_before = identity(&target);
     symlink(&target, scratch.exclude()).unwrap();
 
@@ -255,7 +256,7 @@ fn a_link_at_the_file_becomes_a_regular_file_even_when_its_target_holds_the_comp
     assert!(warnings[0].ends_with(b", and its target is untouched"));
     assert!(fs::symlink_metadata(scratch.exclude()).unwrap().is_file());
     assert_eq!(fs::read(scratch.exclude()).unwrap(), composed);
-    assert_eq!(mode(&scratch.exclude()), 0o600);
+    assert_eq!(mode(&scratch.exclude()), case_mode());
     assert_eq!(fs::read(&target).unwrap(), composed);
     assert_eq!(identity(&target), target_before);
 }

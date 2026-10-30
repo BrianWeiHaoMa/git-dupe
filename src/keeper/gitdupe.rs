@@ -9,18 +9,22 @@
 //! 1-based number. Every other byte, a carriage return included, is part of the path.
 //! The bytes read are kept with their source, for `hide` and `unhide` to edit.
 
-use std::ffi::OsStr;
-use std::fs;
+use std::fs::{self, Permissions};
 use std::io;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 
+use crate::bytes;
 use crate::guards::operand::{self, Cleaned};
 use crate::runner::locate::Workspace;
 use crate::runner::{End, Run};
 
 /// The name of the file, at the root.
 pub const NAME: &[u8] = b".gitdupe";
+
+/// The file's path, at the root.
+pub fn file(workspace: &Workspace) -> PathBuf {
+    bytes::under(workspace.root(), NAME).expect("`.gitdupe` is a name")
+}
 
 /// What `.gitdupe` lists, and the bytes it was read from.
 pub struct Listed {
@@ -36,9 +40,9 @@ pub struct Listed {
 /// Where the bytes of `.gitdupe` came from.
 pub enum Source {
     /// A regular file at the root, with its permissions.
-    File(u32),
+    File(Permissions),
     /// A symbolic link at the root, read through, with its target's permissions.
-    Link(u32),
+    Link(Permissions),
     /// Nothing at the root: the staged version, or nothing when none is staged.
     Absent,
     /// Something at the root that cannot be read as a file, and why: it lists nothing.
@@ -65,18 +69,20 @@ pub fn on_disk(workspace: &Workspace) -> Listed {
 /// `.gitdupe` read from the file at the root, through a link, and from `absent` where
 /// nothing stands there.
 fn reading(workspace: &Workspace, absent: impl FnOnce(&Workspace) -> Vec<u8>) -> Listed {
-    let file = workspace.root().join(OsStr::from_bytes(NAME));
+    let file = file(workspace);
     let (bytes, source) = match fs::symlink_metadata(&file) {
         Err(cause) if cause.kind() == io::ErrorKind::NotFound => {
             (absent(workspace), Source::Absent)
         }
         Err(cause) => return unreadable(cause),
         Ok(found) => {
-            let read = fs::metadata(&file)
-                .and_then(|target| Ok((fs::read(&file)?, target.permissions().mode())));
+            let read =
+                fs::metadata(&file).and_then(|target| Ok((fs::read(&file)?, target.permissions())));
             match read {
-                Ok((bytes, mode)) if found.file_type().is_symlink() => (bytes, Source::Link(mode)),
-                Ok((bytes, mode)) => (bytes, Source::File(mode)),
+                Ok((bytes, permissions)) if found.file_type().is_symlink() => {
+                    (bytes, Source::Link(permissions))
+                }
+                Ok((bytes, permissions)) => (bytes, Source::File(permissions)),
                 Err(cause) => return unreadable(cause),
             }
         }

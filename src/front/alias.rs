@@ -33,8 +33,6 @@
 //!   run's own command word.
 
 use std::collections::BTreeSet;
-use std::ffi::OsString;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 use super::commands::{self, Command};
 use super::outcome::{self, Outcome};
@@ -54,13 +52,13 @@ pub enum Resolved {
     /// the chain they begin with runs these: the chain's last command word, then what each
     /// expansion left after its command word, the innermost first, then the words typed
     /// after the alias.
-    PassThroughReaching(Vec<OsString>),
+    PassThroughReaching(Vec<Vec<u8>>),
     /// The command of F6 a chain reached: its words, the command's own word first, and the
     /// global options the chain's expansions began with, in order.
     Dispatch {
         command: Command,
-        words: Vec<OsString>,
-        prefix: Vec<OsString>,
+        words: Vec<Vec<u8>>,
+        prefix: Vec<Vec<u8>>,
     },
     /// A word the listed releases read differently, one of whose chains reaches a command of
     /// F6: the usage error G19 names, naming it.
@@ -69,7 +67,7 @@ pub enum Resolved {
 
 /// Resolves `words`, the typed word first, with its questions asked `against` the
 /// repository the command's run would be made against.
-pub fn resolve(words: &[OsString], against: Against) -> Result<Resolved, Outcome> {
+pub fn resolve(words: &[Vec<u8>], against: Against) -> Result<Resolved, Outcome> {
     resolve_with(words, &mut Asked { against })
 }
 
@@ -106,7 +104,7 @@ type Record = (Vec<u8>, Option<Vec<u8>>);
 trait Questions {
     type Failure;
     /// Every alias record, in configuration order, under `prefix`.
-    fn aliases(&mut self, prefix: &[OsString]) -> Result<Vec<Record>, Self::Failure>;
+    fn aliases(&mut self, prefix: &[Vec<u8>]) -> Result<Vec<Record>, Self::Failure>;
     /// Every command Git runs before it consults an alias of the same name.
     fn commands(&mut self) -> Result<BTreeSet<Vec<u8>>, Self::Failure>;
 }
@@ -121,7 +119,7 @@ impl Questions for Asked<'_> {
 
     /// Exit 1 is "no alias"; any other failure ends the command, Git's message already on
     /// standard error.
-    fn aliases(&mut self, prefix: &[OsString]) -> Result<Vec<Record>, Outcome> {
+    fn aliases(&mut self, prefix: &[Vec<u8>]) -> Result<Vec<Record>, Outcome> {
         let found = Run::against(self.against, ["config", "-z", "--get-regexp", r"^alias\."])
             .prefixed(prefix)
             .capture_output()
@@ -154,7 +152,7 @@ impl Questions for Asked<'_> {
 }
 
 fn resolve_with<Q: Questions>(
-    words: &[OsString],
+    words: &[Vec<u8>],
     questions: &mut Q,
 ) -> Result<Resolved, Q::Failure> {
     let (typed, after) = words.split_first().expect("a first word");
@@ -162,7 +160,7 @@ fn resolve_with<Q: Questions>(
         questions,
         listed: None,
     };
-    let mut word = typed.as_bytes().to_vec();
+    let mut word = typed.clone();
     let mut prefix = Vec::new();
     let mut seen = Vec::new();
     // The words each expansion left after its command word, outermost first.
@@ -185,7 +183,7 @@ fn resolve_with<Q: Questions>(
             return Ok(Resolved::PassThrough);
         };
         let carried = link.options.is_empty();
-        prefix.extend(link.options.into_iter().map(OsString::from_vec));
+        prefix.extend(link.options);
         if let Some(command) = commands::named(&link.command) {
             // Options no lookup has carried yet are evaluated by one that carries them
             // before the command is read, which may answer without running Git: Git
@@ -212,18 +210,17 @@ fn resolve_with<Q: Questions>(
 /// `left`, what each expansion left after its command word, the outermost first, then
 /// `after`, the words typed after the alias. Git puts each expansion in front of what
 /// remains, so the innermost expansion's words come first.
-fn expanded(word: Vec<u8>, left: Vec<Vec<Vec<u8>>>, after: &[OsString]) -> Vec<OsString> {
+fn expanded(word: Vec<u8>, left: Vec<Vec<Vec<u8>>>, after: &[Vec<u8>]) -> Vec<Vec<u8>> {
     [word]
         .into_iter()
         .chain(left.into_iter().rev().flatten())
-        .map(OsString::from_vec)
         .chain(after.iter().cloned())
         .collect()
 }
 
 /// The words as received passing through at `word`: as typed where no link was followed,
 /// and otherwise with the words the chain reached.
-fn passed_through(word: Vec<u8>, left: Vec<Vec<Vec<u8>>>, after: &[OsString]) -> Resolved {
+fn passed_through(word: Vec<u8>, left: Vec<Vec<Vec<u8>>>, after: &[Vec<u8>]) -> Resolved {
     if left.is_empty() {
         Resolved::PassThrough
     } else {
@@ -255,7 +252,7 @@ impl<Q: Questions> Resolver<'_, Q> {
     /// case, the word followed by `.command`, or `.` and the word without regard to case
     /// (S11). The word is plainly aliased when it holds no dot and every record of it has
     /// the first form.
-    fn reading(&mut self, word: &[u8], prefix: &[OsString]) -> Result<Reading, Q::Failure> {
+    fn reading(&mut self, word: &[u8], prefix: &[Vec<u8>]) -> Result<Reading, Q::Failure> {
         let records = self.questions.aliases(prefix)?;
         let command = [word, b".command"].concat();
         let of_word: Vec<&Record> = records
@@ -304,7 +301,7 @@ impl<Q: Questions> Resolver<'_, Q> {
     fn any_reaches(
         &mut self,
         values: &[Option<Vec<u8>>],
-        prefix: &[OsString],
+        prefix: &[Vec<u8>],
         seen: &[Vec<u8>],
     ) -> Result<bool, Q::Failure> {
         for value in values {
@@ -318,7 +315,7 @@ impl<Q: Questions> Resolver<'_, Q> {
     fn reaches(
         &mut self,
         value: Option<&[u8]>,
-        prefix: &[OsString],
+        prefix: &[Vec<u8>],
         seen: &[Vec<u8>],
     ) -> Result<bool, Q::Failure> {
         let Some(link) = value.and_then(Link::of) else {
@@ -330,11 +327,7 @@ impl<Q: Questions> Resolver<'_, Q> {
         if seen.contains(&link.command) {
             return Ok(false);
         }
-        let prefix: Vec<OsString> = prefix
-            .iter()
-            .cloned()
-            .chain(link.options.into_iter().map(OsString::from_vec))
-            .collect();
+        let prefix: Vec<Vec<u8>> = prefix.iter().cloned().chain(link.options).collect();
         let values = match self.reading(&link.command, &prefix)? {
             Reading::Command | Reading::Shell => return Ok(false),
             Reading::Plain(value) => vec![value],

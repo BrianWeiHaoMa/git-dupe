@@ -241,8 +241,8 @@ mod tests {
         for directory in ["notes", "mine", "kept/sub", "elsewhere/inner"] {
             fs::create_dir_all(root.join(directory)).unwrap();
         }
-        std::os::unix::fs::symlink(root.join("elsewhere"), root.join("link")).unwrap();
-        std::os::unix::fs::symlink(root.join("nothing"), root.join("dangling")).unwrap();
+        crate::links_and_modes::symlink(root.join("elsewhere"), root.join("link")).unwrap();
+        crate::links_and_modes::symlink(root.join("nothing"), root.join("dangling")).unwrap();
         fs::write(root.join("released"), b"").unwrap();
         let regions = [region(
             Owner::Main,

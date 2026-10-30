@@ -1,7 +1,7 @@
 use super::*;
 
-fn words(words: &[&str]) -> Vec<OsString> {
-    words.iter().map(OsString::from).collect()
+fn words(words: &[&str]) -> Vec<Vec<u8>> {
+    words.iter().map(|word| word.as_bytes().to_vec()).collect()
 }
 
 fn word_of(words: &[&str]) -> Option<&'static [u8]> {

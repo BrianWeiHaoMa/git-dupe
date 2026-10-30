@@ -7,25 +7,25 @@
 
 use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, Write};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 /// How many names `fresh` tries before giving up.
 const NAMES: u32 = 100;
 
-/// Replaces `destination` with `content`, the fresh file given `mode` when the original
-/// had one and the mode a new file gets otherwise. On failure the destination is as it
+/// Replaces `destination` with `content`, the fresh file given `permissions`, the
+/// original's, when it had some, which on Windows are its read-only attribute alone, and
+/// otherwise those a new file gets. On failure the destination is as it
 /// was and the fresh file, when one was made, is removed again; the cause is returned for
 /// the caller to report.
 pub fn whole(
     private_directory: &Path,
     destination: &Path,
     content: &[u8],
-    mode: Option<u32>,
+    permissions: Option<Permissions>,
 ) -> io::Result<()> {
     let (fresh, mut file) = fresh(private_directory)?;
-    let written = file.write_all(content).and_then(|()| match mode {
-        Some(mode) => file.set_permissions(Permissions::from_mode(mode & 0o7777)),
+    let written = file.write_all(content).and_then(|()| match permissions {
+        Some(permissions) => file.set_permissions(permissions),
         None => Ok(()),
     });
     drop(file);
@@ -61,7 +61,7 @@ fn fresh(private_directory: &Path) -> io::Result<(PathBuf, File)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
+    use crate::links_and_modes::{mode, permissions_case, symlink};
     use std::path::PathBuf;
 
     /// A directory of the test's own below the system's temporary one, removed after.
@@ -83,12 +83,8 @@ mod tests {
         }
     }
 
-    fn mode(path: &Path) -> u32 {
-        fs::symlink_metadata(path).unwrap().permissions().mode() & 0o7777
-    }
-
     #[test]
-    fn the_destination_is_replaced_with_the_given_mode_and_nothing_is_left_behind() {
+    fn the_destination_is_replaced_with_the_given_permissions_and_nothing_is_left_behind() {
         let scratch = Scratch::new("mode");
         let destination = scratch.0.join("exclude");
         fs::write(&destination, "old\n").unwrap();
@@ -96,11 +92,11 @@ mod tests {
             &scratch.0.join("private"),
             &destination,
             b"new\n",
-            Some(0o600),
+            permissions_case(),
         )
         .unwrap();
         assert_eq!(fs::read(&destination).unwrap(), b"new\n");
-        assert_eq!(mode(&destination), 0o600);
+        assert_eq!(mode(&destination), permissions_case().map(|_| 0o640));
         assert_eq!(fs::read_dir(scratch.0.join("private")).unwrap().count(), 0);
     }
 

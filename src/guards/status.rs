@@ -5,7 +5,6 @@
 //! and nothing is asked of Git here.
 
 use std::collections::BTreeSet;
-use std::ffi::OsString;
 
 use super::operand;
 use super::pathspec;
@@ -19,7 +18,7 @@ use super::scope;
 /// submodule's checkout among them, the path and everything below it: Git's walk reports
 /// such a directory as one untracked entry at the path, which the path alone does not
 /// leave out, and G12 lists none of what stands there (S8).
-pub fn excluded(path: &[u8], nested_repository: bool) -> OsString {
+pub fn excluded(path: &[u8], nested_repository: bool) -> Vec<u8> {
     if nested_repository {
         pathspec::top_literal_exclude(path)
     } else {

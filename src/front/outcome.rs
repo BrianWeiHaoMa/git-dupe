@@ -4,11 +4,11 @@
 //! how it answers, refuses, and reports a usage error; each writes and returns.
 
 use std::io::{self, Write};
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use super::lines::{self, Level};
 use crate::attachment::{Refusal, Unresolved};
+use crate::bytes;
 use crate::keeper::Failed;
 use crate::runner::locate::Workspace;
 use crate::runner::{End, Failure};
@@ -83,13 +83,9 @@ pub fn refuse_to_attach(workspace: &Workspace, refusal: Refusal) -> Outcome {
             .to_vec(),
         Refusal::NotUnderWorktrees => [
             &b"the Git directory of this linked worktree, "[..],
-            workspace.git_directory().as_os_str().as_bytes(),
+            bytes::of(workspace.git_directory().as_os_str()),
             b", is not directly in ",
-            workspace
-                .common_directory()
-                .join("worktrees")
-                .as_os_str()
-                .as_bytes(),
+            bytes::of(workspace.common_directory().join("worktrees").as_os_str()),
             b", where 'git worktree add' makes one; git-dupe attaches only such a linked \
               worktree",
         ]
@@ -106,7 +102,7 @@ pub fn refuse_to_attach(workspace: &Workspace, refusal: Refusal) -> Outcome {
 /// naming it, before anything was run or written through it or in its place.
 pub fn obstructed(path: &Path) -> Outcome {
     let line = [
-        path.as_os_str().as_bytes(),
+        bytes::of(path.as_os_str()),
         b" is not a directory, and a private repository goes there; git-dupe runs and \
           writes nothing through it: move it away first",
     ]
@@ -119,7 +115,7 @@ pub fn obstructed(path: &Path) -> Outcome {
 pub fn unresolved(unresolved: &Unresolved) -> Outcome {
     let line = [
         &b"cannot resolve "[..],
-        unresolved.path.as_os_str().as_bytes(),
+        bytes::of(unresolved.path.as_os_str()),
         b" to record the private repository's working tree: ",
         unresolved.cause.to_string().as_bytes(),
     ]
@@ -142,6 +138,13 @@ pub fn list_too_long(count: usize) -> Outcome {
 pub fn not_started(failure: Failure) -> Outcome {
     match failure {
         Failure::TooLong => refuse(b"the command line for Git is too long to run"),
+        Failure::NotAName(path) => refuse(
+            &[
+                &lines::typed(&path)[..],
+                b" cannot be named on a command line here: it is not valid UTF-8",
+            ]
+            .concat(),
+        ),
         Failure::Other(cause) => refuse(format!("cannot run git: {cause}").as_bytes()),
     }
 }
@@ -176,5 +179,13 @@ mod tests {
         assert_eq!(Outcome::UsageError.status(), 129);
         assert_eq!(Outcome::Git(End::Code(16)).status(), 16);
         assert_eq!(Outcome::Git(End::Signal(15)).status(), 143);
+    }
+
+    #[test]
+    fn a_word_that_is_no_name_is_a_refusal() {
+        let outcome = not_started(Failure::NotAName(b"notes/\xff".to_vec()));
+        assert!(matches!(outcome, Outcome::Refused));
+        let failed = failed(Failed::NotStarted(Failure::NotAName(b"x".to_vec())));
+        assert!(matches!(failed, Outcome::Refused));
     }
 }

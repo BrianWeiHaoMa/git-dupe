@@ -13,9 +13,7 @@
 //! initial branch, and `--template=` when `HEAD` exists, so that completing a killed
 //! `init` copies no sample hook into it. Its standard output is Git's own line.
 
-use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
 
 use super::refusals::{self, Refusal};
@@ -74,7 +72,7 @@ impl From<NotAttached> for NotInitialized {
 
 /// Attaches the workspace, or completes an attachment a killed `init` left undone, with
 /// `branch` as the initial branch when Git's `init` runs and one was given.
-pub fn init(workspace: &Workspace, branch: Option<&OsStr>) -> Result<Initialized, NotInitialized> {
+pub fn init(workspace: &Workspace, branch: Option<&[u8]>) -> Result<Initialized, NotInitialized> {
     if let Some(refusal) = refusals::refusal(workspace)? {
         return Err(NotInitialized::Refused(refusal));
     }
@@ -85,7 +83,7 @@ pub fn init(workspace: &Workspace, branch: Option<&OsStr>) -> Result<Initialized
 /// then the settings, each where it is missing.
 pub(super) fn attach(
     workspace: &Workspace,
-    branch: Option<&OsStr>,
+    branch: Option<&[u8]>,
 ) -> Result<Initialized, NotAttached> {
     let private = workspace.private_directory();
     let work_tree = settings::relative_work_tree(workspace).map_err(NotAttached::Unresolved)?;
@@ -117,16 +115,14 @@ fn exists(path: &Path) -> bool {
 
 /// Git's `init` in a private run, which names the directory through `GIT_DIR`: given as
 /// an operand, Git would make a `.git` inside it.
-fn make(workspace: &Workspace, private: &Path, branch: Option<&OsStr>) -> Result<(), Failed> {
+fn make(workspace: &Workspace, private: &Path, branch: Option<&[u8]>) -> Result<(), Failed> {
     let branch = match branch {
-        Some(branch) => Some(branch.to_owned()),
+        Some(branch) => Some(branch.to_vec()),
         None => public_branch()?,
     };
-    let mut words = vec![OsString::from("init")];
+    let mut words: Vec<Vec<u8>> = vec!["init".into()];
     if let Some(branch) = branch {
-        let mut option = OsString::from("--initial-branch=");
-        option.push(branch);
-        words.push(option);
+        words.push([b"--initial-branch=", &branch[..]].concat());
     }
     if exists(&private.join("HEAD")) {
         words.push("--template=".into());
@@ -140,8 +136,8 @@ fn make(workspace: &Workspace, private: &Path, branch: Option<&OsStr>) -> Result
 
 /// The branch the public repository's `HEAD` names, from one public
 /// `symbolic-ref -q HEAD`, which prints nothing and exits 1 when `HEAD` is detached.
-fn public_branch() -> Result<Option<OsString>, Failed> {
+fn public_branch() -> Result<Option<Vec<u8>>, Failed> {
     let run = Run::public(["symbolic-ref", "-q", "HEAD"]).capture_output();
     let answer = step(run, &[0, 1])?;
-    Ok(records::branch_of(&answer.stdout).map(|branch| OsString::from_vec(branch.to_vec())))
+    Ok(records::branch_of(&answer.stdout).map(<[u8]>::to_vec))
 }

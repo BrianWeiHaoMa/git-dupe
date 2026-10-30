@@ -13,15 +13,12 @@ const TABLE: [Entry; 9] = [
     Entry::long("no-renames", Value::None),
 ];
 
-fn words(words: &[&[u8]]) -> Vec<OsString> {
-    words
-        .iter()
-        .map(|word| OsStr::from_bytes(word).to_owned())
-        .collect()
+fn words(words: &[&[u8]]) -> Vec<Vec<u8>> {
+    words.iter().map(|word| word.to_vec()).collect()
 }
 
-fn os(word: &[u8]) -> &OsStr {
-    OsStr::from_bytes(word)
+fn os(word: &[u8]) -> &[u8] {
+    word
 }
 
 /// The long names of the entries the words spelled, in order.
@@ -80,7 +77,7 @@ fn options_and_operands_keep_their_order_and_their_spelling() {
         let Reading::Read(separate) = read(&TABLE, &given) else {
             panic!()
         };
-        assert!(separate.options().eq([os(given[0].as_bytes())]));
+        assert!(separate.options().eq([os(&given[0])]));
         assert_eq!(separate.operands, [os(b"normal")]);
         assert!(separate.spells(untracked));
     }
@@ -189,14 +186,14 @@ const NEXT: [Entry; 8] = [
 ];
 
 fn read_next(given: &[&[u8]]) -> Read<'static> {
-    let given: &'static [OsString] = Box::leak(words(given).into_boxed_slice());
+    let given: &'static [Vec<u8>] = Box::leak(words(given).into_boxed_slice());
     match read(&NEXT, given) {
         Reading::Read(read) => read,
         other => panic!("{other:?}"),
     }
 }
 
-fn all_os(words: &[&[u8]]) -> Vec<OsString> {
+fn all_os(words: &[&[u8]]) -> Vec<Vec<u8>> {
     words.iter().map(|word| os(word).to_owned()).collect()
 }
 
