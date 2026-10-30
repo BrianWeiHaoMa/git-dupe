@@ -29,6 +29,17 @@ pub fn symlink(target: impl AsRef<Path>, at: impl AsRef<Path>) -> io::Result<()>
     }
 }
 
+/// `path`, which begins with `/`, spelled as this platform calls absolute: as it stands, or
+/// on a drive on Windows, where a root and no drive is not absolute.
+pub fn at_the_top(path: impl AsRef<[u8]>) -> Vec<u8> {
+    let drive: &[u8] = if Path::new("/").is_absolute() {
+        b""
+    } else {
+        b"C:"
+    };
+    [drive, path.as_ref()].concat()
+}
+
 /// Removes the symbolic link at `at`, which on Windows is a directory's where its target
 /// was one.
 pub fn remove_link(at: impl AsRef<Path>) -> io::Result<()> {

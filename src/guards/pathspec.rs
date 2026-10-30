@@ -1,6 +1,7 @@
 //! The one constructor of the pathspecs git-dupe writes.
 
 use super::quoted::shell_word;
+use crate::bytes;
 
 /// `:(top,literal)<path>`: exactly the root-relative `path`, and everything below it,
 /// whatever bytes it holds, from any directory.
@@ -16,13 +17,23 @@ pub fn top_literal_exclude(path: &[u8]) -> Vec<u8> {
 
 /// `:(top,glob,exclude)<exact>`, for `status` alone: the non-empty `path` kept out, and
 /// nothing below it. `<exact>` is the path with `\` before each byte a glob reads, and its
-/// last byte as the bracket expression `[\<byte>\<newline>]`, which `wildmatch` matches
-/// against that byte or a newline and never as a leading directory. Git first compares
-/// the pattern's raw bytes with each path, and leaves out a path spelled as the pattern
-/// and everything below it; the newline makes that spelling no path a workspace holds
-/// (E4, S4).
+/// last ASCII byte other than `/`, or its last byte where it has none, as the bracket
+/// expression `[\<byte>\<newline>]`, which `wildmatch` matches against that byte or a
+/// newline and never as a leading directory. Git first compares the pattern's raw bytes
+/// with each path, and leaves out a path spelled as the pattern and everything below it;
+/// the newline makes that spelling no path a workspace holds (E4, S4).
+///
+/// The bracket stands on an ASCII byte because a Windows command line carries no part of
+/// a character (S20). Where it would have to stand on one, the word is no name there, and
+/// `top_literal_exclude`'s form stands in, which leaves out what lies below the path too
+/// (`Holds/G12`); on Linux and macOS, where every byte string is a name, it never does.
 pub fn top_glob_exclude_exact(path: &[u8]) -> Vec<u8> {
-    let (last, before) = path.split_last().expect("a path is never empty");
+    let bracketed = path
+        .iter()
+        .rposition(|&byte| byte.is_ascii() && byte != b'/')
+        .unwrap_or(path.len().saturating_sub(1));
+    let (before, rest) = path.split_at(bracketed);
+    let (byte, after) = rest.split_first().expect("a path is never empty");
     let mut written = b":(top,glob,exclude)".to_vec();
     for &byte in before {
         if matches!(byte, b'\\' | b'*' | b'?' | b'[') {
@@ -30,8 +41,14 @@ pub fn top_glob_exclude_exact(path: &[u8]) -> Vec<u8> {
         }
         written.push(byte);
     }
-    written.extend([b'[', b'\\', *last, b'\n', b']']);
-    written
+    written.extend([b'[', b'\\', *byte, b'\n', b']']);
+    // What follows the bracket is `/` and bytes above ASCII, none of which a glob reads.
+    written.extend_from_slice(after);
+    if bytes::name(&written).is_some() {
+        written
+    } else {
+        top_literal_exclude(path)
+    }
 }
 
 /// The command a line offers to be typed, from the root, to run Git's `words` on the
@@ -61,6 +78,7 @@ pub fn offered_command(words: &[u8], path: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::links_and_modes::names_every_byte_string;
 
     #[test]
     fn an_offered_pathspec_is_literal_only_where_git_would_read_it_otherwise() {
@@ -120,8 +138,8 @@ mod tests {
         );
         assert_eq!(top_glob_exclude_exact(b"h"), b":(top,glob,exclude)[\\h\n]");
         assert_eq!(
-            top_glob_exclude_exact(b"a\\b*c?d[e]f\xe9 :!^-"),
-            b":(top,glob,exclude)a\\\\b\\*c\\?d\\[e]f\xe9 :!^[\\-\n]"
+            top_glob_exclude_exact(b"a\\b*c?d[e]f\xc3\xa9 :!^-"),
+            b":(top,glob,exclude)a\\\\b\\*c\\?d\\[e]f\xc3\xa9 :!^[\\-\n]"
         );
         // A last byte a bracket expression would otherwise read: escaped inside it.
         for (last, bracketed) in [
@@ -135,6 +153,42 @@ mod tests {
         ] {
             let written = top_glob_exclude_exact(&[b'x', last]);
             assert_eq!(written, [&b":(top,glob,exclude)x"[..], bracketed].concat());
+        }
+    }
+
+    #[test]
+    fn the_bracket_stands_on_the_last_ascii_byte_and_what_follows_it_is_written_as_it_is() {
+        assert_eq!(
+            top_glob_exclude_exact(b"notes/caf\xc3\xa9"),
+            b":(top,glob,exclude)notes/ca[\\f\n]\xc3\xa9"
+        );
+        // A `/` is no byte to bracket: it would match no separator.
+        assert_eq!(
+            top_glob_exclude_exact(b"notes/\xc3\xa9"),
+            b":(top,glob,exclude)note[\\s\n]/\xc3\xa9"
+        );
+        assert_eq!(
+            top_glob_exclude_exact(b"a*\xc3\xa9/\xc3\xa9"),
+            b":(top,glob,exclude)a[\\*\n]\xc3\xa9/\xc3\xa9"
+        );
+        assert_eq!(
+            top_glob_exclude_exact(b"\xc3\xa9/x\xc3\xa9"),
+            b":(top,glob,exclude)\xc3\xa9/[\\x\n]\xc3\xa9"
+        );
+    }
+
+    #[test]
+    fn a_path_with_no_ascii_byte_is_bracketed_only_where_part_of_a_character_is_a_name() {
+        for (path, split) in [
+            (&b"\xc3\xa9"[..], &b"\xc3[\\\xa9\n]"[..]),
+            (b"\xc3\xa9/\xc3\xa9", b"\xc3\xa9/\xc3[\\\xa9\n]"),
+        ] {
+            let expected = if names_every_byte_string() {
+                [&b":(top,glob,exclude)"[..], split].concat()
+            } else {
+                top_literal_exclude(path)
+            };
+            assert_eq!(top_glob_exclude_exact(path), expected);
         }
     }
 }

@@ -17,7 +17,9 @@ use super::scope;
 /// the path the two leave out the same. Where a nested repository stands at the path, a
 /// submodule's checkout among them, the path and everything below it: Git's walk reports
 /// such a directory as one untracked entry at the path, which the path alone does not
-/// leave out, and G12 lists none of what stands there (S8).
+/// leave out, and G12 lists none of what stands there (S8). On Windows a path with no ASCII
+/// byte other than `/` has no pathspec for itself alone, and takes the literal form from
+/// `top_glob_exclude_exact` (`Holds/G12`).
 pub fn excluded(path: &[u8], nested_repository: bool) -> Vec<u8> {
     if nested_repository {
         pathspec::top_literal_exclude(path)
@@ -228,6 +230,11 @@ mod tests {
             );
             assert_eq!(excluded(path, true), pathspec::top_literal_exclude(path));
         }
+        // A character at the end of the path keeps the path alone out, as an ASCII byte does.
+        assert_eq!(
+            excluded(b"notes/caf\xc3\xa9", false),
+            b":(top,glob,exclude)notes/ca[\\f\n]\xc3\xa9"
+        );
     }
 
     #[test]

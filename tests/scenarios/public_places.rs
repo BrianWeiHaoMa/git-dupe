@@ -7,8 +7,8 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
-    Everything, MANY_URLS, PROJECT_URL, Scenario, Transfer, Tree, refusal, text, unchanged,
-    under_each_release,
+    End, Everything, MANY_URLS, PROJECT_URL, Scenario, Transfer, Tree, holds, refusal, text,
+    unchanged, under_each_release,
 };
 
 fn refused(s: &Scenario, t: &Transfer, from: &Path, word: &str, place: &str) {
@@ -378,5 +378,30 @@ fn relative_words_outside_also_use_the_users_directory() {
             .variable("GIT_WORK_TREE", &t.root)
             .succeeds();
         configured(s, &t, "leak", word);
+    });
+}
+
+/// A one-letter host is a drive to Git for Windows, so on every platform what follows the
+/// colon is also a relative path, read from the root, while one that names no place runs
+/// as Git, whose transport is its own failure here (G18, S13).
+#[test]
+fn a_one_letter_host_names_a_place_through_the_path_after_its_colon() {
+    under_each_release(|s| {
+        let t = s.transfer_workspace("workspace");
+        let up = format!("x:../{}", t.root.file_name().unwrap().to_str().unwrap());
+        for words in [["push", "x:.", "main:leak"], ["fetch", &up, "main:leak"]] {
+            let before: Everything = t.everything();
+            let output = s.git(["dupe"].iter().chain(&words)).from(&t.root).run();
+            refusal(&output, &[b"git dupe git", text(&t.root).as_bytes()]);
+            before.unchanged();
+        }
+        let before: Everything = t.everything();
+        let output = s
+            .git(["dupe", "push", "x:elsewhere", "main:leak"])
+            .from(&t.root)
+            .run();
+        assert_ne!(output.end, End::Code(0), "{output:?}");
+        assert!(!holds(&output.stderr, b"git dupe git"), "{output:?}");
+        before.unchanged();
     });
 }

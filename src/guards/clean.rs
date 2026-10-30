@@ -18,6 +18,7 @@
 //!   untracked directories without `-d` (S4). Everything is said through `-e`.
 
 use std::collections::BTreeSet;
+use std::path;
 
 use super::operand;
 
@@ -49,6 +50,8 @@ pub fn refused_beyond_a_link<'p>(
 /// is read by its bytes alone, as `operand::literal` reads a word, with `\` added, which
 /// Git reads as an escape in a pathspec it does not take literally: such a word can match
 /// a directory and fail, or leave out, a file below it, which a literal path cannot (S4).
+/// Where `\` is a separator, on Windows, Git reads it as one (S23) and so does this test
+/// (G29): it is no mark there, and the word still reaches Git as typed.
 /// Unlike an operand of `status` or `add` (`operand::rooted_or_literal`), whose path
 /// git-dupe writes itself, the word reaches Git as typed, and Git reads short magic after
 /// `:/`, so that `:/!<path>` is an exclusion; `:/<path>`, `top` magic, is refused with it.
@@ -56,7 +59,8 @@ pub fn refused_beyond_a_link<'p>(
 /// `--literal-pathspecs`, and for `top`, `literal`, or `icase` magic on a word holding
 /// none of the four bytes, the answer is over-inclusive (`Holds/G16`).
 pub fn non_literal(word: &[u8]) -> bool {
-    (operand::literal(word).is_err() && word != b":/") || word.contains(&b'\\')
+    (operand::literal(word).is_err() && word != b":/")
+        || (word.contains(&b'\\') && !path::is_separator('\\'))
 }
 
 /// The outermost proper ancestor below the root of each region path that has one: what

@@ -387,6 +387,25 @@ fn a_privately_tracked_file_is_listed_without_being_called_newly_hidden() {
     });
 }
 
+/// A word holding `\` is a literal path where `\` is a byte of a name, and where it
+/// separates it is written `/` (G29).
+#[test]
+fn a_word_holding_a_backslash_is_read_as_the_platform_reads_it() {
+    under_each_release(|s| {
+        let dir = s.dir().join("project");
+        s.attached_project(&dir);
+        let output = s.git(["dupe", "hide", "a\\b"]).from(&dir).run();
+        assert_eq!(output.end, End::Code(0), "{output:?}");
+        let (listed, rule): (&[u8], &[u8]) = if std::path::is_separator('\\') {
+            (b"a/b\n", b"/a/b")
+        } else {
+            (b"a\\b\n", b"/a\\\\b")
+        };
+        assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), listed);
+        assert!(region_rules(&dir).iter().any(|held| held == rule));
+    });
+}
+
 #[test]
 fn literal_pathspec_settings_do_not_bypass_public_tracking() {
     under_each_release(|s| {

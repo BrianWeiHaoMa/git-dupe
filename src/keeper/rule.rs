@@ -83,9 +83,11 @@ mod tests {
     fn reading_back_is_the_exact_inverse() {
         let plain: [&[u8]; 4] = [b"notes", b".gitdupe", b"a/b", b"x]y"];
         for path in ESCAPED.iter().map(|(path, _)| *path).chain(plain) {
+            // Where `\\` is a separator, no path a region holds has one.
+            let held = (operand::with_slashes(path) == path).then_some(path);
             assert_eq!(
                 path_of(&of(path)).as_deref(),
-                Some(path),
+                held,
                 "{}",
                 path.escape_ascii()
             );

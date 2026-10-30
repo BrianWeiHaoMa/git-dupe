@@ -269,6 +269,49 @@ fn what_stands_where_a_nested_repository_is_publicly_tracked_is_not_listed() {
     });
 }
 
+/// A publicly tracked path that ends in a character is left out alone, its bracket on the
+/// last ASCII byte, so that a draft under a directory standing there still shows, as under
+/// a path that ends in an ASCII byte (G12, S4, S20).
+#[test]
+fn a_publicly_tracked_path_ending_in_a_character_is_left_out_alone() {
+    under_each_release(|s| {
+        let dir = s.dir().join("project");
+        s.attached_project(&dir);
+        write(&dir, "notes/a.md", b"private\n");
+        dupe_succeeds(s, &dir, &["add", "notes/"]);
+        private_commit(s, &dir);
+        for path in ["notes/caf\u{e9}", "notes/\u{e9}"] {
+            write(&dir, path, b"public\n");
+            s.git(["add", "-f", "--", path]).from(&dir).succeeds();
+        }
+        s.commit_public(&dir);
+        let status = |words: &[&str]| {
+            let words = [
+                "-c",
+                "core.quotePath=false",
+                "dupe",
+                "status",
+                "--porcelain",
+            ]
+            .iter()
+            .chain(words);
+            s.git(words).from(&dir).run()
+        };
+        // A file at each path is the project's.
+        quiet_records(&status(&[]), &[]);
+        fs::remove_file(dir.join("notes/caf\u{e9}")).unwrap();
+        write(&dir, "notes/caf\u{e9}/draft.md", b"draft\n");
+        quiet_records(&status(&[]), &["?? notes/caf\u{e9}/"]);
+        quiet_records(&status(&["-uall"]), &["?? notes/caf\u{e9}/draft.md"]);
+        // The path alone: a path it begins, as Git's walk finds it, is not left out with it.
+        write(&dir, "notes/caf\u{e9}s", b"draft\n");
+        quiet_records(
+            &status(&["-uall"]),
+            &["?? notes/caf\u{e9}/draft.md", "?? notes/caf\u{e9}s"],
+        );
+    });
+}
+
 #[test]
 fn staged_deletions_under_hidden_paths_show_retained_files() {
     under_each_release(|s| {

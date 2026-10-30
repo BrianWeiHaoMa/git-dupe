@@ -4,13 +4,15 @@
 //! What the listing below cannot show:
 //!
 //! - A path is cleaned by `operand` alone, lexically and never through the filesystem
-//!   (R9): a `.gitdupe` line and a typed operand are compared in the same form.
+//!   (R9): a `.gitdupe` line and a typed operand are compared in the same form, `/`
+//!   separating it on every platform and a `\` of Windows's written so first (G29).
 //! - Every pathspec git-dupe writes is made by `pathspec`, and no other code writes one:
 //!   a path git-dupe hands Git is anchored at the root and read as that path whatever it
 //!   holds and whatever directory the run is made from: literal, or, for `status`'s
-//!   exclusion of a path alone, a glob escaped to match it (S4). A run carrying one is
-//!   marked as having git-dupe's own paths, so that no pathspec variable of a global
-//!   option before `dupe` reaches it (`runner::environment`).
+//!   exclusion of a path alone, a glob escaped to match it (S4), its bracket on an ASCII
+//!   byte (S20). No `\` of Windows's reaches one: `literal` magic would keep it (S23). A
+//!   run carrying one is marked as having git-dupe's own paths, so that no pathspec
+//!   variable of a global option before `dupe` reaches it (`runner::environment`).
 //! - A refusal, and what confines a run, is decided here over listings the caller took,
 //!   and returned: this part runs nothing and writes nothing, and the caller writes only
 //!   after it has asked. `scope` is the one rule for the hidden paths under a path.

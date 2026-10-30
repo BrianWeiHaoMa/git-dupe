@@ -136,7 +136,6 @@ fn a_pathspec_is_non_literal_by_its_bytes_whatever_its_magic_says() {
         b":(glob)cache*[k/]",
         b":(icase)CACHE*[K/]",
         b"cache*",
-        b"cache\\/",
         b"*e/",
         b"docs/*",
         b"doc?",
@@ -153,6 +152,24 @@ fn a_pathspec_is_non_literal_by_its_bytes_whatever_its_magic_says() {
     for word in [&b"cache"[..], b"cache/", b"../cache", b".", b":/", b"a b"] {
         assert!(!non_literal(word), "{}", word.escape_ascii());
     }
+}
+
+#[test]
+fn a_backslash_is_a_mark_only_where_it_is_no_separator() {
+    for word in [&b"a\\b"[..], b"tmp\\notes", b".\\tmp\\", b"\\", b"cache\\/"] {
+        assert_eq!(
+            non_literal(word),
+            !std::path::is_separator('\\'),
+            "{}",
+            word.escape_ascii()
+        );
+    }
+    // Everywhere: its other marks are no separators, and it is `:/` alone that names the
+    // root.
+    for word in [&b"a\\*"[..], b"tmp\\?", b"a[b]", b":x", b":\\", b":/\\x"] {
+        assert!(non_literal(word), "{}", word.escape_ascii());
+    }
+    assert!(!non_literal(b":/"));
 }
 
 #[test]

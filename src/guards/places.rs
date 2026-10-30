@@ -124,7 +124,7 @@ impl Places {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::links_and_modes::symlink;
+    use crate::links_and_modes::{at_the_top, symlink};
     use std::fs;
 
     /// A directory of the test's own below the system's temporary one, removed after.
@@ -138,6 +138,16 @@ mod tests {
 
     fn bytes(path: &Path) -> &[u8] {
         crate::bytes::of(path.as_os_str())
+    }
+
+    /// `file://` and the path after a host, on a drive after the empty host alone.
+    fn file_url(path: &Path) -> Vec<u8> {
+        let path = crate::guards::operand::with_slashes(bytes(path));
+        if path.starts_with(b"/") {
+            [b"file://localhost", &path[..]].concat()
+        } else {
+            [b"file:///", &path[..]].concat()
+        }
     }
 
     fn remote(url: &[u8]) -> Place {
@@ -154,9 +164,12 @@ mod tests {
         let scratch =
             Scratch(std::env::temp_dir().join(format!("git-dupe-places-{}", std::process::id())));
         let _ = fs::remove_dir_all(&scratch.0);
-        let base = fs::canonicalize(std::env::temp_dir())
-            .unwrap()
-            .join(scratch.0.file_name().unwrap());
+        // As Git prints a root: its real path, on Windows without the `\\?\` of a canonical
+        // one, which a word never spells and Git would read as `host:path` there (S13).
+        let real = fs::canonicalize(std::env::temp_dir()).unwrap();
+        let printed = bytes(&real).strip_prefix(br"\\?\").unwrap_or(bytes(&real));
+        let base =
+            Path::new(crate::bytes::name(printed).unwrap()).join(scratch.0.file_name().unwrap());
         let root = base.join("w/repo");
         let linked = base.join("w/linked");
         let git = root.join(".git");
@@ -210,7 +223,7 @@ mod tests {
             b".".to_vec(),
             b"".to_vec(),
             b"x=".to_vec(),
-            [b"file://localhost", bytes(&root)].concat(),
+            file_url(&root),
             path(&root.join("absent/..")),
         ] {
             assert_eq!(named(&word), root_place, "{}", word.escape_ascii());
@@ -221,7 +234,7 @@ mod tests {
         );
         assert_eq!(
             named(&path(&linked.join(".git"))),
-            Some(Place::GitEntry(path(&linked.join(".git"))))
+            Some(Place::GitEntry([bytes(&linked), b"/.git"].concat()))
         );
         assert_eq!(
             named(&path(&linked_git)),
@@ -248,11 +261,12 @@ mod tests {
 
     #[test]
     fn a_relative_word_and_a_relative_url_are_read_from_the_same_places() {
-        let root = Path::new("/nonexistent-git-dupe/w/repo");
-        let outside = Path::new("/nonexistent-git-dupe/w");
+        let root = at_the_top("/nonexistent-git-dupe/w/repo");
+        let outside = at_the_top("/nonexistent-git-dupe/w");
+        let name = |path| Path::new(crate::bytes::name(path).unwrap());
         let from = ReadFrom {
-            root,
-            outside: Some(outside),
+            root: name(&root),
+            outside: Some(name(&outside)),
             home: None,
         };
         let places = Places::new([(&b"up"[..], &b"../up.git"[..])], [], [], from);
@@ -261,7 +275,8 @@ mod tests {
             url: b"../up.git".to_vec(),
         };
         assert_eq!(places.named_by(b"../up"), Some(&up));
-        assert_eq!(places.named_by(b"/nonexistent-git-dupe/w/up"), Some(&up));
+        let absolute = at_the_top("/nonexistent-git-dupe/w/up");
+        assert_eq!(places.named_by(&absolute), Some(&up));
         // From the user's directory outside the root, Git opens `up` at `<outside>/up.git`,
         // which the URL names when read from the root.
         assert_eq!(places.named_by(b"up"), Some(&up));
@@ -270,17 +285,19 @@ mod tests {
 
     #[test]
     fn a_word_and_a_url_beginning_with_a_tilde_are_read_from_the_same_home() {
+        let home = at_the_top("/nonexistent-git-dupe/h");
         let from = ReadFrom {
             root: Path::new("/nonexistent-git-dupe/w/repo"),
             outside: None,
-            home: Some(b"/nonexistent-git-dupe/h"),
+            home: Some(&home),
         };
         let places = Places::new([(&b"up"[..], &b"~/up.git"[..])], [], [], from);
         let up = Place::Remote {
             name: b"up".to_vec(),
             url: b"~/up.git".to_vec(),
         };
-        assert_eq!(places.named_by(b"/nonexistent-git-dupe/h/up"), Some(&up));
+        let absolute = at_the_top("/nonexistent-git-dupe/h/up");
+        assert_eq!(places.named_by(&absolute), Some(&up));
         assert_eq!(places.named_by(b"--repo=~/up/"), Some(&up));
         assert_eq!(places.named_by(b"~up"), None);
     }

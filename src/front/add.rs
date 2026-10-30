@@ -96,8 +96,8 @@ fn all_flag(read: &Read) -> bool {
         .is_some_and(|last| *last == ALL || *last == NO_IGNORE_REMOVAL)
 }
 
-/// The operands, each a form or a literal path: `.` and `./` the directory form at the
-/// user's directory, one that resolves to the root the root form, any other the path it
+/// The operands, each a form or a literal path: `.` and `./`, `.\` on Windows, the directory
+/// form at the user's directory, one that resolves to the root the root form, any other the path it
 /// resolves to. An operand that resolves outside the working tree is the fault.
 pub fn resolve<'w>(
     workspace: &Workspace,
@@ -106,7 +106,7 @@ pub fn resolve<'w>(
     operands
         .iter()
         .map(|&word| {
-            let directory = matches!(word, b"." | b"./");
+            let directory = matches!(&operand::with_slashes(word)[..], b"." | b"./");
             match operand::resolve_rooted(word, workspace.prefix(), workspace.root()) {
                 Cleaned::Inside(path) if directory => Ok(Operand::Form(path)),
                 Cleaned::Inside(path) => Ok(Operand::Literal(path)),

@@ -12,6 +12,11 @@
 //!   `[user@]host:path` word has the form of its host and path; anything else is a local
 //!   path. A word holding `://` whose part before it is no scheme Git reads is a local
 //!   path, as Git reads it.
+//! - A one-letter host is a drive to Git for Windows (S13), and the forms below are the same
+//!   on every platform: the word is also a local path, whole, and where no separator follows
+//!   its colon what follows the colon is also a relative path, the over-inclusive
+//!   direction. So is `<letter>:/<path>` of a `file:///<letter>:/<path>` or
+//!   `file://<letter>:/<path>` word. These are Git's own readings, not a match (N5).
 //! - A URL's authority is what stands between its `://` and the first `/` after it,
 //!   bounded before anything is decoded, as RFC 3986 bounds it and the HTTP transport
 //!   reads it; each `%XX` but `%00`, which Git keeps as written, is then decoded in the
@@ -30,14 +35,18 @@
 //!   and it has no form. One beginning with `~<user>` is read as written, a relative path:
 //!   Git takes that user's home from the password database, which the standard library
 //!   cannot ask, and the product admits it as not seen through.
-//! - The canonical path is the real path, asked of the path as written, so that `link/..`
-//!   is where the link's target's parent is; where the real path cannot be had — nothing
-//!   there, or a path Git cannot open either, as one beyond a component it may not
-//!   search or in a loop of links — it is the path cleaned as text (`operand`). This and
-//!   `places` are the only parts of `Guards` that read the filesystem, and they only read.
+//! - A relative local path is one `Path::is_absolute` does not call absolute: `C:\proj` is
+//!   absolute on Windows alone, `/x` on Linux and macOS alone (`Holds/G18`).
+//! - The canonical path is the real path, asked of the path as written, so that on Linux
+//!   and macOS `link/..` is where the link's target's parent is; where the real path cannot
+//!   be had — nothing there, or a path Git cannot open either, as one beyond a component it
+//!   may not search or in a loop of links — it is the path cleaned as text (`operand`). On
+//!   Windows a real path is spelled `\\?\C:\…`, so a canonical path is compared only with
+//!   another. This and `places` are the only parts of `Guards` that read the filesystem,
+//!   and they only read.
 
 use std::fs;
-use std::path::Path;
+use std::path::{self, Path};
 
 use super::operand;
 use crate::bytes;
@@ -84,16 +93,33 @@ pub fn forms(destination: &[u8], from: ReadFrom) -> Vec<Form> {
             for path in paths.into_iter().filter(|path| !path.is_empty()) {
                 forms.extend(local(path, from));
             }
+            if let Some(path) = on_a_drive(&whole) {
+                forms.extend(local(path, from));
+            }
         }
         return forms;
     }
     if let Some((host, path)) = scp(destination) {
-        let path = if path.starts_with(b"/") {
-            path.to_vec()
-        } else {
-            [&b"/"[..], path].concat()
-        };
-        return vec![url(host, &path)];
+        let mut forms = vec![url(
+            host,
+            &if path.starts_with(b"/") {
+                path.to_vec()
+            } else {
+                [&b"/"[..], path].concat()
+            },
+        )];
+        if matches!(host, [letter] if letter.is_ascii_alphabetic()) {
+            forms.extend(local(destination, from));
+            if !path
+                .first()
+                .is_some_and(|&byte| path::is_separator(char::from(byte)))
+            {
+                // Written from `.`, so that no reading of a local path takes it for another
+                // kind: what follows the colon is a relative path whatever it holds.
+                forms.extend(local(&[b"./", path].concat(), from));
+            }
+        }
+        return forms;
     }
     local(destination, from)
 }
@@ -106,6 +132,15 @@ pub fn canonical(path: &[u8]) -> Vec<u8> {
         Some(real) => bytes::of(real.as_os_str()).to_vec(),
         None => operand::clean_absolute(path),
     }
+}
+
+/// The `<letter>:/<path>` of what a `file:///<letter>:/<path>` or `file://<letter>:/<path>`
+/// word holds after its `://`, decoded.
+fn on_a_drive(after_the_scheme: &[u8]) -> Option<&[u8]> {
+    let path = after_the_scheme
+        .strip_prefix(b"/")
+        .unwrap_or(after_the_scheme);
+    matches!(path, [letter, b':', b'/', ..] if letter.is_ascii_alphabetic()).then_some(path)
 }
 
 /// The scheme and what follows its `://`, when the word is a URL as Git's `is_url` reads
@@ -224,7 +259,8 @@ fn decoded(text: &[u8]) -> Vec<u8> {
 /// The local forms of `path`: joined to each place a relative one is read from, its
 /// trailing slashes dropped, then the canonical path of each of the four paths Git opens.
 /// One that is `~` or begins with `~/` has its trailing slashes dropped first and `HOME`
-/// read in place of its `~`, and none where `HOME` is unset.
+/// read in place of its `~`, and none where `HOME` is unset; `~\x` is no such form on
+/// Windows (S13).
 fn local(path: &[u8], from: ReadFrom) -> Vec<Form> {
     let opened: Vec<Vec<u8>> = match path.strip_prefix(b"~") {
         Some(rest) if rest.is_empty() || rest.starts_with(b"/") => match from.home {
@@ -233,9 +269,15 @@ fn local(path: &[u8], from: ReadFrom) -> Vec<Form> {
         },
         _ => joined(path, from)
             .iter()
-            .map(|joined| match without_trailing_slashes(joined) {
-                b"" => b"/".to_vec(),
-                kept => kept.to_vec(),
+            .map(|joined| {
+                let written = operand::with_slashes(joined);
+                let kept = without_trailing_slashes(&written);
+                // The top, `/` or `C:/`, keeps its slash: without it, it is another path.
+                if operand::absolute(kept) == operand::absolute(&written) {
+                    kept.to_vec()
+                } else {
+                    [kept, b"/"].concat()
+                }
             })
             .collect(),
     };
@@ -256,7 +298,7 @@ fn local(path: &[u8], from: ReadFrom) -> Vec<Form> {
 /// `path` itself when absolute, else joined to each place `from` reads a relative one
 /// from.
 fn joined(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
-    if path.starts_with(b"/") {
+    if operand::absolute(path) {
         return vec![path.to_vec()];
     }
     [Some(from.root), from.outside]

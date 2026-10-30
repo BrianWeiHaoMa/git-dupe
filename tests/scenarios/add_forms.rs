@@ -81,6 +81,28 @@ fn dot_slash_is_the_directory_form() {
     });
 }
 
+/// `.\` is the directory form where `\` separates, as `./` is (G29), and elsewhere a literal
+/// path like any other word, at which nothing stands.
+#[test]
+fn dot_backslash_is_the_directory_form_where_a_backslash_separates() {
+    under_each_release(|s| {
+        let dir = changes(s, "dot-backslash");
+        write(&dir, "notes/sub/x.md", b"new\n");
+        let output = s.git(["dupe", "add", ".\\"]).from(&dir.join("notes")).run();
+        if std::path::is_separator('\\') {
+            assert_eq!(output.end, End::Code(0), "{output:?}");
+            assert_eq!(
+                privately_staged(s, &dir),
+                b"A\0notes/sub/x.md\0A\0notes/today.md\0"
+            );
+        } else {
+            assert_ne!(output.end, End::Code(0), "{output:?}");
+            assert_eq!(privately_staged(s, &dir), b"");
+        }
+        assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), b"notes\n.vscode\n");
+    });
+}
+
 /// `--all` with no operand, from a directory outside every hidden path, stages every
 /// change under every hidden path and no public file.
 #[test]

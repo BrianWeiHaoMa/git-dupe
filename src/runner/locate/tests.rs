@@ -1,19 +1,17 @@
 use super::*;
-use crate::links_and_modes::{names_every_byte_string, remove_link, symlink};
+use crate::links_and_modes::{at_the_top, names_every_byte_string, remove_link, symlink};
 
 /// What Git prints for an answer these checks spell with `/w`, `/x`, and `/elsewhere` lines:
 /// paths this platform calls absolute, `C:/w` on Windows, where `/w` is not (S23).
 fn printed(answer: &[u8]) -> Vec<u8> {
-    let drive: &[u8] = if Path::new("/w").is_absolute() {
-        b""
-    } else {
-        b"C:"
-    };
     let lines = answer.split_inclusive(|&byte| byte == b'\n');
     lines
         .map(|line| {
-            let path = line.starts_with(b"/w") || line.starts_with(b"/x");
-            [if path { drive } else { b"" }, line].concat()
+            if line.starts_with(b"/w") || line.starts_with(b"/x") {
+                at_the_top(line)
+            } else {
+                line.to_vec()
+            }
         })
         .collect::<Vec<_>>()
         .concat()
