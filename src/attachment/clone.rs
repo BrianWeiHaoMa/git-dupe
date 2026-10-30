@@ -7,9 +7,12 @@
 //! workspace becomes attached, so that a refusal leaves nothing behind.
 //!
 //! The steps: `init` as G1 does it without `-b`; `remote add origin URL`;
-//! `fetch --update-shallow origin`, its output Git's, which takes the refs of a shallow
-//! repository and makes this one shallow as `git clone` of it would, where a plain fetch
-//! rejects them and leaves no branch to check out (S12); `for-each-ref` of `origin`'s
+//! `fetch --update-shallow origin` with the refspec `remote add` records, its output Git's,
+//! which takes the refs of a shallow repository and makes this one shallow as `git clone`
+//! of it would, where a plain fetch rejects them and leaves no branch to check out (S12),
+//! and whose refspec makes a `remotes.origin` group of the developer's configuration Git's
+//! refusal, where a bare `fetch origin` would fetch the group's members into no tracking
+//! ref and read as a remote with no branch (S13); `for-each-ref` of `origin`'s
 //! branches, whose empty answer ends the command with nothing checked out; without `-b`,
 //! `ls-remote --symref origin HEAD`, whose `ref:` line for `HEAD` names the branch, and
 //! whose lack of one refuses; `branch --track` from `refs/remotes/origin/BRANCH`,
@@ -105,7 +108,12 @@ pub fn clone(
 
     quiet(&[word("remote"), word("add"), word("origin"), url])?;
     step(
-        run(&[word("fetch"), word("--update-shallow"), word("origin")]),
+        run(&[
+            word("fetch"),
+            word("--update-shallow"),
+            word("origin"),
+            word("+refs/heads/*:refs/remotes/origin/*"),
+        ]),
         &[0],
     )?;
     let branches = quiet(&[

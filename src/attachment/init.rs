@@ -10,8 +10,9 @@
 //! Git's `init` runs only when the private Git directory lacks `HEAD`, `objects`, or
 //! `refs`, the repository Git cannot open, because on a complete repository it rewrites
 //! keys the developer may have edited, `core.worktree` among them (S6). It gets the
-//! initial branch, and `--template=` when `HEAD` exists, so that completing a killed
-//! `init` copies no sample hook into it. Its standard output is Git's own line.
+//! initial branch and its own template directory, so that completing a killed `init`
+//! copies the template files the kill left missing and keeps those it left, a partly
+//! copied one included (G1, G21). Its standard output is Git's own line.
 
 use std::fs;
 use std::path::Path;
@@ -123,9 +124,6 @@ fn make(workspace: &Workspace, private: &Path, branch: Option<&[u8]>) -> Result<
     let mut words: Vec<Vec<u8>> = vec!["init".into()];
     if let Some(branch) = branch {
         words.push([b"--initial-branch=", &branch[..]].concat());
-    }
-    if exists(&private.join("HEAD")) {
-        words.push("--template=".into());
     }
     step(
         Run::private(private, workspace.root(), words).from(workspace.root()),

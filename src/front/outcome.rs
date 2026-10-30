@@ -90,6 +90,15 @@ pub fn refuse_to_attach(workspace: &Workspace, refusal: Refusal) -> Outcome {
               worktree",
         ]
         .concat(),
+        Refusal::OnAnotherDrive => [
+            &b"this linked worktree, "[..],
+            bytes::of(workspace.root().as_os_str()),
+            b", stands on another drive than its Git directory, ",
+            bytes::of(workspace.git_directory().as_os_str()),
+            b", and no relative path between two drives exists to record; git-dupe attaches \
+              only a linked worktree on the drive of .git",
+        ]
+        .concat(),
         Refusal::Obstructed(path) => return obstructed(&path),
         Refusal::TracksGitdupe => b"this project tracks .gitdupe, the file that holds \
               git-dupe's hidden paths; git-dupe cannot be attached to it"

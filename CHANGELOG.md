@@ -8,6 +8,31 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Changed
+
+- Commands in different worktrees now wait for each other on one empty lock file,
+  `.git/git-dupe.lock`, where they waited on the `.git` directory itself. The first
+  command that needs it makes it, nothing removes it, `git dupe detach` leaves it, and
+  Git never reads it.
+- `.gitdupe` is now read with a UTF-8 byte order mark at the start of the file and one
+  carriage return at the end of a line dropped, so that a file Git checks out with CRLF
+  line endings under `core.autocrlf=true`, or an editor saves so, hides what it listed,
+  and `hide` and `unhide` keep the rest of it byte for byte. A file that begins with a
+  UTF-16 byte order mark, as Windows PowerShell 5.1's `>` writes one, lists nothing and
+  is named in a `warning:`, and `hide`, `unhide`, and a hiding `add` refuse to write it
+  until it is saved as UTF-8.
+- A destination whose host is one letter, such as `c:proj`, is now also compared as a
+  local path, and a `file:///C:/proj` destination as the path `C:/proj`, because Git for
+  Windows opens them as paths: `push`, `pull`, `fetch`, `remote`, and `clone` refuse one
+  that names the project, naming `git dupe git`.
+- `git dupe init` run again after a killed `init` now copies the template files the kill
+  left missing, where a repository that had a `HEAD` was completed without them. A file
+  the kill left partly copied stays as it is.
+- `git dupe clone` now fetches with the refspec `git remote add` records, so that a
+  `remotes.origin` group in the developer's configuration ends it with Git's own
+  refusal, status 128, the workspace attached, where it fetched into no tracking ref and
+  reported a remote with no branch.
+
 ## [0.3.3] - 2026-10-30
 
 ### Added

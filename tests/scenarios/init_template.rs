@@ -1,5 +1,6 @@
 //! `init` under a template directory of the developer's: one that holds a `HEAD`, one
-//! whose `config` a kill left partly copied, and one whose `config` includes a file.
+//! whose files a kill left missing or partly copied, one whose `config` a kill left partly
+//! copied, and one whose `config` includes a file.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -59,6 +60,60 @@ fn a_templates_head_stands_in_place_of_the_initial_branch() {
                 .succeeds();
             assert_eq!(worktree.stdout, b"../..\n");
         }
+    });
+}
+
+/// A kill among Git's copies of a template that holds a `HEAD`, which can be the first
+/// file Git copies, leaves a repository Git cannot open with `HEAD` and some of the files.
+/// Run again, `init` completes it under the same template: every file the kill left missing
+/// is copied, those it left are kept, a partly copied one as it is, and so is a key of the
+/// `config`, and the workspace ends configured as F2 says (`Holds/G1`, G21, S6).
+#[test]
+fn a_rerun_copies_the_template_files_a_kill_left_missing_and_keeps_those_it_left() {
+    under_each_release(|s| {
+        let names: Vec<String> = (0..20).map(|index| format!("file-{index:02}")).collect();
+        let whole = |name: &str| format!("the whole of {name}\n").into_bytes();
+        let contents: Vec<Vec<u8>> = names.iter().map(|name| whole(name)).collect();
+        let mut files: Vec<(&str, &[u8])> = names
+            .iter()
+            .map(String::as_str)
+            .zip(contents.iter().map(Vec::as_slice))
+            .collect();
+        files.push(("HEAD", b"ref: refs/heads/trunk\n"));
+        let template_dir = template(s, &files);
+
+        let dir = s.dir().join("killed");
+        s.repository(&dir);
+        let private = dir.join(".git/dupe");
+        fs::create_dir(&private).unwrap();
+        fs::write(private.join("HEAD"), b"ref: refs/heads/trunk\n").unwrap();
+        fs::write(private.join("config"), b"[color]\n\tui = never\n").unwrap();
+        fs::write(private.join("file-00"), b"the whole").unwrap();
+        fs::write(private.join("file-01"), whole("file-01")).unwrap();
+
+        let output = init_under(s, &template_dir, &dir);
+        assert_eq!(output.end, End::Code(0), "{output:?}");
+        // Git's line for the repository it completed, and the hint saying so (G1).
+        assert!(!output.stdout.is_empty(), "{output:?}");
+        assert_eq!(output.lines("hint").len(), 1, "{output:?}");
+        assert_eq!(fs::read(private.join("file-00")).unwrap(), b"the whole");
+        for name in &names[1..] {
+            assert_eq!(fs::read(private.join(name)).unwrap(), whole(name), "{name}");
+        }
+        assert!(private.join("objects").is_dir() && private.join("refs").is_dir());
+        assert_eq!(
+            fs::read(private.join("HEAD")).unwrap(),
+            b"ref: refs/heads/trunk\n"
+        );
+        for (key, expected) in [
+            ("color.ui", "never"),
+            ("core.worktree", "../.."),
+            ("status.showUntrackedFiles", "no"),
+            ("advice.statusHints", "false"),
+        ] {
+            private_config_value(s, &dir, key, expected);
+        }
+        dupe_succeeds(s, &dir, &["status"]);
     });
 }
 

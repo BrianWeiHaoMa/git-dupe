@@ -1,16 +1,17 @@
 //! `git dupe add notes/`, `git dupe unhide notes/`, and `git dupe init`, each killed at
 //! every point of its run and then run again: `.gitdupe` and `.git/info/exclude` each
 //! either as they were or as the uninterrupted run leaves them, never partially written,
-//! and after the second run what the uninterrupted run leaves (G21, `Done when`). The
-//! sweep itself is the harness's.
+//! and after the second run what the uninterrupted run leaves (G21, `Done when`), `init`'s
+//! every template file among it. The sweep itself is the harness's.
 
 use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, GITDUPE, Killed, Output, Point, Scenario, Sweep, Version, copied, files, holds, lived_in,
-    private_add, private_commit, staged_gitdupe, under_each_release, write,
+    End, GITDUPE, Killed, Output, Point, Scenario, Sweep, Version, copied, entry_names, files,
+    holds, lived_in, private_add, private_commit, private_config_value, staged_gitdupe,
+    under_each_release, write,
 };
 
 const NAME: &str = "Public Name";
@@ -306,10 +307,32 @@ fn locked_then_completed(sweep: &Sweep, killed: &Killed) {
     configured(s, &dir);
 }
 
+/// A key neither Git's `init` nor git-dupe's settings set, edited in a copy of `killed`
+/// before the rerun, is kept while the rerun sets the keys F2 names (S6).
+fn edited_key_kept(sweep: &Sweep, killed: &Killed) {
+    let s = sweep.s;
+    let dir = copied(s, &killed.dir, "edited");
+    let edited = s
+        .git(["dupe", "config", "--local", "color.ui", "never"])
+        .from(&dir)
+        .run();
+    assert_eq!(edited.end, End::Code(0), "{killed:?}: {edited:?}");
+    rerun(sweep, &dir);
+    private_config_value(s, &dir, "color.ui", "never");
+    configured(s, &dir);
+}
+
 #[test]
 fn a_killed_init_is_completed_by_running_it_again() {
     under_each_release(|s| {
         let fixture = unattached_fixture(s);
+        let plain = s.dir().join("plain");
+        s.git(["init", "-q", plain.to_str().unwrap()]).succeeds();
+        let hooks = entry_names(&plain.join(".git/hooks"));
+        assert!(
+            !hooks.is_empty(),
+            "Git's own template holds its sample hooks"
+        );
         let locked = Cell::new(false);
         let kills = every_kill_point(
             s,
@@ -329,6 +352,7 @@ fn a_killed_init_is_completed_by_running_it_again() {
                 // show, and Git's own `config` waits a while on a lock in some releases.
                 if unfinished && !locked.replace(true) {
                     locked_then_completed(sweep, killed);
+                    edited_key_kept(sweep, killed);
                 }
                 (attached, unfinished)
             },
@@ -340,6 +364,8 @@ fn a_killed_init_is_completed_by_running_it_again() {
                     "{killed:?}: {rerun:?}"
                 );
                 configured(s, &killed.dir);
+                let copied = entry_names(&killed.dir.join(".git/dupe/hooks"));
+                assert_eq!(copied, hooks, "{killed:?}");
             },
         );
         for state in [(false, false), (true, true), (true, false)] {

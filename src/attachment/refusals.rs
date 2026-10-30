@@ -2,12 +2,13 @@
 //! the main worktree, whose `.git` entry at the root is the common Git directory, or a
 //! linked worktree that `git worktree add` made, whose Git directory lies directly under
 //! the common Git directory's `worktrees` (E9), a bare repository's included — and not a
-//! submodule checkout, a worktree where something other than a directory stands at its
-//! private repository's path, or a project that tracks `.gitdupe` publicly. A bare
-//! repository's own directory never gets here: Git's locate run fails there.
+//! submodule checkout, a linked worktree on another Windows drive than `.git`, a worktree
+//! where something other than a directory stands at its private repository's path, or a
+//! project that tracks `.gitdupe` publicly. A bare repository's own directory never gets
+//! here: Git's locate run fails there.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::keeper::{self, Failed};
 use crate::runner::locate::Workspace;
@@ -25,6 +26,9 @@ pub enum Refusal {
     /// A linked worktree whose Git directory's parent is not, by canonical path,
     /// `worktrees` in the common Git directory: no worktree `git worktree add` made.
     NotUnderWorktrees,
+    /// A linked worktree on another Windows drive than its Git directory: no relative path
+    /// between them exists to record as `core.worktree` (F2).
+    OnAnotherDrive,
     /// Something other than a directory stands at the private Git directory's path by
     /// `lstat`, this path: Git's `init` and `config` would follow it to whatever it leads
     /// to, the public repository or another worktree's private one (G5, G28), and git-dupe
@@ -44,6 +48,9 @@ pub fn refusal(workspace: &Workspace) -> Result<Option<Refusal>, Failed> {
     if workspace.linked() {
         if !under_worktrees(workspace) {
             return Ok(Some(Refusal::NotUnderWorktrees));
+        }
+        if on_another_drive(workspace) {
+            return Ok(Some(Refusal::OnAnotherDrive));
         }
     } else if !own_git_directory(workspace) {
         return Ok(Some(Refusal::NotOwnGitDirectory));
@@ -74,6 +81,28 @@ fn under_worktrees(workspace: &Workspace) -> bool {
         return false;
     };
     same_directory(parent, &workspace.common_directory().join("worktrees"))
+}
+
+/// Whether the root's canonical path stands on another drive than the Git directory's,
+/// the parent of the private Git directory. A path with no canonical form is `settings`'
+/// to report, and answers no here.
+fn on_another_drive(workspace: &Workspace) -> bool {
+    match (
+        fs::canonicalize(workspace.root()),
+        fs::canonicalize(workspace.git_directory()),
+    ) {
+        (Ok(root), Ok(git_directory)) => different_prefixes(&root, &git_directory),
+        _ => false,
+    }
+}
+
+/// Whether both paths open with a prefix and the two differ: two Windows drives. No path
+/// on Linux or macOS has a prefix, so that this one arrangement needs no condition (R11).
+fn different_prefixes(one: &Path, other: &Path) -> bool {
+    match (one.components().next(), other.components().next()) {
+        (Some(one @ Component::Prefix(_)), Some(other @ Component::Prefix(_))) => one != other,
+        _ => false,
+    }
 }
 
 /// Whether the two paths have one canonical path; one that has none is not the same
@@ -153,5 +182,36 @@ mod tests {
             &scratch.common().join("worktrees"),
         );
         assert!(!answered);
+    }
+
+    #[test]
+    fn two_drives_differ_by_the_prefixes_of_their_canonical_paths_and_nothing_else_does() {
+        let drive = Path::new(r"\\?\C:\proj");
+        let prefixed = matches!(drive.components().next(), Some(Component::Prefix(_)));
+        assert_eq!(
+            different_prefixes(drive, Path::new(r"\\?\G:\bare\worktrees\x")),
+            prefixed
+        );
+        assert!(!different_prefixes(
+            drive,
+            Path::new(r"\\?\C:\bare\worktrees\x")
+        ));
+        assert!(!different_prefixes(drive, Path::new("/bare/worktrees/x")));
+        assert!(!different_prefixes(
+            Path::new("/proj"),
+            Path::new("/bare/worktrees/x")
+        ));
+    }
+
+    #[test]
+    fn a_linked_worktree_of_one_filesystem_stands_on_no_other_drive() {
+        let scratch = Scratch::new("drive");
+        let root = scratch.0.join("one");
+        fs::create_dir(&root).unwrap();
+        let linked = Workspace::linked_at(&scratch.common(), b"one", &root);
+        assert!(!on_another_drive(&linked));
+        // A root with no canonical form is reported later, naming it.
+        let gone = Workspace::linked_at(&scratch.common(), b"one", &scratch.0.join("gone"));
+        assert!(!on_another_drive(&gone));
     }
 }

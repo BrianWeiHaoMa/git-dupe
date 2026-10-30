@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, holds, locate_words, name_accepted, names, names_number,
-    private_config_value, refused_stash_untracked, region, region_rules, unchanged,
+    End, Output, Scenario, Tree, Worktree, entry_names, holds, locate_words, name_accepted, names,
+    names_number, private_config_value, refused_stash_untracked, region, region_rules, unchanged,
     under_each_release, usage_line,
 };
 
@@ -425,14 +425,11 @@ fn head_only_and_empty_private_directories_are_completed() {
                 );
                 keys(s, &dir);
                 assert_eq!(region_rules(&dir), [b"/.gitdupe"]);
-                if head && private.join("hooks").exists() {
-                    for entry in fs::read_dir(private.join("hooks")).unwrap() {
-                        assert_ne!(
-                            entry.unwrap().path().extension(),
-                            Some(OsStr::new("sample"))
-                        );
-                    }
-                }
+                // What the kill left missing is copied, `HEAD` standing or not (`Holds/G1`).
+                assert_eq!(
+                    entry_names(&private.join("hooks")),
+                    entry_names(&dir.join(".git/hooks"))
+                );
             }
         }
     });

@@ -108,6 +108,8 @@ impl Leaving {
         if let Some(killed) = self.removed.killed {
             return Err(NotRemoved::Killed(killed));
         }
+        // A file another process holds open without delete sharing can stop this partway on
+        // Windows (S24): the failure names it, and `detach --force` removes the rest.
         fs::remove_dir_all(&self.private_directory)
             .map_err(|cause| NotRemoved::Failed(self.private_directory, cause))
     }

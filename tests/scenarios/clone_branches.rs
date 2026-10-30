@@ -1,9 +1,9 @@
 //! Which branch `git dupe clone` checks out, and how it ends where there is none to check
 //! out (G2, `Holds/G2`, S12): `-b BRANCH`, else the remote's default branch; a remote with
 //! no branch attaches with nothing checked out; a remote whose `HEAD` names no branch it
-//! has is refused naming `-b`; a `BRANCH` the remote lacks and a `URL` that is no
-//! repository end with Git's status, attached; and from each, `git dupe detach --force`
-//! and `git dupe clone` start over.
+//! has is refused naming `-b`; a `BRANCH` the remote lacks, a `URL` that is no repository,
+//! and a `remotes.origin` group of the developer's end with Git's status, attached; and
+//! from each, `git dupe detach --force` and `git dupe clone` start over.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -11,7 +11,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    End, Scenario, dupe_clone, names, private_add, private_commit, region_rules,
+    End, Scenario, dupe_clone, names, private_add, private_commit, region_rules, text,
     under_each_release, usage_line, write,
 };
 
@@ -370,6 +370,59 @@ fn a_url_that_is_no_repository_ends_with_fetchs_status_attached_and_starts_over(
 
         detached(s, second);
         let again = dupe_clone(s, second, &[m.first.private_remote.as_os_str()]);
+        assert_eq!(again.end, End::Code(0), "{again:?}");
+        attached_on_main(s, second, first);
+    });
+}
+
+/// A `remotes.origin` group in the developer's global configuration, which a bare
+/// `fetch origin` would read as a group, fetching into no tracking ref and leaving a remote
+/// with no branch, is Git's refusal of a refspec beside a group: its status and message,
+/// the workspace attached with what was done, no branch fetched and no file written, and
+/// `detach --force` and `clone` start over without it (`Holds/G2`, S13, G2).
+#[test]
+fn a_remotes_origin_group_is_gits_refusal_of_the_refspec_attached_and_starts_over() {
+    under_each_release(|s| {
+        let m = s.second_machine("project");
+        let (first, second) = (&m.first.root, &m.root);
+        let url = &m.first.private_remote;
+        let other = s.dir().join("other-private.git");
+        s.git(["clone", "-q", "--bare", text(url), text(&other)])
+            .succeeds();
+        let group = format!("{} {}", text(url), text(&other));
+        s.git(["config", "--global", "remotes.origin", &group])
+            .succeeds();
+
+        let failed = dupe_clone(s, second, &[url.as_os_str()]);
+        assert_eq!(failed.end, End::Code(128), "{failed:?}");
+        attached_and_settled(second);
+        let recorded = s
+            .private(second)
+            .git(["config", "--get", "remote.origin.url"])
+            .succeeds();
+        assert_eq!(recorded.stdout, [text(url), "\n"].concat().as_bytes());
+        let tracking = s
+            .private(second)
+            .git(["for-each-ref", "refs/remotes/origin/"])
+            .succeeds();
+        assert!(tracking.stdout.is_empty(), "{tracking:?}");
+        assert!(!second.join("notes").exists() && !second.join(".gitdupe").exists());
+        let gits = s
+            .private(second)
+            .git([
+                "fetch",
+                "--update-shallow",
+                "origin",
+                "+refs/heads/*:refs/remotes/origin/*",
+            ])
+            .run();
+        assert_eq!(failed.end, gits.end, "{gits:?}");
+        assert!(failed.stderr.ends_with(&gits.stderr), "{failed:?}");
+
+        s.git(["config", "--global", "--unset", "remotes.origin"])
+            .succeeds();
+        detached(s, second);
+        let again = dupe_clone(s, second, &[url.as_os_str()]);
         assert_eq!(again.end, End::Code(0), "{again:?}");
         attached_on_main(s, second, first);
     });

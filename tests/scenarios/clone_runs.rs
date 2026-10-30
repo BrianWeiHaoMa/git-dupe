@@ -7,7 +7,7 @@ use std::path::Path;
 
 use crate::harness::{
     End, Scenario, Tree, names, private_add, private_commit, private_head, region_rules,
-    run_traced, under_each_release, write,
+    run_traced, run_words, under_each_release, write,
 };
 
 /// The private index's entries, including modes, object names, and stages.
@@ -105,6 +105,16 @@ fn clone_git_run_sequences_do_not_follow_private_file_counts() {
                 .map(|word| word.as_bytes().to_vec())
                 .collect();
                 assert_eq!(sequence, expected, "{own:?}");
+                let fetch = run_words(&[
+                    "fetch",
+                    "--update-shallow",
+                    "origin",
+                    "+refs/heads/*:refs/remotes/origin/*",
+                ]);
+                assert!(
+                    own.words().iter().any(|words| words.ends_with(&fetch)),
+                    "{own:?}"
+                );
                 sequences.push(sequence);
             }
             assert_eq!(sequences[0], sequences[1]);
