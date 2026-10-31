@@ -422,7 +422,12 @@ fn a_file_url_on_a_drive_also_has_the_path_on_that_drive() {
     assert_eq!(of("file:///ab:/repo"), expected);
     let mut expected = vec![url_form("", "/C:repo")];
     expected.extend(local_forms(&read("/C:repo")));
-    assert_eq!(of("file:///C:repo"), expected);
+    // A drive and no root, which where a root alone is not absolute is also a relative path.
+    assert_eq!(
+        of("file:///C:repo")[..expected.len()] == expected[..]
+            && of("file:///C:repo").len() == expected.len(),
+        Path::new("/").is_absolute()
+    );
     // Any other scheme opens no path on a drive.
     assert_eq!(of("https://example.com/C:/repo")[1..], []);
 }
@@ -507,7 +512,132 @@ fn what_the_shell_opens_past_a_drive_as_a_directory_is_also_a_form_where_a_root_
     }
     // Any other first component opens nothing of the kind.
     for word in ["/tmpx/repo", "/ab", "/1", "/ab:/repo", "/1:/repo"] {
-        assert_eq!(through_the_shell(word.as_bytes()), None, "{word}");
+        let paths = through_the_shell(word.as_bytes(), from(Path::new(&root)));
+        assert_eq!(paths, Vec::<Vec<u8>>::new(), "{word}");
+    }
+}
+
+/// The form of the root itself, which a word Git opens from there has.
+fn at_the_root(root: &str) -> Form {
+    Form::Local(canonical(root.as_bytes()))
+}
+
+#[test]
+fn a_drives_top_is_also_where_git_stands_on_that_drive_once_it_drops_the_slash() {
+    let a_root_alone_is_absolute = Path::new("/").is_absolute();
+    for word in [
+        "C:/",
+        "c:/",
+        "file:///C:/",
+        "file://C:/",
+        "/c",
+        "/C",
+        "/c/",
+        "/c\\",
+        "/c:",
+        "/c:/",
+        "/C:\\",
+        "file:///c/",
+        "/./c",
+    ] {
+        assert_eq!(
+            of(word).contains(&at_the_root(&root())),
+            !a_root_alone_is_absolute,
+            "{word}"
+        );
+    }
+    // Below the top, and on a drive the root does not stand on, Git stands nowhere of it.
+    for word in ["C:/x", "G:/", "/g", "file:///G:/", "file://C:/x"] {
+        assert!(!of(word).contains(&at_the_root(&root())), "{word}");
+    }
+}
+
+#[test]
+fn a_dot_before_the_first_component_is_no_component_to_the_shell() {
+    let root = root();
+    let form = |path: &[u8]| local(path, from(Path::new(&root)))[0].clone();
+    let a_root_alone_is_absolute = Path::new("/").is_absolute();
+    for (word, place) in [
+        ("/./c/repo", &b"c:/repo"[..]),
+        ("/.//./C:/repo", b"C:/repo"),
+        ("/.\\g", b"g:/"),
+    ] {
+        assert_eq!(
+            of(word).contains(&form(place)),
+            !a_root_alone_is_absolute,
+            "{word}"
+        );
+    }
+}
+
+#[test]
+fn a_drive_and_no_root_in_a_file_url_is_read_from_the_root_where_the_platform_has_drives() {
+    let root = root();
+    let a_root_alone_is_absolute = Path::new("/").is_absolute();
+    for word in [
+        "file://C:",
+        "file://c:",
+        "file:///C:",
+        "file://C:.",
+        "file://%43:",
+        "file:///C:.",
+        "file://C:sub/..",
+        "file:///C:sub/..",
+    ] {
+        assert_eq!(
+            of(word).contains(&at_the_root(&root)),
+            !a_root_alone_is_absolute,
+            "{word}"
+        );
+    }
+    let below = Form::Local(canonical(format!("{root}/.git").as_bytes()));
+    assert_eq!(
+        of("file://C:.git").contains(&below),
+        !a_root_alone_is_absolute
+    );
+    let beside = Form::Local(canonical(format!("{root}/../x").as_bytes()));
+    assert_eq!(
+        of("file://C:../x").contains(&beside),
+        !a_root_alone_is_absolute
+    );
+}
+
+#[test]
+fn a_drive_and_no_root_after_the_shells_first_slash_is_read_from_the_root() {
+    let root = root();
+    let a_root_alone_is_absolute = Path::new("/").is_absolute();
+    for word in ["/C:.", "/c:sub/..", "/C:sub\\.."] {
+        assert_eq!(
+            of(word).contains(&at_the_root(&root)),
+            !a_root_alone_is_absolute,
+            "{word}"
+        );
+    }
+    let below = Form::Local(canonical(format!("{root}/.git").as_bytes()));
+    assert_eq!(of("/C:.git").contains(&below), !a_root_alone_is_absolute);
+}
+
+#[test]
+fn the_shells_proc_is_the_root_where_a_root_alone_is_not_absolute() {
+    let root = root();
+    let a_root_alone_is_absolute = Path::new("/").is_absolute();
+    for word in [
+        "/proc",
+        "/proc/cygdrive/c/repo",
+        "/proc/self/cwd/",
+        "/proc\\cygdrive\\c",
+        "/./proc/self/root/c/repo",
+        "file:///proc/self/cwd/",
+    ] {
+        assert_eq!(
+            of(word).contains(&at_the_root(&root)),
+            !a_root_alone_is_absolute,
+            "{word}"
+        );
+    }
+    // The shell's `/proc` is spelled in lower case alone, and is a whole component.
+    for word in ["/PROC/cygdrive/c/repo", "/procx/y", "/x/proc/y"] {
+        assert!(!of(word).contains(&at_the_root(&root)), "{word}");
     }
 }
 

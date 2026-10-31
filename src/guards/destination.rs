@@ -16,7 +16,9 @@
 //!   on every platform: the word is also a local path, whole, and where no separator follows
 //!   its colon what follows the colon is also a relative path, the over-inclusive
 //!   direction. So is `<letter>:/<path>` of a `file:///<letter>:/<path>` or
-//!   `file://<letter>:/<path>` word. These are Git's own readings, not a match (N5).
+//!   `file://<letter>:/<path>` word, and, where the platform has drives, what follows the
+//!   colon of such a word with no separator there. These are Git's own readings, not a match
+//!   (N5).
 //! - A URL's authority is what stands between its `://` and the first `/` after it,
 //!   bounded before anything is decoded, as RFC 3986 bounds it and the HTTP transport
 //!   reads it; each `%XX` but `%00`, which Git keeps as written, is then decoded in the
@@ -29,6 +31,8 @@
 //!   slashes dropped, the path itself, with `.git` appended, and each of those with
 //!   `/.git` appended. A relative one is read from the root and also from the user's
 //!   directory where that lies outside the root (`ReadFrom`). An empty one is the root.
+//!   So is a drive's top on Windows, `C:/`, on the root's drive, beside itself: Git drops
+//!   its slash too, and `C:` is the directory Git stands in on that drive.
 //! - A local path that is `~` or begins with `~/` is read as Git reads it: its trailing
 //!   slashes dropped, then the value of `HOME` in place of its `~`, then `.git` and
 //!   `/.git` appended to what that gives; where `HOME` is unset Git opens nothing for it,
@@ -39,7 +43,8 @@
 //!   absolute on Windows alone, `/x` on Linux and macOS alone (`Holds/G18`). On Windows
 //!   `\x` and `/x` are read from the root as the platform joins them, on its drive, and
 //!   what Git for Windows's shell opens for a `/x` it rewrites is also a local path:
-//!   `drive_as_directory` and `through_the_shell`, the over-inclusive direction.
+//!   `drive_as_directory` and `through_the_shell`, the over-inclusive direction. A `/<path>`
+//!   it reads below Git's own top directory has no form of it: the product admits it.
 //! - The canonical path is the real path, asked of the path as written, so that on Linux
 //!   and macOS `link/..` is where the link's target's parent is; where the real path cannot
 //!   be had — nothing there, or a path Git cannot open either, as one beyond a component it
@@ -97,7 +102,12 @@ pub fn forms(destination: &[u8], from: ReadFrom) -> Vec<Form> {
                 forms.extend(local(path, from));
             }
             if let Some(path) = on_a_drive(&whole) {
-                forms.extend(local(path, from));
+                let relative = after_the_colon(&path[2..], from);
+                forms.extend(if relative.is_empty() {
+                    local(path, from)
+                } else {
+                    relative
+                });
             }
         }
         return forms;
@@ -113,14 +123,7 @@ pub fn forms(destination: &[u8], from: ReadFrom) -> Vec<Form> {
         )];
         if matches!(host, [letter] if letter.is_ascii_alphabetic()) {
             forms.extend(local(destination, from));
-            if !path
-                .first()
-                .is_some_and(|&byte| path::is_separator(char::from(byte)))
-            {
-                // Written from `.`, so that no reading of a local path takes it for another
-                // kind: what follows the colon is a relative path whatever it holds.
-                forms.extend(local(&[b"./", path].concat(), from));
-            }
+            forms.extend(after_the_colon(path, from));
         }
         return forms;
     }
@@ -137,17 +140,35 @@ pub fn canonical(path: &[u8]) -> Vec<u8> {
     }
 }
 
-/// The `<letter>:/<path>` of what a `file:///<letter>:/<path>` or `file://<letter>:/<path>`
-/// word holds after its `://`, decoded, a separator after the colon being what the platform
-/// calls one, so that `file://C:\proj`, which Git for Windows opens, reads the same.
+/// The local forms of `path`, what follows a drive's colon, where no separator begins it, as
+/// the platform calls one: a relative path, from where Git stands on that drive; none otherwise.
+fn after_the_colon(path: &[u8], from: ReadFrom) -> Vec<Form> {
+    if path
+        .first()
+        .is_some_and(|&byte| path::is_separator(char::from(byte)))
+    {
+        return Vec::new();
+    }
+    // Written from `.`, so that no reading of a local path takes it for another kind: what
+    // follows the colon is a relative path whatever it holds.
+    local(&[b"./", path].concat(), from)
+}
+
+/// The `<letter>:<path>` of what a `file:///<letter>:<path>` or `file://<letter>:<path>` word
+/// holds after its `://`, decoded: a separator as the platform calls one after the colon, or
+/// anything where the platform has drives, which is where Git for Windows opens that.
 fn on_a_drive(after_the_scheme: &[u8]) -> Option<&[u8]> {
     let path = after_the_scheme
         .strip_prefix(b"/")
         .unwrap_or(after_the_scheme);
-    let drive = |letter: &u8, separator: &u8| {
-        letter.is_ascii_alphabetic() && path::is_separator(char::from(*separator))
+    let [letter, b':', rest @ ..] = path else {
+        return None;
     };
-    matches!(path, [letter, b':', separator, ..] if drive(letter, separator)).then_some(path)
+    let separated = rest
+        .first()
+        .is_some_and(|&byte| path::is_separator(char::from(byte)));
+    let read = separated || operand::absolute(&[*letter, b':', b'/']);
+    (letter.is_ascii_alphabetic() && read).then_some(path)
 }
 
 /// The scheme and what follows its `://`, when the word is a URL as Git's `is_url` reads
@@ -276,15 +297,17 @@ fn local(path: &[u8], from: ReadFrom) -> Vec<Form> {
         },
         _ => joined(path, from)
             .iter()
-            .map(|joined| {
+            .flat_map(|joined| {
                 let written = operand::with_slashes(joined);
                 let kept = without_trailing_slashes(&written);
-                // The top, `/` or `C:/`, keeps its slash: without it, it is another path.
                 if operand::absolute(kept) == operand::absolute(&written) {
-                    kept.to_vec()
-                } else {
-                    [kept, b"/"].concat()
+                    return vec![kept.to_vec()];
                 }
+                // The top, `/` or `C:/`, keeps its slash: without it, it is another path. Git
+                // drops the slash of `C:/` and opens `C:`, where it stands on that drive.
+                let mut paths = vec![[kept, b"/"].concat()];
+                paths.extend(stood_in_on(kept, from));
+                paths
             })
             .collect(),
     };
@@ -302,14 +325,39 @@ fn local(path: &[u8], from: ReadFrom) -> Vec<Form> {
         .collect()
 }
 
-/// `path` itself when absolute, else joined to each place `from` reads a relative one from:
-/// a root and no drive, which only Windows has, on that place's drive, where Git opens it;
-/// and any other path after that place, a drive and no root staying a name in it. A path
-/// `drive_as_directory` or `through_the_shell` reads is also that path.
+/// Each place `from` reads a relative path from that stands on `drive`, which is `C:` spelled
+/// in either case, or nothing: Git stands there on that drive.
+fn stood_in_on(drive: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
+    [Some(from.root), from.outside]
+        .into_iter()
+        .flatten()
+        .map(|base| bytes::of(base.as_os_str()))
+        .filter(|base| {
+            !drive.is_empty()
+                && base
+                    .get(..2)
+                    .is_some_and(|on| on.eq_ignore_ascii_case(drive))
+        })
+        .map(<[u8]>::to_vec)
+        .collect()
+}
+
+/// `path` itself when absolute, else joined to each place `from` reads a relative one from.
+/// A path `drive_as_directory` or `through_the_shell` reads is also that path.
 fn joined(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
     if operand::absolute(path) {
         return vec![path.to_vec()];
     }
+    let mut paths = join_to_each_place(path, from);
+    paths.extend(drive_as_directory(path));
+    paths.extend(through_the_shell(path, from));
+    paths
+}
+
+/// `path`, not absolute, joined to each place `from` reads a relative one from: a root and no
+/// drive, which only Windows has, on that place's drive, where Git opens it; and any other
+/// path after that place, a drive and no root staying a name in it.
+fn join_to_each_place(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
     let rooted = bytes::name(path).filter(|name| Path::new(name).has_root());
     [Some(from.root), from.outside]
         .into_iter()
@@ -318,20 +366,23 @@ fn joined(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
             Some(name) => bytes::of(base.join(name).as_os_str()).to_vec(),
             None => [bytes::of(base.as_os_str()), b"/", path].concat(),
         })
-        .chain(drive_as_directory(path))
-        .chain(through_the_shell(path))
         .collect()
 }
 
-/// The first component of a path that begins with `/` and what follows it, which begins with
-/// a separator as the platform calls one, or is empty.
+/// The first component of a path that begins with `/`, separators and `.` components before
+/// it being none to the shell, and what follows it, which begins with a separator as the
+/// platform calls one, or is empty.
 fn first_component(path: &[u8]) -> Option<(&[u8], &[u8])> {
-    let path = path.strip_prefix(b"/")?;
-    let end = path
-        .iter()
-        .position(|&byte| path::is_separator(char::from(byte)))
-        .unwrap_or(path.len());
-    Some(path.split_at(end))
+    let separator = |byte: &u8| path::is_separator(char::from(*byte));
+    let mut path = path.strip_prefix(b"/")?;
+    loop {
+        match path {
+            [first, rest @ ..] if separator(first) => path = rest,
+            [b'.', second, rest @ ..] if separator(second) => path = rest,
+            _ => break,
+        }
+    }
+    Some(path.split_at(path.iter().position(separator).unwrap_or(path.len())))
 }
 
 /// The `<letter>:/<path>` of a `/<letter>/<path>` that `Path::is_absolute` does not call
@@ -347,21 +398,30 @@ fn drive_as_directory(path: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// What else that shell opens for such a path: `/<letter>` the drive's top, `/<letter>:/<path>`
-/// that path on the drive, and `/tmp/<path>`, `tmp` in any case, that path below the directory
-/// `temp_dir` gives, which is the shell's `/tmp`. The refused direction: it costs `git dupe git`.
-fn through_the_shell(path: &[u8]) -> Option<Vec<u8>> {
-    let (first, rest) = first_component(path)?;
+/// that path on the drive, `/<letter>:<path>` with no separator `<path>` from where Git stands
+/// on the drive, `/tmp/<path>`, `tmp` in any case, that path below the directory `temp_dir`
+/// gives, which is the shell's `/tmp`, and `/proc/<path>` the root: that file system reaches any
+/// place and every spelling of it, so that no form of its own can hold one. The refused
+/// direction: it costs `git dupe git`.
+fn through_the_shell(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
+    let Some((first, rest)) = first_component(path) else {
+        return Vec::new();
+    };
     match first {
         [letter] if letter.is_ascii_alphabetic() && rest.is_empty() => {
-            Some([*letter, b':', b'/'].to_vec())
+            vec![[*letter, b':', b'/'].to_vec()]
         }
         [letter, b':'] if letter.is_ascii_alphabetic() => {
-            Some([&[*letter, b':', b'/'][..], rest].concat())
+            vec![[&[*letter, b':', b'/'][..], rest].concat()]
         }
+        [letter, b':', after @ ..] if letter.is_ascii_alphabetic() => {
+            join_to_each_place(&[b"./", after, rest].concat(), from)
+        }
+        b"proc" => join_to_each_place(b".", from),
         _ if first.eq_ignore_ascii_case(b"tmp") => {
-            Some([bytes::of(env::temp_dir().as_os_str()), b"/", rest].concat())
+            vec![[bytes::of(env::temp_dir().as_os_str()), b"/", rest].concat()]
         }
-        _ => None,
+        _ => Vec::new(),
     }
 }
 
