@@ -3,8 +3,9 @@
 git-dupe is one executable, `git-dupe`, which Git runs for `git dupe …` when it stands
 in a directory on `PATH`, and a manual page, `git-dupe.1`, which `man git-dupe` and
 `git dupe --help` show when it stands in the `man1` directory of a manual path. It runs
-on Linux and on macOS and needs Git 2.43.0 or newer, below 3.0.0, a release that is not
-out yet and may change what git-dupe relies on.
+on Linux, on macOS, and on Windows 11, and needs Git 2.43.0 or newer, below 3.0.0, a
+release that is not out yet and may change what git-dupe relies on. Windows has its own
+section, [On Windows](#on-windows); the sections before it are for Linux and macOS.
 
 ## With the install script
 
@@ -38,7 +39,7 @@ supports.
 
 ## From a release, by hand
 
-Download the archive for your machine,
+Download the tar for your machine,
 `git-dupe-<version>-<platform>-<architecture>.tar`, from the
 [releases](https://github.com/BrianWeiHaoMa/git-dupe/releases) and follow its `INSTALL`
 note, which installs the executable and the manual page, with `~/.local/bin` on `PATH`
@@ -58,13 +59,14 @@ name, so that `shasum -a 256 -c <archive>.sha256`, or `sha256sum -c`, checks a d
 in its own directory.
 
 A release has one archive for each kind of machine, its executable built and checked on
-that kind of machine, the Macs' on macOS 26:
+that kind of machine, the Macs' on macOS 26 and Windows's on Windows Server 2025:
 
 | Archive | For |
 |---|---|
 | `git-dupe-<version>-linux-x86_64.tar` | x86-64 Linux with the GNU C library 2.39 or newer |
 | `git-dupe-<version>-macos-arm64.tar` | a Mac with Apple silicon, on macOS 11.0 or newer |
 | `git-dupe-<version>-macos-x86_64.tar` | an Intel Mac, on macOS 10.12 or newer |
+| `git-dupe-<version>-windows-x86_64.zip` | x86-64 Windows, where the executable starts on Windows 10 or newer and git-dupe is checked on Windows 11 |
 
 On a Mac, a browser marks the archive it downloads as quarantined, the mark passes to the
 files unpacked from it, and macOS holds the executable, which Apple has not notarized,
@@ -95,8 +97,68 @@ the `git-core` PPA, a backport, or a build from source. On a Mac, Apple's Git, w
 Command Line Tools for Xcode install, will do, 2.50.1 in their version 26.6, and so will
 Homebrew's.
 
+## On Windows
+
+git-dupe runs on Windows 11 on x86-64, under Git for Windows 2.43.0 or newer, below
+3.0.0, its `MinGit` distribution included: the `git` on `PATH` must be Git for Windows's
+`git.exe`, a `.cmd` shim or another build of Git being outside what it promises. In
+PowerShell, paste:
+
+```powershell
+irm https://raw.githubusercontent.com/BrianWeiHaoMa/git-dupe/main/install.ps1 | iex
+```
+
+The script, [`install.ps1`](../install.ps1) in this repository, finds the latest release,
+downloads `git-dupe-<version>-windows-x86_64.zip` and its `.sha256`, checks the zip's
+SHA-256 digest, unpacks it, and runs the executable once. Only then does it install the
+executable as `~\.local\bin\git-dupe.exe`. It asks nothing, needs no change to the
+execution policy and no elevation, and writes nothing else outside a temporary directory
+it removes. A download cut short runs nothing, a failure installs nothing, and run later
+the same line installs the newest release over the one installed. Where the old
+`git-dupe.exe` is running, the script renames it to `git-dupe.exe.old` beside the new one
+and says so, and the next run, once that one has ended, removes it.
+
+The script changes no setting of yours. When `~\.local\bin` is not on `PATH` it prints
+two lines and runs neither: one that adds the directory for this session, and one to run
+once for every new shell. It also warns, and installs all the same, when the Git on
+`PATH` is missing or older than 2.43.0.
+
+By hand, download the zip from the
+[releases](https://github.com/BrianWeiHaoMa/git-dupe/releases) and, in its directory,
+unpack it and follow its `INSTALL-windows.txt` note, with `~\.local\bin` on `PATH`:
+
+```powershell
+Expand-Archive git-dupe-<version>-windows-x86_64.zip .
+cd git-dupe-<version>
+New-Item -ItemType Directory -Force ~\.local\bin
+Copy-Item git-dupe.exe ~\.local\bin\
+```
+
+Any other directory on `PATH` serves the same. To check a download first, compare
+`Get-FileHash -Algorithm SHA256 <zip>`, or `certutil -hashfile <zip> SHA256`, with the
+digest its `.sha256` starts with. The zip's `git-dupe.exe` carries its C runtime in it,
+so nothing else needs installing, and `cargo install --path .` works from a clone here
+as well, with the same C runtime.
+
+- **No `man`, and no page.** Windows has no `man` and the zip holds no manual page:
+  `git dupe help` and `-h` are the documentation, and `git dupe --help` is Git's own
+  failure for a page it lacks.
+- **Long paths.** Past Windows's 260 characters a Git command fails with
+  `Filename too long`, unless `core.longpaths` is set, a key of Git for Windows's that
+  git-dupe never sets of its own accord. Every file in the dupe stands five characters
+  deeper than its counterpart in `.git`.
+- **Symbolic links.** Where `core.symlinks` is false, which Git for Windows's own
+  configuration sets, a private symbolic link is checked out as a file holding its
+  target, as Git does for any repository.
+
+The rest of what Windows differs in is under
+[Limits](how-it-works.md#limits). To uninstall, run `git dupe detach` in each project that
+uses it, then delete `~\.local\bin\git-dupe.exe`, or run `cargo uninstall git-dupe` after
+an install from source.
+
 ## Uninstalling
 
-Run `git dupe detach` in each project that uses it, then delete
+On Linux and macOS, run `git dupe detach` in each project that uses it, then delete
 `~/.local/bin/git-dupe` and `~/.local/share/man/man1/git-dupe.1`, or run
-`cargo uninstall git-dupe` after an install from source.
+`cargo uninstall git-dupe` after an install from source. [On Windows](#on-windows) ends
+with its own.

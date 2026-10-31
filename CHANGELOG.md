@@ -8,12 +8,26 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Added
+
+- A release now ships `git-dupe-<version>-windows-x86_64.zip`, holding `git-dupe.exe`,
+  which needs no C runtime installed, and the install note `INSTALL-windows.txt`, beside
+  the three tars, and `install.ps1` installs it with one line pasted into PowerShell,
+  `irm https://raw.githubusercontent.com/BrianWeiHaoMa/git-dupe/main/install.ps1 | iex`:
+  it checks the zip against its published SHA-256 digest, puts the executable in
+  `~\.local\bin`, prints the line that puts that directory on `PATH`, and changes no
+  setting of yours. `docs/install.md` and the limits in `docs/how-it-works.md` say what
+  Windows users do and what Windows differs in.
+
 ### Changed
 
-- The scenarios, all but the release archive's, now run on Windows too, under Git for
-  Windows's `MinGit` builds of the oldest and the newest listed release, each part
-  Windows cannot hold reporting itself unavailable and naming why, so that git-dupe's
-  behavior there is pinned by the same checks as on Linux and macOS.
+- The scenarios now run on Windows too, under Git for Windows's `MinGit` builds of the
+  listed releases, each part Windows cannot hold reporting itself unavailable and naming
+  why, so that git-dupe's behavior there is pinned by the same checks as on Linux and
+  macOS, on every push on a `windows-2025` runner, which also makes the Windows archive.
+- The repository's `.gitattributes` keeps every checkout's bytes as committed, so that a
+  build from a clone under `core.autocrlf=true`, which Git for Windows ships, embeds the
+  help texts with LF line endings.
 - Commands in different worktrees now wait for each other on one empty lock file,
   `.git/git-dupe.lock`, where they waited on the `.git` directory itself. The first
   command that needs it makes it, nothing removes it, `git dupe detach` leaves it, and

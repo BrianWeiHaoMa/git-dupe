@@ -1,0 +1,4 @@
+# Every text file keeps the bytes it was committed with: the help texts and the page reach the
+# executable through include_str!, so a checkout under core.autocrlf=true, which Git for Windows
+# ships, must not turn them CRLF.
+* -text

@@ -99,8 +99,8 @@ or a commit of a branch, a tag, a stash entry, or `HEAD` is on no remote.
 
 ## Limits
 
-- **Paths are compared as spelled, on macOS's case-insensitive volume too.** That
-  volume, macOS's default, makes one difference: git-dupe compares paths as spelled, so
+- **Paths are compared as spelled, on a case-insensitive volume too.** Such a volume,
+  macOS's default and NTFS, makes one difference: git-dupe compares paths as spelled, so
   a path spelled in another case is another path to it, while the project's Git ignores
   a hidden path in every spelling of its ASCII case.
 - **Git 2.43.0 or newer, below 3.0.0.** No single feature needs it; it is the floor the
@@ -128,7 +128,9 @@ or a commit of a branch, a tag, a stash entry, or `HEAD` is on no remote.
   its worktrees, and `push`, `pull`, and `fetch` also when a remote of the dupe's
   configuration does. A URL Git rewrites through `url.<base>.insteadOf`, a path
   beginning with `~` and a user's name, and a remote defined by a file in a `remotes` or
-  `branches` directory are not seen through.
+  `branches` directory are not seen through; nor, on Windows, are a UNC path to a local
+  drive, a `/<path>` that Git for Windows's shell reads below Git's own installation, and
+  a public remote reached through that shell's `/proc`.
 - **One command at a time in a worktree.** git-dupe commands in one worktree must not
   overlap each other or a public Git command that writes to that worktree, and one
   person or agent works in a worktree at a time; nothing is promised when they do.
@@ -145,6 +147,47 @@ or a commit of a branch, a tag, a stash entry, or `HEAD` is on no remote.
   naming the count, never truncated. Files below a hidden directory do not count toward
   the paths: `notes/` is one path.
 
+### On Windows
+
+The commands of a day's work hold in PowerShell, `cmd`, and Git Bash. Windows differs in
+these, where keeping Linux's and macOS's behavior is impossible or out of proportion:
+
+- Its command line holds fewer hidden paths: their paths and those of other worktrees'
+  regions take at most 32,000 UTF-16 code units together, each path counted with 15
+  more, 2 more when it holds a space, and 1 more for each `"` in it and each character
+  its exclude rule escapes, which is 17,000 units of paths at 1,000 paths that hold no
+  space and no such character.
+- A name stored in an index or in `.gitdupe` that is not valid UTF-8 cannot stand on a
+  command line: a command that would need one there is refused, naming the path, and
+  otherwise it is named in a warning.
+- There is no `man` and no page: `git dupe help` and `-h` are the documentation, and
+  `git dupe --help` is Git's own failure for a page it lacks.
+- A Ctrl-C ends a command with no particular exit status.
+- An NTFS junction counts as a symbolic link: a hidden path below one is warned about
+  and `git dupe clean` refuses, though Git walks a junction as a directory. A path of
+  another worktree's hidden paths that lies below one is not warned about.
+- Where `core.symlinks` is false, a private symbolic link is checked out as a file
+  holding its target, as Git does for any repository.
+- A path past 260 characters fails in Git unless `core.longpaths` is set, which
+  git-dupe does not do of its own accord, and every file in the dupe stands five
+  characters deeper than its counterpart in `.git`.
+- `cmd` and PowerShell do not expand `*`, so `git dupe add notes/*.md`, which Git Bash
+  expands, is a usage error in them. `cmd` does not read the `"$(…)"` of the command
+  that attaches a linked worktree. A command a git-dupe line offers is quoted for a
+  POSIX shell, as Git Bash reads it.
+- Under Git for Windows 2.43 through 2.47, a Git command in another worktree that opens
+  `.git/info/exclude` at the moment git-dupe replaces it can fail with Git's own
+  message that it cannot use that file, exit 128, and succeeds when run again; so can
+  git-dupe's own question of which hidden paths are exposed, which then says in a
+  warning that it could not be checked and is asked again by the next command. From
+  2.48 on Git reads the old file or the new.
+- Through a dangling symbolic link at `.git/info/exclude`, every Git for Windows command
+  that reads the file fails, so that a git-dupe command warns that exposure could not
+  be checked, where Linux's and macOS's Git answer.
+- In `git dupe status`, a path the project tracks under the hidden paths whose spelling
+  holds no ASCII byte other than `/` is left out with everything below it, where on
+  Linux and macOS a staged deletion or an untracked file below it stays shown.
+
 ## Built to a specification
 
 git-dupe is new, and a tool that writes inside `.git` has to earn trust, so it is held to
@@ -153,15 +196,15 @@ numbered lines, what git-dupe does, the guarantees it keeps, and what it never d
 [`TECHNICAL_SPECIFICATION.md`](../TECHNICAL_SPECIFICATION.md) says how each guarantee
 holds. The code follows both, and a change of behavior amends the specification first.
 The scenario suite, the specification's own `Done when` among it, runs on every push on
-Linux, on an Apple silicon Mac, and on an Intel Mac, under Git 2.43.0 and 2.56.0, the
-oldest and the newest release it lists
+Linux, on an Apple silicon Mac, on an Intel Mac, and on Windows Server, under Git 2.43.0
+and 2.56.0, the oldest and the newest release it lists
 ([CI](https://github.com/BrianWeiHaoMa/git-dupe/actions/workflows/ci.yml)), all but
 its timing of six commands among 100,000 files, which a shared runner decides as much
-as git-dupe does, and in full before each release, on Linux and on macOS, under every
-minor release between them, fourteen at this writing, each built from source there. On
-Windows the scenarios, all but the release archive's, run under Git for Windows's
-`MinGit` builds, unpacked in place of a build from source, so far under those two
-releases.
+as git-dupe does, and in full before each release, on Linux, on macOS, and on Windows 11,
+under every minor release between them, fourteen at this writing, each built from source
+on Linux and macOS, and on Windows the `MinGit` build of Git for Windows unpacked in
+place of one, a part of a check Windows cannot hold reporting itself unavailable and
+naming why.
 
 **How it was built.** I wrote the product specification and own every decision in it:
 the command surface, what is refused, what is left to plain Git, and the tradeoffs

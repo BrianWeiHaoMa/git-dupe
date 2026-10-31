@@ -31,6 +31,10 @@ jobs:
             timeout: 90
           - runner: macos-26-intel
             timeout: 90
+          # The label, never windows-latest, which moves to whatever image GitHub promotes;
+          # four processors, and a MinGit unpacked rather than built on a cache miss.
+          - runner: windows-2025
+            timeout: 120
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     steps:
@@ -42,7 +46,16 @@ jobs:
           rustup toolchain install
           rustup show active-toolchain
 
-      # macOS has man, and its Command Line Tools the zlib headers.
+      # Every file in a private repository stands deeper than its counterpart in .git, and
+      # the runner's own temporary directory is long enough to fail the deepest scenarios.
+      - name: Keep temporary files in a short directory
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p /c/t
+          echo 'TMP=C:\t' >> "$GITHUB_ENV"
+          echo 'TEMP=C:\t' >> "$GITHUB_ENV"
+
+      # macOS has man, and its Command Line Tools the zlib headers; Windows needs neither.
       - name: Install man and the zlib headers
         if: runner.os == 'Linux'
         run: |

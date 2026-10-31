@@ -51,7 +51,9 @@ what git-dupe runs and writes, and [Questions](questions.md) the usual doubts.
   and it holds a subdirectory, never a file at the root such as `AGENTS.md`.
 - **A gitignored folder, or symlinks from a dotfiles repository.** Hidden only where the
   team's `.gitignore` happens to name it, versioned only if the dotfiles repository knows
-  every project, and gone from every fresh clone until you set it up again.
+  every project, and gone from every fresh clone until you set it up again. On Windows a
+  symbolic link also needs Developer Mode or an elevated session, and comes out of a
+  checkout as a file holding its target where `core.symlinks` is false.
 - **git-crypt, sops, age.** git-crypt and sops encrypt files that stay in the project's
   repository, and age encrypts a file wherever it is; git-dupe keeps files out of the
   project and encrypts nothing. If you want both, encrypt before you add.

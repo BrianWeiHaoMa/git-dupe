@@ -4,7 +4,7 @@
 # CHANGELOG.md has the version's section (`check`). Then the checks of ci.yml run on a
 # runner of each platform and architecture a release ships for, and each runner's
 # `release_archive` scenarios make its archive (`build`). The Release is published only
-# when every runner's checks passed, with the three archives, their checksums, and that
+# when every runner's checks passed, with the four archives, their checksums, and that
 # section as its notes (`publish`).
 name: Release
 
@@ -110,7 +110,8 @@ jobs:
 
   # Each archive is made by the scenarios on a runner of the platform and architecture
   # its suffix names, never cross-built, so that an archive exists only where the checks
-  # passed on its platform (P3); the suffix is the expectation that pins it there.
+  # passed on its platform (P3); the suffix and the extension are the expectation that
+  # pins it there.
   build:
     needs: check
     strategy:
@@ -119,19 +120,29 @@ jobs:
         include:
           - runner: ubuntu-24.04
             suffix: linux-x86_64
+            extension: tar
             timeout: 60
           # A macOS runner is slower, the Intel one most, and builds the two Git
           # releases itself on a cache miss.
           - runner: macos-26
             suffix: macos-arm64
+            extension: tar
             timeout: 90
           - runner: macos-26-intel
             suffix: macos-x86_64
+            extension: tar
             timeout: 90
+          # The label, never windows-latest, which moves to whatever image GitHub promotes;
+          # four processors, and a MinGit unpacked rather than built on a cache miss.
+          - runner: windows-2025
+            suffix: windows-x86_64
+            extension: zip
+            timeout: 120
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     env:
       VERSION: ${{ needs.check.outputs.version }}
+      EXTENSION: ${{ matrix.extension }}
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -141,7 +152,16 @@ jobs:
           rustup toolchain install
           rustup show active-toolchain
 
-      # macOS has man, and its Command Line Tools the zlib headers.
+      # Every file in a private repository stands deeper than its counterpart in .git, and
+      # the runner's own temporary directory is long enough to fail the deepest scenarios.
+      - name: Keep temporary files in a short directory
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p /c/t
+          echo 'TMP=C:\t' >> "$GITHUB_ENV"
+          echo 'TEMP=C:\t' >> "$GITHUB_ENV"
+
+      # macOS has man, and its Command Line Tools the zlib headers; Windows needs neither.
       - name: Install man and the zlib headers
         if: runner.os == 'Linux'
         run: |
@@ -181,36 +201,44 @@ jobs:
 
       # As in ci.yml: every scenario but `scale`, whose counted Git runs among 100,000
       # files and one-second bound the delivery check runs before the tag. Its
-      # `release_archive` scenarios make target/release/git-dupe-<version>-<suffix>.tar.
+      # `release_archive` scenarios make target/release/git-dupe-<version>-<suffix>.<extension>
+      # with its .sha256.
       - name: Scenarios under the oldest and the newest listed release
         env:
           GIT_DUPE_CHECK_RELEASES: ${{ steps.releases.outputs.selection }}
         run: cargo test --test scenarios -- --skip scale
 
-      # From the archive's own directory, so that the .sha256 names it by its bare name;
-      # shasum is on every runner and every Mac, and its line is the one RELEASING.md checks.
-      - name: Write the archive's checksum
+      # The scenarios wrote the .sha256 and this step writes none, so that the three
+      # platforms have one source for its line. From the archive's own directory, because
+      # the line names it by its bare name; shasum stands in on a Mac without sha256sum.
+      - name: Check the archive's checksum
         run: |
           cd target/release
-          archive=git-dupe-$VERSION-${{ matrix.suffix }}.tar
-          if [[ ! -f $archive ]]; then
-            echo "the scenarios left no archive at target/release/$archive" >&2
-            exit 1
+          archive=git-dupe-$VERSION-${{ matrix.suffix }}.$EXTENSION
+          for file in "$archive" "$archive.sha256"; do
+            if [[ ! -f $file ]]; then
+              echo "the scenarios left no file at target/release/$file" >&2
+              exit 1
+            fi
+          done
+          if command -v sha256sum > /dev/null; then
+            sha256sum -c "$archive.sha256"
+          else
+            shasum -a 256 -c "$archive.sha256"
           fi
-          shasum -a 256 "$archive" > "$archive.sha256"
-          shasum -a 256 -c "$archive.sha256"
 
       - name: Keep the archive and its checksum for the publishing job
         uses: actions/upload-artifact@v7
         with:
           name: archive-${{ matrix.suffix }}
           path: |
-            target/release/git-dupe-${{ env.VERSION }}-${{ matrix.suffix }}.tar
-            target/release/git-dupe-${{ env.VERSION }}-${{ matrix.suffix }}.tar.sha256
+            target/release/git-dupe-${{ env.VERSION }}-${{ matrix.suffix }}.${{ matrix.extension }}
+            target/release/git-dupe-${{ env.VERSION }}-${{ matrix.suffix }}.${{ matrix.extension }}.sha256
           if-no-files-found: error
 
-  # Runs only when every build passed, and publishes the six files in one command, so
-  # that a Release never holds fewer.
+  # Runs only when every build passed, and publishes the eight files in one command, so
+  # that a Release never holds fewer; the loop names each archive, never a glob, so that
+  # one made under a wrong name is not published.
   publish:
     needs: [check, build]
     runs-on: ubuntu-24.04
@@ -238,8 +266,8 @@ jobs:
         run: |
           cd release
           files=()
-          for suffix in linux-x86_64 macos-arm64 macos-x86_64; do
-            archive=git-dupe-$VERSION-$suffix.tar
+          for suffix in linux-x86_64.tar macos-arm64.tar macos-x86_64.tar windows-x86_64.zip; do
+            archive=git-dupe-$VERSION-$suffix
             shasum -a 256 -c "$archive.sha256"
             files+=("$archive" "$archive.sha256")
           done

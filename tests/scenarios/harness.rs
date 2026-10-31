@@ -51,7 +51,7 @@ pub use detach::{
     after_git, daily_warnings, detached, now_visible, stale_file_timestamp, stale_timestamp,
     warnings,
 };
-pub use documents::{is_git_dupe, shown_command_lines};
+pub use documents::{is_git_dupe, shown_command_lines, shown_powershell_lines};
 pub use exclude_lock::{lock_is_free, lock_path};
 pub use executable::write_executable;
 pub use files::{

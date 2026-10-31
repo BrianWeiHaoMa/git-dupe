@@ -42,5 +42,5 @@ alone, and [What it is for](use-cases.md) the uses it was made for.
   `--force` it refuses while a change is uncommitted or a commit of a branch, a tag, a
   stash entry, or `HEAD` is on no remote; history removed by `detach --force` is gone,
   since git-dupe keeps no copy. Then delete `~/.local/bin/git-dupe` and
-  `~/.local/share/man/man1/git-dupe.1`, or `cargo uninstall git-dupe`, as
-  [Installing](install.md#uninstalling) says.
+  `~/.local/share/man/man1/git-dupe.1`, on Windows `~\.local\bin\git-dupe.exe`, or
+  `cargo uninstall git-dupe`, as [Installing](install.md#uninstalling) says.

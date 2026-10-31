@@ -17,7 +17,7 @@ codes.
 
 ## Install
 
-On x86-64 Linux or macOS, with Git 2.43.0 or newer, below 3.0.0:
+On x86-64 Linux or on macOS, with Git 2.43.0 or newer, below 3.0.0:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BrianWeiHaoMa/git-dupe/main/install.sh | sh
@@ -25,8 +25,17 @@ curl -fsSL https://raw.githubusercontent.com/BrianWeiHaoMa/git-dupe/main/install
 
 It puts the latest release's executable in `~/.local/bin` and its manual page in
 `~/.local/share/man/man1`, once the download matches its published digest.
+
+On Windows 11 on x86-64, in PowerShell, with Git for Windows of the same versions:
+
+```powershell
+irm https://raw.githubusercontent.com/BrianWeiHaoMa/git-dupe/main/install.ps1 | iex
+```
+
+It puts `git-dupe.exe` in `~\.local\bin`, once the download matches its digest, and
+prints the line that puts that directory on `PATH`, changing no setting of yours.
 [Installing](docs/install.md) has the rest: the archives by hand, from source, the Git
-it needs, and uninstalling.
+it needs, what Windows differs in, and uninstalling.
 
 ## Quick start
 
@@ -81,12 +90,12 @@ More of what it does not do is under [Limits](docs/how-it-works.md#limits), and
 - [What it is for](docs/use-cases.md): the uses it was made for, and how it compares
   with what you may already use.
 - [Questions](docs/questions.md): worktrees, teams, clones, and getting out.
-- [Installing](docs/install.md): the script, the archives by hand, from source, and the
+- [Installing](docs/install.md): the scripts, the archives by hand, from source, and the
   Git it needs.
 - `git dupe help`, and `git dupe help <command>` for each command git-dupe adds or
   changes: a screen each, from the executable alone.
-- `man git-dupe`, where the manual page is installed: the commands, a quick start,
-  examples, and explanations.
+- `man git-dupe`, where the manual page is installed, which is not on Windows: the
+  commands, a quick start, examples, and explanations.
 - [`PRODUCT_SPECIFICATION.md`](PRODUCT_SPECIFICATION.md): what git-dupe does and
   guarantees, and what it does not; [`TECHNICAL_SPECIFICATION.md`](TECHNICAL_SPECIFICATION.md):
   how each guarantee holds.
