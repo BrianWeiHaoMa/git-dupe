@@ -37,7 +37,9 @@
 //!   cannot ask, and the product admits it as not seen through.
 //! - A relative local path is one `Path::is_absolute` does not call absolute: `C:\proj` is
 //!   absolute on Windows alone, `/x` on Linux and macOS alone (`Holds/G18`). On Windows
-//!   `\x` and `/x` are read from the root as the platform joins them, on its drive.
+//!   `\x` and `/x` are read from the root as the platform joins them, on its drive, and
+//!   what Git for Windows's shell opens for a `/x` it rewrites is also a local path:
+//!   `drive_as_directory` and `through_the_shell`, the over-inclusive direction.
 //! - The canonical path is the real path, asked of the path as written, so that on Linux
 //!   and macOS `link/..` is where the link's target's parent is; where the real path cannot
 //!   be had — nothing there, or a path Git cannot open either, as one beyond a component it
@@ -46,8 +48,8 @@
 //!   another. This and `places` are the only parts of `Guards` that read the filesystem,
 //!   and they only read.
 
-use std::fs;
 use std::path::{self, Path};
+use std::{env, fs};
 
 use super::operand;
 use crate::bytes;
@@ -303,7 +305,7 @@ fn local(path: &[u8], from: ReadFrom) -> Vec<Form> {
 /// `path` itself when absolute, else joined to each place `from` reads a relative one from:
 /// a root and no drive, which only Windows has, on that place's drive, where Git opens it;
 /// and any other path after that place, a drive and no root staying a name in it. A path
-/// of the form `drive_as_directory` reads is also that path.
+/// `drive_as_directory` or `through_the_shell` reads is also that path.
 fn joined(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
     if operand::absolute(path) {
         return vec![path.to_vec()];
@@ -317,16 +319,47 @@ fn joined(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
             None => [bytes::of(base.as_os_str()), b"/", path].concat(),
         })
         .chain(drive_as_directory(path))
+        .chain(through_the_shell(path))
         .collect()
+}
+
+/// The first component of a path that begins with `/` and what follows it, which begins with
+/// a separator as the platform calls one, or is empty.
+fn first_component(path: &[u8]) -> Option<(&[u8], &[u8])> {
+    let path = path.strip_prefix(b"/")?;
+    let end = path
+        .iter()
+        .position(|&byte| path::is_separator(char::from(byte)))
+        .unwrap_or(path.len());
+    Some(path.split_at(end))
 }
 
 /// The `<letter>:/<path>` of a `/<letter>/<path>` that `Path::is_absolute` does not call
 /// absolute, which only Windows has: Git for Windows's shell opens that path on that drive
 /// when Git starts a transport program there.
 fn drive_as_directory(path: &[u8]) -> Option<Vec<u8>> {
-    match path {
-        [b'/', letter, rest @ ..] if letter.is_ascii_alphabetic() && rest.starts_with(b"/") => {
+    match first_component(path)? {
+        ([letter], rest) if letter.is_ascii_alphabetic() && !rest.is_empty() => {
             Some([&[*letter, b':'][..], rest].concat())
+        }
+        _ => None,
+    }
+}
+
+/// What else that shell opens for such a path: `/<letter>` the drive's top, `/<letter>:/<path>`
+/// that path on the drive, and `/tmp/<path>`, `tmp` in any case, that path below the directory
+/// `temp_dir` gives, which is the shell's `/tmp`. The refused direction: it costs `git dupe git`.
+fn through_the_shell(path: &[u8]) -> Option<Vec<u8>> {
+    let (first, rest) = first_component(path)?;
+    match first {
+        [letter] if letter.is_ascii_alphabetic() && rest.is_empty() => {
+            Some([*letter, b':', b'/'].to_vec())
+        }
+        [letter, b':'] if letter.is_ascii_alphabetic() => {
+            Some([&[*letter, b':', b'/'][..], rest].concat())
+        }
+        _ if first.eq_ignore_ascii_case(b"tmp") => {
+            Some([bytes::of(env::temp_dir().as_os_str()), b"/", rest].concat())
         }
         _ => None,
     }

@@ -146,10 +146,10 @@ fn a_file_url_also_has_the_local_forms_of_the_path_git_opens_once_it_decodes_the
     expected.extend(local_forms(&read("/srv/p")));
     expected.extend(local_forms(&read("/ss@localhost/srv/p")));
     assert_eq!(of("file://reader:p%2Fss@localhost/srv/p"), expected);
-    let mut expected = vec![url_form("x/srv", "/p")];
-    expected.extend(local_forms(&read("/p")));
-    expected.extend(local_forms(&read("/srv/p")));
-    assert_eq!(of("file://x%2fsrv/p"), expected);
+    let mut expected = vec![url_form("x/srv", "/proj")];
+    expected.extend(local_forms(&read("/proj")));
+    expected.extend(local_forms(&read("/srv/proj")));
+    assert_eq!(of("file://x%2fsrv/proj"), expected);
     // With no path of its own, the URL has the local forms of the one Git opens alone.
     let mut expected = vec![url_form("x/srv", "")];
     expected.extend(local_forms(&read("/srv")));
@@ -448,7 +448,14 @@ fn a_drive_written_as_a_directory_is_also_the_drive_where_a_root_alone_is_not_ab
             joined(path.as_bytes(), from(Path::new(&root())))[0].as_slice(),
         ))
     };
-    for word in ["/c/repo", "/C/repo/", "file:///c/repo"] {
+    for word in [
+        "/c/repo",
+        "/C/repo/",
+        "file:///c/repo",
+        "/c\\repo",
+        "file:///c\\repo",
+        "file:///c%5Crepo",
+    ] {
         let forms = of(word);
         let shell =
             forms.contains(&on_the_drive("c:/repo")) || forms.contains(&on_the_drive("C:/repo"));
@@ -461,6 +468,46 @@ fn a_drive_written_as_a_directory_is_also_the_drive_where_a_root_alone_is_not_ab
                 .iter()
                 .all(|form| { !matches!(form, Form::Local(path) if path.starts_with(b"C:/repo")) })
         );
+    }
+}
+
+#[test]
+fn what_the_shell_opens_past_a_drive_as_a_directory_is_also_a_form_where_a_root_alone_is_not_absolute()
+ {
+    let root = root();
+    let form = |path: &[u8]| local(path, from(Path::new(&root)))[0].clone();
+    let below_the_temporary_directory = std::env::temp_dir().join("repo");
+    let places: [(&[&str], Vec<u8>); 3] = [
+        (
+            &["/c:/repo", "/c:/repo/", "/c:\\repo", "file:///c:\\repo"],
+            b"c:/repo".to_vec(),
+        ),
+        (
+            &["/g", "file:///g", "/g:", "/g:/", "/g:\\"],
+            b"g:/".to_vec(),
+        ),
+        (
+            &["/tmp/repo", "/TMP/repo", "/Tmp\\repo", "file:///tmp/repo"],
+            bytes::of(below_the_temporary_directory.as_os_str()).to_vec(),
+        ),
+    ];
+    let a_root_alone_is_absolute = Path::new("/").is_absolute();
+    for (words, place) in places {
+        for word in words {
+            assert!(
+                of(word).contains(&form(&place)) || a_root_alone_is_absolute,
+                "{word}"
+            );
+        }
+    }
+    // Where a root alone is absolute, the path is that path and no other.
+    for word in ["/c:/repo", "/g", "/tmp/repo"] {
+        let paths = joined(word.as_bytes(), from(Path::new(&root)));
+        assert_eq!(paths.len() == 1, a_root_alone_is_absolute, "{word}");
+    }
+    // Any other first component opens nothing of the kind.
+    for word in ["/tmpx/repo", "/ab", "/1", "/ab:/repo", "/1:/repo"] {
+        assert_eq!(through_the_shell(word.as_bytes()), None, "{word}");
     }
 }
 

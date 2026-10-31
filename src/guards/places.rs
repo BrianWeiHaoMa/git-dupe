@@ -219,9 +219,19 @@ mod tests {
         // The root without its drive, and with its drive as a directory, each the root
         // itself where a root alone is absolute.
         let written = crate::guards::operand::with_slashes(bytes(&root));
-        let (rooted, drive_as_directory) = match written.split_at(2) {
-            ([letter, b':'], rest) => (rest.to_vec(), [b"/", &[*letter][..], rest].concat()),
-            _ => (written.clone(), written.clone()),
+        let (rooted, drive_as_directory, separated, through_the_shell) = match written.split_at(2) {
+            ([letter, b':'], rest) => (
+                rest.to_vec(),
+                [b"/", &[*letter][..], rest].concat(),
+                [b"/", &[*letter][..], b"\\", &rest[1..]].concat(),
+                [b"/", &written[..]].concat(),
+            ),
+            _ => (
+                written.clone(),
+                written.clone(),
+                written.clone(),
+                written.clone(),
+            ),
         };
         let root_place = Some(Place::WorkingTree(path(&root)));
         for word in [
@@ -235,6 +245,8 @@ mod tests {
             [b"file://", bytes(&root)].concat(),
             rooted.clone(),
             drive_as_directory.clone(),
+            separated.clone(),
+            through_the_shell.clone(),
         ] {
             assert_eq!(named(&word), root_place, "{}", word.escape_ascii());
         }
