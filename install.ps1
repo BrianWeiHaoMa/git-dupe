@@ -9,8 +9,8 @@
 # then does it place the file, by a rename, so that the path holds the old file, for an
 # instant nothing, or the new one, and never part of one. Every failure before that
 # installs nothing. It prints the line that puts ~\.local\bin on PATH and runs it for
-# nobody: it changes no setting of the user's, and a success leaves the calling session as
-# it was, where a refusal exits, as a script's failure does.
+# nobody: it changes no setting of the user's. A success leaves the calling session as it
+# was, and a refusal stops the pasted line with an error and leaves that session open too.
 # It runs under Windows PowerShell 5.1, which Windows 11 ships, and needs nothing else. It
 # never reads standard input, and writes nothing else outside a temporary directory it
 # removes.
@@ -36,7 +36,10 @@ function Assert-GitDupeMachine([string]$FromSource) {
     if ([Environment]::OSVersion.Platform -ne 'Win32NT') {
         throw 'install.ps1 is for Windows, and install.sh for this system; nothing was installed.'
     }
-    $machine = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+    # From the core library by name: PSReadLine 2.0, which an interactive session has loaded,
+    # defines a public type of this name with no OSArchitecture, and a bare [type] finds that.
+    $information = [object].Assembly.GetType('System.Runtime.InteropServices.RuntimeInformation')
+    $machine = $information::OSArchitecture.ToString()
     if ($machine -ne 'X64') {
         throw "no release of git-dupe is built for Windows on $machine; install it from source instead, as $FromSource says. Nothing was installed."
     }
@@ -220,8 +223,10 @@ function Install-GitDupeRelease([string]$Releases, [string]$Work) {
     Write-GitDupeReport $target $aside
 }
 
-# Every preference stands here, inside the function, and so ends with it; a success returns
-# rather than exits, so that what follows the pasted line in its session runs.
+# Every preference stands here, inside the function, and so ends with it. Nothing here exits:
+# exit ends the session pasted into, closing its window on the line that says why. A success
+# returns, and a refusal throws, which leaves that session open and still ends a
+# `powershell -Command` of the pasted line with status 1.
 function Install-GitDupe {
     $ErrorActionPreference = 'Stop'
     $ProgressPreference = 'SilentlyContinue'
@@ -243,7 +248,7 @@ function Install-GitDupe {
     }
     if ($refusal) {
         [Console]::Error.WriteLine("install.ps1: $refusal")
-        exit 1
+        throw 'git-dupe was not installed.'
     }
 }
 

@@ -66,7 +66,7 @@ that kind of machine, the Macs' on macOS 26 and Windows's on Windows Server 2025
 | `git-dupe-<version>-linux-x86_64.tar` | x86-64 Linux with the GNU C library 2.39 or newer |
 | `git-dupe-<version>-macos-arm64.tar` | a Mac with Apple silicon, on macOS 11.0 or newer |
 | `git-dupe-<version>-macos-x86_64.tar` | an Intel Mac, on macOS 10.12 or newer |
-| `git-dupe-<version>-windows-x86_64.zip` | x86-64 Windows, where the executable starts on Windows 10 or newer and git-dupe is checked on Windows 11 |
+| `git-dupe-<version>-windows-x86_64.zip` | x86-64 Windows 11 |
 
 On a Mac, a browser marks the archive it downloads as quarantined, the mark passes to the
 files unpacked from it, and macOS holds the executable, which Apple has not notarized,

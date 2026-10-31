@@ -46,8 +46,8 @@ fn stands_whole_in(command: &str, paragraph: &str) -> bool {
     })
 }
 
-#[test]
-fn every_git_dupe_line_the_docs_show_is_held_by_the_page() {
+/// Every page under `docs/`, from the repository root, in order.
+fn pages() -> Vec<String> {
     let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs");
     let mut documents: Vec<String> = fs::read_dir(&directory)
         .unwrap_or_else(|cause| panic!("{}: {cause}", directory.display()))
@@ -62,7 +62,12 @@ fn every_git_dupe_line_the_docs_show_is_held_by_the_page() {
             .any(|document| document == "docs/install.md"),
         "docs/ lists no page: {documents:?}"
     );
+    documents
+}
 
+#[test]
+fn every_git_dupe_line_the_docs_show_is_held_by_the_page() {
+    let documents = pages();
     let present = page_texts_present();
     let texts: Vec<&str> = present.iter().map(|(_, _, text)| text.as_str()).collect();
     for document in &documents {
@@ -75,6 +80,35 @@ fn every_git_dupe_line_the_docs_show_is_held_by_the_page() {
                      spells, or write it in prose"
                 );
             }
+        }
+    }
+}
+
+/// Windows 11 is the one Windows git-dupe runs on (N10, E1), whatever an older one the
+/// toolchain's target can start: no public document names another by its number.
+#[test]
+fn no_document_names_a_windows_outside_the_envelope() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let others = [
+        "README.md",
+        "RELEASING.md",
+        "CONTRIBUTING.md",
+        "CHANGELOG.md",
+        "INSTALL",
+        "INSTALL-windows.txt",
+    ];
+    for document in pages().iter().map(String::as_str).chain(others) {
+        let text = fs::read_to_string(root.join(document)).unwrap();
+        for (at, word) in text.match_indices("Windows ") {
+            // `Git for Windows 2.43` is a release of Git.
+            let rest = &text[at + word.len()..];
+            assert!(
+                text[..at].ends_with("Git for ")
+                    || rest.starts_with("11")
+                    || !rest.starts_with(|c: char| c.is_ascii_digit()),
+                "{document} names Windows {}",
+                rest.lines().next().unwrap()
+            );
         }
     }
 }

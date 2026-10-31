@@ -5,7 +5,9 @@
 //! beside the releases pages (`harness/release_site.rs`), so that nothing here asks another
 //! machine (L4, P3, S25). Every run compares every value of `HKCU\Environment` before and
 //! after it, because a script that helpfully sets the user's `Path` installs just as well.
-//! Each check reports itself unavailable off Windows, before any archive is asked for.
+//! `-Command` is not the session a person pastes into, which has PSReadLine loaded and goes
+//! on after the line: `Install::typed` is that session. Each check reports itself unavailable
+//! off Windows, before any archive is asked for.
 //!
 //! Of `install`'s cases this file leaves out: the strict umask, because Windows has no modes;
 //! the machine no archive is built for, because the architecture comes from .NET, not from a
@@ -21,8 +23,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use crate::harness::{
-    End, Output, ReleaseSite, Scenario, entry_names, hex_digest, identity, path_for_an_install,
-    release_archive, report, sleeping, text, under_each_release, windows_powershell, word,
+    End, Git, Output, ReleaseSite, Scenario, entry_names, hex_digest, identity,
+    path_for_an_install, release_archive, report, sleeping, text, under_each_release,
+    windows_powershell, word,
 };
 
 /// The line the installed executable prints for `git dupe --version`.
@@ -148,8 +151,8 @@ impl<'s> Install<'s> {
         self.bin().join("git-dupe.exe")
     }
 
-    /// `command` in PowerShell, against `site`, with `path` its `PATH`.
-    fn powershell(&self, site: &ReleaseSite, path: &OsStr, command: &str) -> Output {
+    /// PowerShell given `command`, against `site`, with `path` its `PATH`.
+    fn shell(&self, site: &ReleaseSite, path: &OsStr, command: &str) -> Git<'s> {
         let words = [
             "-NoProfile",
             "-ExecutionPolicy",
@@ -166,7 +169,22 @@ impl<'s> Install<'s> {
             .variable("TEMP", &self.temporary)
             .variable("TMP", &self.temporary)
             .variable("GIT_DUPE_RELEASES_URL", site.base())
-            .run()
+    }
+
+    /// `command` in PowerShell, against `site`, with `path` its `PATH`.
+    fn powershell(&self, site: &ReleaseSite, path: &OsStr, command: &str) -> Output {
+        self.shell(site, path, command).run()
+    }
+
+    /// `lines` typed one after another into one session, each read when the one before has
+    /// ended, as a person's are: PSReadLine is loaded first, and a line that fails does not
+    /// end the session.
+    fn typed(&self, site: &ReleaseSite, path: &OsStr, lines: &[&str]) -> Output {
+        let session = ["Import-Module PSReadLine\r\n".to_owned()]
+            .into_iter()
+            .chain(lines.iter().map(|line| format!("{line}\r\n")))
+            .collect::<String>();
+        self.shell(site, path, "-").input(session.as_bytes()).run()
     }
 
     /// The line a reader pastes, with the stand-in's address in the place of GitHub's.
@@ -217,16 +235,21 @@ impl<'s> Install<'s> {
         assert!(printed.contains(VERSION_LINE.trim_end()), "{output:?}");
     }
 
-    /// After a run that refused: exit 1, one `install.ps1:` line, nothing installed, nothing left.
+    /// After a run that refused: exit 1, one `install.ps1:` line first, followed by what
+    /// PowerShell prints for the error that stops the pasted line, nothing installed, nothing
+    /// left.
     fn refused(&self, output: &Output, saying: &str) {
         assert_eq!(output.end, End::Code(1), "{output:?}");
         let complaint = said(&output.stderr);
-        let lines: Vec<&str> = complaint.lines().collect();
+        let reasons: Vec<&str> = complaint
+            .lines()
+            .filter(|line| line.starts_with("install.ps1: "))
+            .collect();
         assert!(
-            lines.len() == 1 && lines[0].starts_with("install.ps1: "),
+            reasons.len() == 1 && complaint.starts_with(reasons[0]),
             "{output:?}"
         );
-        assert!(complaint.contains(saying), "{output:?}");
+        assert!(reasons[0].contains(saying), "{output:?}");
         assert!(entry_names(&self.temporary).is_empty(), "{output:?}");
     }
 
@@ -289,6 +312,77 @@ fn the_pasted_line_installs_the_latest_release_s_executable() {
             .variable("PATH", &path)
             .succeeds();
         assert_eq!(answer.stdout, VERSION_LINE.as_bytes(), "{answer:?}");
+
+        // Each printed line itself puts the directory where Git finds git-dupe, the one for
+        // every new shell run on this process's `Path`, because a check may not write the
+        // user's.
+        let path = path_for_an_install(s, &[]);
+        for (start, then) in [
+            ("$env:Path =", None),
+            ("[Environment]::SetEnvironmentVariable", Some("'Process'")),
+        ] {
+            let line = printed
+                .lines()
+                .map(str::trim)
+                .find(|line| line.starts_with(start))
+                .unwrap_or_else(|| panic!("{start}: {output:?}"));
+            let line = then.map_or(line.to_owned(), |scope| line.replace("'User'", scope));
+            let command = format!("{line}; git dupe --version");
+            let answer = install.powershell(&site, &path, &command);
+            assert_eq!(answer.end, End::Code(0), "{command}: {answer:?}");
+            assert_eq!(said(&answer.stdout), VERSION_LINE, "{command}: {answer:?}");
+        }
+    });
+}
+
+/// The session a person pastes into: PSReadLine defines a public type of the name .NET gives
+/// the machine's architecture, without that property, so that a script that passes every
+/// `-Command` check refuses here, every time (L4, P3).
+#[test]
+fn the_pasted_line_installs_in_a_session_with_psreadline_loaded() {
+    if !the_script_runs_here("the session pasted into") {
+        return;
+    }
+    under_each_release(|s| {
+        let site = site_of_the_release();
+        let install = Install::of(s);
+        let output = install.typed(
+            &site,
+            &path_for_an_install(s, &[]),
+            &[&Install::line(&site)],
+        );
+        install.installed(&output);
+    });
+}
+
+/// A refusal in that session says why and leaves it open: `exit` would end it, and its window
+/// with the line, while the person who pasted is still to read it (L4, P3).
+#[test]
+fn a_refusal_leaves_the_session_it_was_pasted_into_open() {
+    if !the_script_runs_here("a refusal in the session") {
+        return;
+    }
+    under_each_release(|s| {
+        let site = ReleaseSite::without_a_release().with_script(script());
+        let install = Install::of(s);
+        let output = install.typed(
+            &site,
+            &path_for_an_install(s, &[]),
+            &[
+                &Install::line(&site),
+                "[Console]::Out.WriteLine('the session went on')",
+            ],
+        );
+        assert!(
+            said(&output.stderr).contains("latest release"),
+            "{output:?}"
+        );
+        assert!(
+            said(&output.stdout).contains("the session went on"),
+            "{output:?}"
+        );
+        install.nothing_installed(&output);
+        assert!(entry_names(&install.temporary).is_empty(), "{output:?}");
     });
 }
 

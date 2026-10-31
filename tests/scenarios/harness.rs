@@ -89,7 +89,7 @@ pub use remotes::{
     dupe_clone, remote_moves_on,
 };
 pub use repository::locate_words;
-pub use scenario::{Scenario, report, under_each_release};
+pub use scenario::{Git, Scenario, report, under_each_release};
 pub use sha256::hex_digest;
 pub use stash::{refused_stash_untracked, stash_refusal_first, stash_untracked_line};
 pub use sweep::{GITDUPE, Killed, Sweep, Version, copied, files, lived_in, outside};

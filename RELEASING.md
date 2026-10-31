@@ -24,7 +24,7 @@ it has another name, read that name for `main` in them (`Set once`, below).
   | `git-dupe-<version>-linux-x86_64.tar` | `ubuntu-24.04` | x86-64 Linux with the GNU C library 2.39 or newer |
   | `git-dupe-<version>-macos-arm64.tar` | `macos-26` | macOS 11.0 or newer on Apple silicon |
   | `git-dupe-<version>-macos-x86_64.tar` | `macos-26-intel` | macOS 10.12 or newer on Intel |
-  | `git-dupe-<version>-windows-x86_64.zip` | `windows-2025` | Windows 10 or newer on x86-64, git-dupe being checked on Windows 11 |
+  | `git-dupe-<version>-windows-x86_64.zip` | `windows-2025` | Windows 11 on x86-64 |
 
   Each archive is named for the platform and the architecture of the machine that made
   it, as `uname -m` prints the architecture there, `x86_64` on Windows, and holds under
@@ -39,8 +39,9 @@ it has another name, read that name for `main` in them (`Set once`, below).
   executable runs only where the GNU C library is at least as new as the one it was
   linked against, the runner image's 2.39, so a newer image would raise that floor; a
   macOS executable runs on the macOS releases the pinned Rust toolchain supports for its
-  architecture, 11.0 on Apple silicon and 10.12 on Intel; a Windows executable, on the
-  releases that toolchain's target supports, 10 and later. The same scenarios write each
+  architecture, 11.0 on Apple silicon and 10.12 on Intel. Windows has no such floor:
+  git-dupe runs on Windows 11 alone, whatever older release that toolchain's target can
+  start on. The same scenarios write each
   `.sha256`, which names its archive by its bare name, so that
   `shasum -a 256 -c git-dupe-<version>-<platform>-<architecture>.<extension>.sha256`, or
   `sha256sum -c` where that is installed, checks a download in its own directory.
