@@ -55,7 +55,7 @@ pub use documents::{is_git_dupe, shown_command_lines};
 pub use exclude_lock::{lock_is_free, lock_path};
 pub use executable::write_executable;
 pub use files::{
-    copy, entry_names, mode, mode_is, name, name_accepted, set_mode, text, word_of, write,
+    copy, entry_names, junction, mode, mode_is, name, name_accepted, set_mode, text, word_of, write,
 };
 pub use fresh::FreshDirectory;
 pub use front::{general_text, usage_line};
@@ -66,13 +66,13 @@ pub use man::{
     shown_under, text_present, texts_present,
 };
 pub use output::{
-    End, Output, holds, lines_in_order, names, names_number, names_the_route_to_private, offered,
-    records, refusal, warnings_in_any_order,
+    End, Output, holds, lines_in_order, names, names_number, names_path,
+    names_the_route_to_private, offered, records, refusal, warnings_in_any_order,
 };
 pub use platform::{
-    MACHINES_WITHOUT_AN_ARCHIVE, architecture, as_git_spells, as_git_spells_bytes, canonical,
-    command_line_limit, commondir_read_through_a_link, identity, permissions, second_filesystems,
-    symlink, word,
+    MACHINES_WITHOUT_AN_ARCHIVE, architecture, as_git_spells, as_git_spells_bytes,
+    backslash_separates, canonical, command_line_limit, commondir_read_through_a_link,
+    held_from_deletion, identity, permissions, second_filesystems, symlink, word,
 };
 pub use public::{
     EVERY_OBJECT, held_publicly, leaving_public_git, privately_tracked, public_git, public_status,

@@ -10,9 +10,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, STOPPED_REBASE_HINT as REBASE, Scenario, global_alias, hinted, holds, private_add,
-    private_alias, private_commit, run_traced, text, under_each_release, unhinted, write,
-    write_executable,
+    End, STOPPED_REBASE_HINT as REBASE, Scenario, Worktree, global_alias, hinted, holds,
+    private_add, private_alias, private_commit, run_traced, text, under_each_release, unhinted,
+    write, write_executable,
 };
 
 const AM: [&[u8]; 4] = [
@@ -464,7 +464,10 @@ fn a_help_request_gets_no_hint_where_the_state_would_draw_one() {
         for words in [["rebase", "-h"], ["co", "-h"]] {
             let expected = s
                 .git(["-c", "help.autocorrect=0"].iter().chain(&words))
-                .variable("GIT_DIR", unattached.join(".git/dupe"))
+                .variable(
+                    "GIT_DIR",
+                    Worktree::read(s, &unattached).private_directory(),
+                )
                 .from(&unattached)
                 .run();
             let ours = s.git(["dupe"].iter().chain(&words)).from(&unattached).run();

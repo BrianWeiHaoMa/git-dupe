@@ -1,13 +1,17 @@
-//! A linked worktree outside E1 still refuses an indivisible `.gitdupe` replacement
-//! across filesystems (F5, Composition/Keeper), then settles the existing hidden set (G6).
+//! A linked worktree on another filesystem than `.git`, outside E1, on each way the platform
+//! reaches one. On another drive no relative path exists to record, and `init` refuses (G4,
+//! `Holds/G1`). Under the same drive or `/`, `init` attaches and an indivisible `.gitdupe`
+//! replacement is refused across the filesystems (F5, `Composition/Keeper`), the command then
+//! settling the existing hidden set (G6). The two roots' first components decide which.
 
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::ErrorKind;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use crate::harness::{
-    End, Scenario, Tree, Worktree, identity, names, report, second_filesystems, under_each_release,
-    write,
+    End, Scenario, Tree, Worktree, as_git_spells, identity, names, report, second_filesystems,
+    under_each_release, write,
 };
 
 /// One refusal leaves both indexes, all working files, and the declared hidden list
@@ -66,6 +70,22 @@ fn replacement_refused(s: &Scenario, wt: &Worktree, words: &[&str], cause: &str)
     assert_eq!(settled.after, region.after);
 }
 
+/// `init` on another drive than the Git directory: one refusal naming both, nothing made.
+fn refused_on_another_drive(s: &Scenario, wt: &Worktree) {
+    let init = s.git(["dupe", "init"]).from(&wt.root).run();
+    assert_eq!(init.end, End::Code(128), "{init:?}");
+    assert!(init.stdout.is_empty(), "{init:?}");
+    let refusal = init.only_line("fatal");
+    names(refusal, as_git_spells(&wt.root).as_bytes());
+    names(refusal, as_git_spells(&wt.git_directory).as_bytes());
+    assert_eq!(
+        fs::symlink_metadata(wt.private_directory())
+            .unwrap_err()
+            .kind(),
+        ErrorKind::NotFound
+    );
+}
+
 #[test]
 fn a_linked_worktree_on_another_filesystem_refuses_hidden_list_replacements() {
     under_each_release(|s| {
@@ -96,6 +116,10 @@ fn a_linked_worktree_on_another_filesystem_refuses_hidden_list_replacements() {
                 let wt = Worktree::read(s, &root);
                 assert_eq!(identity(&wt.git_directory).0, first_device);
                 assert_eq!(identity(&wt.root).0, second_device);
+                if wt.root.components().next() != wt.git_directory.components().next() {
+                    refused_on_another_drive(s, &wt);
+                    return;
+                }
                 let init = s.git(["dupe", "init"]).from(&root).run();
                 if init.end != End::Code(0) {
                     report(&format!(
@@ -103,6 +127,26 @@ fn a_linked_worktree_on_another_filesystem_refuses_hidden_list_replacements() {
                     ));
                 }
                 assert_eq!(init.end, End::Code(0), "{init:?}");
+
+                // The work tree is recorded relative to the private repository, and plain Git
+                // finds the root through it (F2).
+                let recorded = wt.private(s).git(["config", "--local", "core.worktree"]);
+                let recorded = recorded.succeeds();
+                assert!(recorded.stdout.starts_with(b"../../../.."), "{recorded:?}");
+                let mut private = OsString::from("--git-dir=");
+                private.push(wt.private_directory());
+                let top = s
+                    .git([
+                        private.as_os_str(),
+                        OsStr::new("rev-parse"),
+                        OsStr::new("--show-toplevel"),
+                    ])
+                    .from(&main)
+                    .succeeds();
+                assert_eq!(
+                    top.stdout,
+                    [as_git_spells(&wt.root).as_bytes(), b"\n"].concat()
+                );
 
                 // Observe this filesystem's rename cause directly, rather than fixing its wording.
                 let source = s.dir().join("rename-probe");

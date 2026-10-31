@@ -10,6 +10,10 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ### Changed
 
+- The scenarios, all but the release archive's, now run on Windows too, under Git for
+  Windows's `MinGit` builds of the oldest and the newest listed release, each part
+  Windows cannot hold reporting itself unavailable and naming why, so that git-dupe's
+  behavior there is pinned by the same checks as on Linux and macOS.
 - Commands in different worktrees now wait for each other on one empty lock file,
   `.git/git-dupe.lock`, where they waited on the `.git` directory itself. The first
   command that needs it makes it, nothing removes it, `git dupe detach` leaves it, and

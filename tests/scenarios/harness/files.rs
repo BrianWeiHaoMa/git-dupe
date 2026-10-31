@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use super::platform;
 use super::platform::symlink;
@@ -127,4 +128,15 @@ pub fn entry_names(directory: &Path) -> BTreeSet<OsString> {
 /// own paths are UTF-8.
 pub fn text(path: &Path) -> &str {
     path.to_str().expect("a UTF-8 scenario path")
+}
+
+/// An NTFS junction at `at` to the absolute directory `target`, which `cmd` alone makes:
+/// `symlink` makes a symbolic link, and the two differ to Git (S24).
+pub fn junction(target: &Path, at: &Path) {
+    let made = Command::new("cmd")
+        .args(["/c", "mklink", "/J"])
+        .args([at, target])
+        .output()
+        .unwrap_or_else(|cause| panic!("cmd: {cause}"));
+    assert!(made.status.success(), "mklink /J: {made:?}");
 }

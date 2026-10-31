@@ -4,6 +4,7 @@
 //! listing.
 
 use std::fmt;
+use std::path::MAIN_SEPARATOR;
 
 /// How a run ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,6 +104,20 @@ pub fn names(line: &[u8], part: &[u8]) {
         line.escape_ascii(),
         part.escape_ascii()
     );
+}
+
+/// `names` of the path `path`, whichever separator `line` or `path` spells it with: git-dupe
+/// joins a name below Git's directory with the platform's own, so that `.git/info/exclude`
+/// reads `.git\info\exclude` on Windows.
+pub fn names_path(line: &[u8], path: &[u8]) {
+    let spelled = |text: &[u8]| -> Vec<u8> {
+        let slash = |byte: &u8| match char::from(*byte) {
+            MAIN_SEPARATOR => b'/',
+            _ => *byte,
+        };
+        text.iter().map(slash).collect()
+    };
+    names(&spelled(line), &spelled(path));
 }
 
 /// A refusal (F9): exit 128, nothing on standard output, and standard error exactly one

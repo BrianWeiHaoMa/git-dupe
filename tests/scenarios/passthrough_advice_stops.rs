@@ -11,8 +11,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, STOPPED_REBASE_HINT as REBASE, Scenario, hinted, private_add, private_commit, run_traced,
-    text, under_each_release, unhinted, write, write_executable,
+    End, STOPPED_REBASE_HINT as REBASE, Scenario, as_git_spells, hinted, private_add,
+    private_commit, run_traced, text, under_each_release, unhinted, write, write_executable,
 };
 
 /// An attached workspace whose private `main`, checked out, holds three commits of
@@ -46,7 +46,7 @@ fn sequence_editor(s: &Scenario, root: &Path, name: &str, program: &str) {
     let body = format!("#!/bin/sh\n{program} \"$1\" > \"$1.new\" && mv \"$1.new\" \"$1\"\n");
     write_executable(s, &script, body.as_bytes());
     s.private(root)
-        .git(["config", "sequence.editor", text(&script)])
+        .git(["config", "sequence.editor", &as_git_spells(&script)])
         .succeeds();
 }
 

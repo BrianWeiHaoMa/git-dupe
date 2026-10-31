@@ -9,8 +9,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Runs, Scenario, Tree, Twin, changed_since, holds, names, private_add,
-    private_commit, refusal, region_rules, run_traced, under_each_release, write,
+    End, Output, Runs, Scenario, Tree, Twin, backslash_separates, changed_since, holds, names,
+    private_add, private_commit, refusal, region_rules, run_traced, under_each_release, write,
 };
 
 /// An attached project whose committed `.gitignore` ignores `ign/` and `*.o`, beside its
@@ -167,12 +167,20 @@ fn a_non_literal_pathspec_over_a_loose_directory_is_refused_in_every_spelling_an
             // An `-e` lacking its value, which Git refuses: refused here first.
             &["-fd", "cache?", "-e"],
         ] {
+            // A separator where `\` is one (G29): the word is a literal path there, below.
+            if words.iter().any(|word| word.contains('\\')) && backslash_separates() {
+                continue;
+            }
             let word = words
                 .iter()
                 .skip(1)
                 .find(|word| **word != "--" && !word.starts_with('-') && **word != "cache")
                 .unwrap();
             names_cache(&clean(words), word, false);
+        }
+        if backslash_separates() {
+            let literal = clean(&["-n", "--", "cache\\/"]);
+            assert_eq!(literal.end, End::Code(0), "{literal:?}");
         }
         // Under `-X`, which refuses `-e`, the way out is literal pathspecs alone.
         for words in [

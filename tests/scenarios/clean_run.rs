@@ -141,7 +141,8 @@ fn a_pathspec_setting_before_dupe_governs_the_users_pathspecs_alone() {
 #[test]
 fn under_x_one_ignore_question_comes_before_clean_whatever_the_hidden_files() {
     under_each_release(|s| {
-        for count in [5, 500] {
+        // As many as one command line holds here: a list past it is G23's refusal (E8).
+        for count in [5, (command_line_limit() / 150).min(500)] {
             // Each file hidden alone, or the directory that holds it.
             for directories in [false, true] {
                 let dir = s.dir().join(format!("workspace-{count}-{directories}"));

@@ -13,9 +13,12 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, holds, names, offered, private_commit, privately_tracked,
+    End, Output, Scenario, holds, name_accepted, names, offered, private_commit, privately_tracked,
     publicly_tracked, symlink, under_each_release, write,
 };
+
+/// The part a name this filesystem refuses leaves out.
+const OFFERED: &str = "a path a line offers a command for";
 
 /// A path a shell reads as two words, the second expanded, unless it is quoted.
 const SPACED: &str = "two $words";
@@ -113,7 +116,8 @@ fn clone_restores(s: &Scenario, name: &str, setting: Option<&str>) {
     let obstruction = format!("{SPACED} dir");
     let below = format!("{obstruction}/f.txt");
     // Each kept path, and what a pathspec written as it stands would also name.
-    let kept = [spaced.as_str(), ":(exclude)keep", "star*.txt"];
+    let mut kept = vec![spaced.as_str(), ":(exclude)keep", "star*.txt"];
+    kept.retain(|path| name_accepted(first, path.as_bytes(), OFFERED));
     let near = ["keep", "other", "starX.txt"];
     for path in kept.iter().chain(&near).chain([&below.as_str()]) {
         write(first, path, b"private\n");
@@ -166,7 +170,9 @@ fn hides_offers_to_add_and_unhide_take_the_path_alone() {
         let root = s.dir().join("project");
         s.attached_project(&root);
         hidden_decoy(s, &root);
-        for path in [SPACED, ":colon", BANGED] {
+        let mut paths = vec![SPACED, ":colon", BANGED];
+        paths.retain(|path| name_accepted(&root, path.as_bytes(), OFFERED));
+        for path in paths {
             let file = format!("{path}/a.md");
             write(&root, &file, b"note\n");
             let word = format!("./{path}");
@@ -217,6 +223,9 @@ fn hides_forced_add_offer_versions_a_path_the_project_ignores() {
             (":colon", ":colon/a.md"),
             ("mine", "mine"),
         ] {
+            if path == ":colon" && !name_accepted(&root, path.as_bytes(), OFFERED) {
+                continue;
+            }
             write(&root, file, b"local\n");
             let word = format!("./{path}");
             let hidden = s.git(["dupe", "hide", "--", &word]).from(&root).succeeds();
@@ -278,7 +287,8 @@ fn routes_to_private(s: &Scenario, name: &str, setting: Option<&str>) {
     let root = s.dir().join(name);
     s.attached_project(&root);
     let spaced = format!("{SPACED}.md");
-    let routed = [spaced.as_str(), ":colon.md", "back\\slash.md"];
+    let mut routed = vec![spaced.as_str(), ":colon.md", "back\\slash.md"];
+    routed.retain(|path| name_accepted(&root, path.as_bytes(), OFFERED));
     // What `:colon.md` and `back\slash.md`, read as Git reads a pathspec, also name.
     let near = ["colon.md", "backslash.md"];
     for path in routed.iter().chain(&near) {
@@ -288,7 +298,7 @@ fn routes_to_private(s: &Scenario, name: &str, setting: Option<&str>) {
     s.commit_public(&root);
     hidden_decoy(s, &root);
 
-    for path in routed {
+    for path in routed.iter().copied() {
         let word = format!("./{path}");
         let refused = git_under(s, &["dupe", "add", "--", &word], &root, setting);
         assert_eq!(refused.end, End::Code(128), "{refused:?}");

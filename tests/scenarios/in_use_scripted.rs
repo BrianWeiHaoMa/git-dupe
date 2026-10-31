@@ -7,9 +7,9 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Scenario, Tree, changed_since, daily_state, holds, leaving_public_git, names,
-    region_rules, run_traced, staged_gitdupe, unchanged, under_each_release, usage_line, write,
-    write_executable,
+    End, Scenario, Tree, as_git_spells, changed_since, daily_state, holds, leaving_public_git,
+    names, region_rules, run_traced, staged_gitdupe, unchanged, under_each_release, usage_line,
+    write, write_executable,
 };
 
 fn usage_error(s: &Scenario, dir: &Path, command: &str, options: &[&str], word: &[u8]) {
@@ -217,7 +217,7 @@ fn agent_then_script_then_unguarded_git_walk() {
             &dir,
             s.git(["dupe", "commit"])
                 .from(&dir)
-                .variable("GIT_EDITOR", &editor)
+                .variable("GIT_EDITOR", as_git_spells(&editor))
                 .variable("GIT_TERMINAL_PROMPT", "0")
                 .variable("EDITOR_RECORD", &record),
         );
@@ -225,10 +225,10 @@ fn agent_then_script_then_unguarded_git_walk() {
         assert_eq!(
             fs::read(record).unwrap(),
             format!(
-                "0\n{}\n{}\n1\n{}\n",
-                editor.display(),
-                editor.display(),
-                dir.join(".git/dupe/COMMIT_EDITMSG").display()
+                "0\n{}\n{}\n1\n{}/COMMIT_EDITMSG\n",
+                as_git_spells(&editor),
+                as_git_spells(&editor),
+                as_git_spells(&dir.join(".git/dupe"))
             )
             .as_bytes()
         );

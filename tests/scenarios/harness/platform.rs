@@ -53,6 +53,12 @@ pub fn as_git_spells_bytes(path: &Path) -> Vec<u8> {
     spelled.collect()
 }
 
+/// Whether `\` separates a path's components here (G29), so that a word holding it says
+/// nothing about a pattern.
+pub fn backslash_separates() -> bool {
+    std::path::is_separator('\\')
+}
+
 /// Removes the symbolic link at `at`, which on Windows is a directory's where its target
 /// was one.
 pub fn remove_link(at: impl AsRef<Path>) -> std::io::Result<()> {
@@ -183,6 +189,11 @@ mod unix {
     /// Whether a run can be started under a soft `RLIMIT_FSIZE`.
     pub fn file_size_limits() -> bool {
         true
+    }
+
+    /// A handle on the file at `path`, which stops no removal here.
+    pub fn held_from_deletion(path: &Path) -> fs::File {
+        fs::File::open(path).unwrap_or_else(|cause| panic!("{}: {cause}", path.display()))
     }
 
     /// Whether a Git reading `.git/info/exclude` can fail at the moment another command

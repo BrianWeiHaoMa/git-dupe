@@ -6,8 +6,8 @@ use std::path::Path;
 
 use crate::harness::{
     End, Everything, Output, Scenario, Transfer, Tree, as_git_spells, detached, dupe_succeeds,
-    holds, names, private_add, private_commit, refusal, region, run_traced, stale_file_timestamp,
-    stale_timestamp, symlink, unchanged, under_each_release, write,
+    holds, names, names_path, private_add, private_commit, refusal, region, run_traced,
+    stale_file_timestamp, stale_timestamp, symlink, unchanged, under_each_release, write,
 };
 
 fn before_refusal(transfer: &Transfer) -> Everything {
@@ -527,7 +527,7 @@ fn info_link_with_region_refuses_even_force_before_private_runs() {
             let (output, runs) = run_traced(s.git(words).from(root), &s.dir().join("trace"));
             assert_eq!(output.end, End::Code(128), "{output:?}");
             assert!(output.stdout.is_empty(), "{output:?}");
-            names(output.only_line("fatal"), as_git_spells(&info).as_bytes());
+            names_path(output.only_line("fatal"), as_git_spells(&info).as_bytes());
             let own = runs.own();
             assert_eq!(own.commands(), [b"rev-parse".as_slice()], "{own:?}");
             before.unchanged();

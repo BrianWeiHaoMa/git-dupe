@@ -12,9 +12,9 @@
 use std::path::Path;
 
 use crate::harness::{
-    End, Scenario, commit_here, committing, diverged, dupe_succeeds, gits_then_one_hint, hinted,
-    holds, succeeded_without_a_hint, text, transfer_asked_after, under_each_release, unhinted,
-    without_maintenance,
+    End, Scenario, as_git_spells, commit_here, committing, diverged, dupe_succeeds,
+    gits_then_one_hint, hinted, holds, succeeded_without_a_hint, text, transfer_asked_after,
+    under_each_release, unhinted, without_maintenance,
 };
 
 const UPSTREAM: &[u8] = b"'git dupe push -u origin HEAD'";
@@ -331,7 +331,8 @@ fn a_rejected_push_given_a_repository_names_its_pull_and_fetch() {
         assert_eq!(ours.end, End::Code(1), "{ours:?}");
         // Given as a path, the remote has no remote-tracking branch for a fetch to update: the
         // fetch and merge are claimed only where the fetch updates one.
-        let path = text(&t.private_remote);
+        let path = as_git_spells(&t.private_remote);
+        let path = path.as_str();
         let by_path = [
             format!("'git dupe pull {path} <branch>'"),
             format!("'git dupe fetch {path}'"),

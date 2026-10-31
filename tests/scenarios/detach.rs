@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, Output, Scenario, Transfer, Tree, as_git_spells, changed_since, command_line_limit,
-    daily_warnings, detached, holds, locate_words, mode_is, name, names, now_visible, permissions,
-    private_add, private_commit, public_git, region, region_rules, run_traced, symlink, unchanged,
-    under_each_release, warnings, write, write_executable,
+    daily_warnings, detached, holds, locate_words, mode_is, name, names, names_path, now_visible,
+    permissions, private_add, private_commit, public_git, region, region_rules, run_traced,
+    symlink, unchanged, under_each_release, warnings, write, write_executable,
 };
 
 const USER_BEFORE: &[u8] = b"# developer before\r\n*.o\n# caf\xe9\n";
@@ -236,7 +236,7 @@ fn exclude_link_is_replaced_with_user_bytes_and_its_target_is_untouched() {
         let replacement = output
             .lines("warning")
             .into_iter()
-            .filter(|line| holds(line, b".git/info/exclude"))
+            .filter(|line| holds(line, b"was a symbolic link; it is now"))
             .collect::<Vec<_>>();
         assert_eq!(replacement.len(), 1, "{output:?}");
         names(
@@ -244,7 +244,7 @@ fn exclude_link_is_replaced_with_user_bytes_and_its_target_is_untouched() {
             b"was a symbolic link; it is now a regular file",
         );
         names(replacement[0], b"its target is untouched");
-        names(replacement[0], as_git_spells(&exclude).as_bytes());
+        names_path(replacement[0], as_git_spells(&exclude).as_bytes());
         expected.push(replacement[0].to_vec());
         warnings(&output, expected);
         before.after_detach(&t);

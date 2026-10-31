@@ -4,6 +4,7 @@
 
 use std::ffi::{OsString, c_void};
 use std::fs;
+use std::fs::File;
 use std::io;
 use std::os::windows::fs::{OpenOptionsExt, symlink_dir, symlink_file};
 use std::os::windows::io::AsRawHandle;
@@ -25,6 +26,7 @@ pub use job::{Group, HeldProcess, ended, process_held, spawn_grouped};
 type Handle = *mut c_void;
 
 const DRIVE_FIXED: u32 = 3;
+const FILE_SHARE_READ_AND_WRITE: u32 = 0x3;
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
 const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 const FILE_SHARE_EVERYTHING: u32 = 0x7;
@@ -43,6 +45,9 @@ struct ByHandleFileInformation {
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
+    fn FindFirstVolumeW(volume: *mut u16, size: u32) -> Handle;
+    fn FindNextVolumeW(search: Handle, volume: *mut u16, size: u32) -> i32;
+    fn FindVolumeClose(search: Handle) -> i32;
     fn GetDriveTypeW(root: *const u16) -> u32;
     fn GetFileInformationByHandle(file: Handle, found: *mut ByHandleFileInformation) -> i32;
     fn GetLogicalDrives() -> u32;
@@ -55,6 +60,12 @@ unsafe extern "system" {
         flags: *mut u32,
         filesystem: *mut u16,
         filesystem_size: u32,
+    ) -> i32;
+    fn GetVolumePathNamesForVolumeNameW(
+        volume: *const u16,
+        names: *mut u16,
+        size: u32,
+        needed: *mut u32,
     ) -> i32;
 }
 
@@ -308,12 +319,29 @@ fn compiled_forwarder() -> Result<PathBuf, String> {
     Ok(program)
 }
 
-/// Each way of this platform: a volume under a drive letter of its own.
+/// A handle on the file at `path` that shares no deletion, so that a removal of it stops
+/// until the handle is dropped (S24).
+pub fn held_from_deletion(path: &Path) -> File {
+    fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ_AND_WRITE)
+        .open(path)
+        .unwrap_or_else(|cause| panic!("{}: {cause}", path.display()))
+}
+
+/// Each way of this platform: a volume under a drive letter of its own, and one mounted at a
+/// folder of the first drive holding no letter, two volumes (`Composition/The checks`).
 pub fn second_filesystems() -> Vec<SecondFilesystemFound> {
-    vec![SecondFilesystemFound {
-        reached: "under its own drive letter",
-        found: under_its_own_drive_letter(),
-    }]
+    vec![
+        SecondFilesystemFound {
+            reached: "under its own drive letter",
+            found: under_its_own_drive_letter(),
+        },
+        SecondFilesystemFound {
+            reached: "at a folder of the first drive",
+            found: at_a_folder_of_the_first_drive(),
+        },
+    ]
 }
 
 /// A fresh directory on a fixed NTFS volume other than the one the temporary directory lies
@@ -323,17 +351,99 @@ fn under_its_own_drive_letter() -> Result<SecondFilesystem, String> {
     let (first, _) = identity(&std::env::temp_dir());
     // SAFETY: the call takes no argument.
     let drives = unsafe { GetLogicalDrives() };
-    let root = (0..26)
+    let directory = (0..26)
         .filter(|letter| drives & (1 << letter) != 0)
         .map(|letter| format!("{}:\\", char::from(b'A' + letter)))
-        .find(|root| fixed_ntfs_serial(root).is_some_and(|serial| u64::from(serial) != first))
-        .ok_or("no fixed NTFS volume but the temporary directory's has a drive letter")?;
-    let directory = FreshDirectory::create_in(Path::new(&root))
-        .ok_or_else(|| format!("no fresh directory can be made at {root}"))?;
+        .filter(|root| fixed_ntfs_serial(root).is_some_and(|serial| u64::from(serial) != first))
+        .find_map(|root| FreshDirectory::create_in(Path::new(&root)))
+        .ok_or(
+            "no fixed NTFS volume but the temporary directory's takes a directory under a letter",
+        )?;
     Ok(SecondFilesystem { directory })
 }
 
-/// The serial number of the volume at the drive root `root`, where it is fixed and NTFS.
+/// A fresh directory on a fixed NTFS volume, other than the temporary directory's, that holds
+/// no drive letter and is mounted at a folder of the temporary directory's drive; the reason
+/// where this machine has none. The recovery partition has no path name, so it is not found.
+fn at_a_folder_of_the_first_drive() -> Result<SecondFilesystem, String> {
+    let temporary = canonical(&std::env::temp_dir())
+        .map_err(|cause| format!("the temporary directory: {cause}"))?;
+    let (first, _) = identity(&temporary);
+    let drive = temporary.components().next();
+    let directory = volumes()
+        .into_iter()
+        .filter(|volume| fixed_ntfs_serial(volume).is_some_and(|serial| u64::from(serial) != first))
+        .map(|volume| path_names(&volume))
+        .filter(|names| {
+            names
+                .iter()
+                .all(|name| Path::new(name).components().count() > 2)
+        })
+        .flatten()
+        .filter(|name| Path::new(name).components().next() == drive)
+        .find_map(|name| FreshDirectory::create_in(Path::new(&name)))
+        .ok_or(
+            "no fixed NTFS volume with no letter takes a directory at a folder of the first drive",
+        )?;
+    Ok(SecondFilesystem { directory })
+}
+
+/// The name of every volume of the machine, `\\?\Volume{…}\`.
+fn volumes() -> Vec<String> {
+    let mut volume = [0u16; 64];
+    let size = volume.len() as u32;
+    // SAFETY: the buffer is given with its size.
+    let search = unsafe { FindFirstVolumeW(volume.as_mut_ptr(), size) };
+    if search as isize == -1 {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    loop {
+        found.push(text_up_to_its_terminator(&volume));
+        // SAFETY: the search is open and the buffer is given with its size.
+        if unsafe { FindNextVolumeW(search, volume.as_mut_ptr(), size) } == 0 {
+            break;
+        }
+    }
+    // SAFETY: the search is open, and nothing uses it after this.
+    unsafe { FindVolumeClose(search) };
+    found
+}
+
+/// Every path at which `volume` is mounted, `C:\` or `C:\folder\`.
+fn path_names(volume: &str) -> Vec<String> {
+    let wide: Vec<u16> = volume.encode_utf16().chain([0]).collect();
+    let mut names = [0u16; 2048];
+    let mut needed = 0;
+    // SAFETY: `wide` ends in its terminator and the buffer is given with its size.
+    let asked = unsafe {
+        GetVolumePathNamesForVolumeNameW(
+            wide.as_ptr(),
+            names.as_mut_ptr(),
+            names.len() as u32,
+            &mut needed,
+        )
+    };
+    if asked == 0 {
+        return Vec::new();
+    }
+    names
+        .split(|unit| *unit == 0)
+        .take_while(|name| !name.is_empty())
+        .map(String::from_utf16_lossy)
+        .collect()
+}
+
+fn text_up_to_its_terminator(wide: &[u16]) -> String {
+    let end = wide
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(wide.len());
+    String::from_utf16_lossy(&wide[..end])
+}
+
+/// The serial number of the volume at `root`, a drive's root or a volume's name, where it is
+/// fixed and NTFS.
 fn fixed_ntfs_serial(root: &str) -> Option<u32> {
     let wide: Vec<u16> = root.encode_utf16().chain([0]).collect();
     // SAFETY: `wide` ends in its terminator.

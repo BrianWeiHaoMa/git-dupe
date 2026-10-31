@@ -6,8 +6,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Everything, MANY_URLS, PROJECT_URL, Scenario, Transfer, Tree, as_git_spells, holds,
-    refusal, symlink, text, unchanged, under_each_release,
+    End, Everything, MANY_URLS, PROJECT_URL, Scenario, Transfer, Tree, as_git_spells,
+    commondir_read_through_a_link, holds, refusal, symlink, text, unchanged, under_each_release,
 };
 
 fn refused(s: &Scenario, t: &Transfer, from: &Path, word: &str, place: &str) {
@@ -159,13 +159,13 @@ fn an_encoded_slash_in_a_credential_hides_no_public_place() {
 fn a_file_url_names_its_own_path_and_the_path_git_opens_once_it_decodes_the_url_whole() {
     under_each_release(|s| {
         let t = s.transfer_workspace("workspace");
-        let root = text(&t.root);
-        let rest = root.strip_prefix('/').unwrap();
+        let root = as_git_spells(&t.root);
+        let rest = root.trim_start_matches('/');
         let place = format!("working tree '{root}'");
         for word in [
             format!("file://x%2F{rest}"),
             format!("file://reader:p%2f{rest}"),
-            format!("file://reader:p%2Fss@localhost{root}"),
+            format!("file://reader:p%2Fss@localhost/{rest}"),
         ] {
             refused(s, &t, &t.root, &word, &place);
         }
@@ -223,16 +223,16 @@ fn working_trees_and_git_directories_are_public() {
     under_each_release(|s| {
         let t = s.transfer_workspace("workspace");
         let common = t.root.join(".git");
-        let linked_git = common.join("worktrees").join(t.linked.file_name().unwrap());
-        for path in [
-            &t.root,
-            &common,
-            &t.linked,
-            &linked_git,
-            &t.linked.join(".git"),
-        ] {
-            refused(s, &t, &t.root, text(path), text(path));
+        let linked_name = t.linked.file_name().unwrap();
+        let linked_git = common.join("worktrees").join(linked_name);
+        for path in [&t.root, &common, &t.linked, &t.linked.join(".git")] {
+            refused(s, &t, &t.root, text(path), &as_git_spells(path));
         }
+        // A Git directory below `worktrees` is joined to the directory as Git spells it.
+        let joined = Path::new(&as_git_spells(&common))
+            .join("worktrees")
+            .join(linked_name);
+        refused(s, &t, &t.root, text(&linked_git), text(&joined));
         runs(
             s,
             &t,
@@ -282,8 +282,15 @@ fn real_paths_precede_lexical_cleaning() {
         let elsewhere = s.dir().join("elsewhere");
         fs::create_dir(&elsewhere).unwrap();
         symlink(&sub, elsewhere.join("link")).unwrap();
-        for path in [alias, elsewhere.join("link/.."), t.root.join("absent/..")] {
-            refused(s, &t, &t.root, text(&path), text(&t.root));
+        for path in [alias, t.root.join("absent/..")] {
+            refused(s, &t, &t.root, text(&path), &as_git_spells(&t.root));
+        }
+        let beyond = elsewhere.join("link/..");
+        // Where `..` is folded by the path's spelling, Git opens `elsewhere` there too.
+        if commondir_read_through_a_link() {
+            refused(s, &t, &t.root, text(&beyond), &as_git_spells(&t.root));
+        } else {
+            runs(s, &t, &t.root, "elsewhere", text(&beyond));
         }
     });
 }
@@ -310,7 +317,7 @@ fn file_urls_also_name_local_places() {
             );
         }
         let relative = format!("../{}", t.root.file_name().unwrap().to_str().unwrap());
-        refused(s, &t, &t.root, &relative, text(&t.root));
+        refused(s, &t, &t.root, &relative, &as_git_spells(&t.root));
     });
 }
 
@@ -351,7 +358,7 @@ fn relative_words_inside_use_the_root() {
         let t = s.transfer_workspace("workspace");
         let sub = t.root.join("sub");
         fs::create_dir(&sub).unwrap();
-        refused(s, &t, &sub, ".", text(&t.root));
+        refused(s, &t, &sub, ".", &as_git_spells(&t.root));
         runs(s, &t, &sub, "near", "..");
     });
 }

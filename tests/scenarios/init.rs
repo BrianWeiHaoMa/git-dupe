@@ -450,7 +450,7 @@ fn config_lock_relays_gits_failure_and_removing_it_allows_completion() {
                 .run();
             assert_eq!(made.end, End::Code(0), "{made:?}");
             // Git's absolute core.worktree makes this an unfinished attachment.
-            private_config_value(s, &dir, "core.worktree", dir.to_str().unwrap());
+            private_config_value(s, &dir, "core.worktree", &as_git_spells(&dir));
             let missing = s
                 .private(&dir)
                 .git(["config", "--local", "--get", "status.showUntrackedFiles"])
@@ -459,7 +459,7 @@ fn config_lock_relays_gits_failure_and_removing_it_allows_completion() {
             fs::write(private.join("config.lock"), b"locked\n").unwrap();
             let output = s.git(["dupe", "init"]).from(&from).run();
             let mut git_dir = OsString::from("--git-dir=");
-            git_dir.push(&private);
+            git_dir.push(Worktree::read(s, &dir).private_directory());
             let gits = s
                 .git([
                     git_dir.as_os_str(),

@@ -158,7 +158,10 @@ oldest and the newest release it lists
 ([CI](https://github.com/BrianWeiHaoMa/git-dupe/actions/workflows/ci.yml)), all but
 its timing of six commands among 100,000 files, which a shared runner decides as much
 as git-dupe does, and in full before each release, on Linux and on macOS, under every
-minor release between them, fourteen at this writing, each built from source there.
+minor release between them, fourteen at this writing, each built from source there. On
+Windows the scenarios, all but the release archive's, run under Git for Windows's
+`MinGit` builds, unpacked in place of a build from source, so far under those two
+releases.
 
 **How it was built.** I wrote the product specification and own every decision in it:
 the command surface, what is refused, what is left to plain Git, and the tradeoffs

@@ -7,8 +7,8 @@ use std::fs;
 
 use crate::harness::{
     End, Region, Tree, as_git_spells, holds, identity, mode_is, name, name_accepted, names,
-    refused_stash_untracked, region, region_in, run_traced, set_mode, symlink, unchanged,
-    under_each_release, write,
+    names_path, refused_stash_untracked, region, region_in, run_traced, set_mode, symlink,
+    unchanged, under_each_release, write,
 };
 
 /// The user's text before every region.
@@ -204,7 +204,7 @@ fn detach_refuses_a_link_at_info_only_while_the_main_region_stands_beyond_it() {
                     let (output, runs) =
                         run_traced(s.git(words).from(&root), &s.dir().join("trace"));
                     assert_eq!(output.end, End::Code(128), "{output:?}");
-                    names(output.only_line("fatal"), as_git_spells(&info).as_bytes());
+                    names_path(output.only_line("fatal"), as_git_spells(&info).as_bytes());
                     let own = runs.own();
                     assert_eq!(own.commands(), [b"rev-parse".as_slice()], "{own:?}");
                     assert!(root.join(".git/dupe").is_dir());

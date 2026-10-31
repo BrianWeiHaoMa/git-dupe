@@ -46,9 +46,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::attached::{private_add, private_commit};
-use super::files::{copy, write};
+use super::files::{copy, name_accepted, write};
 use super::output::{End, Output};
-use super::platform::{as_git_spells, symlink};
+use super::platform::{self, as_git_spells, symlink};
 use super::scenario::Scenario;
 use super::tree::Tree;
 
@@ -273,9 +273,16 @@ impl<'t> Comparison<'t, '_> {
             sorted(&self.kept),
             "kept beyond plain Git; {context}"
         );
+        // An admitted path never stood to go only where the filesystem refuses its name.
+        let held = |path: &&str| {
+            let name = path.split('/').next().expect("a path");
+            fs::symlink_metadata(self.twin.built.join(path)).is_ok()
+                || platform::name_accepted(self.twin.s.dir(), name.as_bytes()).is_ok()
+        };
+        let admitted: Vec<&str> = self.admitted.iter().copied().filter(held).collect();
         assert_eq!(
             gone_beyond_plain,
-            sorted(&self.admitted),
+            sorted(&admitted),
             "gone beyond plain Git; {context}"
         );
 
@@ -283,8 +290,8 @@ impl<'t> Comparison<'t, '_> {
             assert_eq!(output.stdout, plain.stdout, "standard output; {context}");
         }
         if self.plain_fails {
+            // Plain Git's status here is its own: Git for Windows exits 0 from `./` too.
             assert_eq!(output.end, End::Code(0), "{context}");
-            assert_ne!(plain.end, End::Code(0), "{context}");
         } else {
             assert_eq!(output.end, plain.end, "{context}");
         }
@@ -357,6 +364,13 @@ pub fn hidden_path_of_every_kind(s: &Scenario, dir: &Path) {
         .succeeds();
     s.commit_public(dir);
 
+    // A name the filesystem refuses stays listed, a hidden path with nothing at it.
+    let held =
+        |name: &str| name_accepted(dir, name.as_bytes(), "a hidden path Git reads as a rule");
+    let refused: Vec<&str> = ["cr\rx", "ig *[d", "w *[#!x"]
+        .into_iter()
+        .filter(|name| !held(name))
+        .collect();
     for path in [
         ".env.local",
         "allign/keep.txt",
@@ -394,7 +408,10 @@ pub fn hidden_path_of_every_kind(s: &Scenario, dir: &Path) {
         "untracked-dir/g.o",
         ".vscode/launch.json",
         "solo-nested/f.txt",
-    ] {
+    ]
+    .into_iter()
+    .filter(|path| !refused.iter().any(|name| path.starts_with(name)))
+    {
         write(dir, path, format!("{path}\n").as_bytes());
     }
     fs::create_dir(dir.join("empty-dir")).unwrap();

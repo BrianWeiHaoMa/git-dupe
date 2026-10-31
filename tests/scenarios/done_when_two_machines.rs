@@ -12,10 +12,11 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    EVERY_OBJECT, End, PROJECT_URL, Runs, Scenario, SecondMachine, Tree, changed_since, detached,
-    held_publicly, holds, names, now_visible, private_head, privately_tracked, public_git,
-    publicly_tracked, records, region_rules, run_traced, stale_timestamp, stash_untracked_line,
-    under_each_release, usage_line, warnings, watched_dupe_succeeds, write,
+    EVERY_OBJECT, End, PROJECT_URL, Runs, Scenario, SecondMachine, Tree, as_git_spells,
+    changed_since, detached, held_publicly, holds, names, now_visible, private_head,
+    privately_tracked, public_git, publicly_tracked, records, region_rules, run_traced,
+    stale_timestamp, stash_untracked_line, under_each_release, usage_line, warnings,
+    watched_dupe_succeeds, write,
 };
 
 /// The privately tracked files of the first machine's history other than `.env.local`:
@@ -191,14 +192,14 @@ fn two_machines_share_private_work_refusals_change_nothing_and_detach_keeps_ever
             &["push", ".", "main:leak"],
         );
         let root = second.to_str().unwrap();
-        public_place_refused(&line, &runs, "push", root);
+        public_place_refused(&line, &runs, "push", &as_git_spells(second));
         // "`git dupe fetch <the root's absolute path>`"
         let (line, runs) = refused(s, &m, &linked, second, &["fetch", root]);
-        public_place_refused(&line, &runs, "fetch", root);
+        public_place_refused(&line, &runs, "fetch", &as_git_spells(second));
         // "`git dupe push <a linked worktree's path> main:leak`"
         let linked_path = linked.to_str().unwrap();
         let (line, runs) = refused(s, &m, &linked, second, &["push", linked_path, "main:leak"]);
-        public_place_refused(&line, &runs, "push", linked_path);
+        public_place_refused(&line, &runs, "push", &as_git_spells(&linked));
         // "`git dupe stash -u`": `notes/x.md` is there to take.
         let (line, runs) = refused(s, &m, &linked, second, &["stash", "-u"]);
         assert_eq!(line, stash_untracked_line(s));

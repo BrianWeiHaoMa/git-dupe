@@ -1,11 +1,11 @@
-//! The product's `Done when`, its bullet on macOS's default volume, which equates spellings
-//! that differ in case: `notes` hidden before anything stands at it, the directory then
-//! made as `Notes` (`Product`, terms and the sixth accepted limit; F3, G7, G11, G12, G13,
-//! G16, G18; S18). Git compares the spellings as its ignore rules read them, git-dupe byte
-//! for byte. The check names that volume, so it runs on macOS alone, where the scenario's
-//! own directory equates spellings, and reports itself unavailable everywhere else.
+//! The product's `Done when`, its bullet on macOS's default volume and on NTFS, which equate
+//! spellings that differ in case: `notes` hidden before anything stands at it, the directory
+//! then made as `Notes` (`Product`, terms and the sixth accepted limit; F3, G7, G11, G12,
+//! G13, G16, G18; S18). Git compares the spellings as its ignore rules read them, git-dupe
+//! byte for byte. The check names such a volume, so it runs on macOS and on Windows alone,
+//! where the scenario's own directory equates spellings, and reports itself unavailable
+//! everywhere else.
 
-use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -36,14 +36,17 @@ fn names_notes(text: &[u8]) -> bool {
 #[test]
 fn notes_hidden_before_it_stands_hides_the_directory_made_as_capital_notes() {
     under_each_release(|s| {
-        if word() != "macos" {
-            report("macos_volume unavailable: it checks macOS's default volume, on macOS alone");
+        if word() == "linux" {
+            report(
+                "case_insensitive_volume unavailable: it checks a case-insensitive volume, \
+                 on macOS and on Windows alone",
+            );
             return;
         }
         if !equates_spellings(s.dir()) {
             report(
-                "macos_volume unavailable: the scenarios' directory distinguishes case, \
-                 where macOS's default volume does not",
+                "case_insensitive_volume unavailable: the scenarios' directory distinguishes \
+                 case, where macOS's default volume and NTFS do not",
             );
             return;
         }
@@ -108,13 +111,8 @@ fn notes_hidden_before_it_stands_hides_the_directory_made_as_capital_notes() {
         );
 
         // A destination naming the root in another case names the project's working tree.
-        let other_case = s.dir().join("PROJECT");
-        let words = [
-            OsStr::new("dupe"),
-            OsStr::new("push"),
-            other_case.as_os_str(),
-            OsStr::new("main:leak"),
-        ];
+        let other_case = as_git_spells(&s.dir().join("PROJECT"));
+        let words = ["dupe", "push", &other_case, "main:leak"];
         let push = s.git(words).from(&root).run();
         assert_eq!(push.end, End::Code(128), "{push:?}");
         let refusal = push.only_line("fatal");

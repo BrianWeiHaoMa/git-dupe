@@ -4,9 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, command_line_limit, mode_is, name, name_accepted, names,
-    names_number, refused_stash_untracked, region, region_rules, set_mode, stash_refusal_first,
-    stash_untracked_line, symlink, under_each_release,
+    End, Output, Scenario, Tree, command_line_limit, holds, mode_is, name, name_accepted, names,
+    names_number, names_path, refused_stash_untracked, region, region_rules, set_mode,
+    stash_refusal_first, stash_untracked_line, symlink, under_each_release,
 };
 
 const ONLY_GITDUPE: &[u8] = b"# BEGIN git-dupe\n/.gitdupe\n# END git-dupe\n";
@@ -122,10 +122,11 @@ fn info_links_and_dangling_exclude_links_stay_untouched_and_exposure_is_still_as
                 symlink(&target, &link).unwrap();
                 let git = dir.join(".git");
                 let before = Tree::of(&dir).without_the_lock_file(&git);
-                let output = settled_by_stash_refusal(s, &from);
+                let output = s.git(["dupe", "stash", "-u"]).from(&from).run();
+                stash_refusal_first(s, &output);
                 let warnings = output.lines("warning");
                 assert_eq!(warnings.len(), 2, "{output:?}");
-                names(
+                names_path(
                     warnings[0],
                     if info_link {
                         b".git/info"
@@ -134,9 +135,20 @@ fn info_links_and_dangling_exclude_links_stay_untouched_and_exposure_is_still_as
                     },
                 );
                 names(warnings[0], b"cannot be maintained");
-                names(warnings[1], b"notes");
-                names(warnings[1], b".gitignore");
-                names_number(warnings[1], 2);
+                // The question is asked. Git for Windows cannot read its exclude file through a
+                // link to nothing, and fails as it does for every command then, so that the
+                // answer is the warning a failed question gets.
+                let asked = s
+                    .git(["check-ignore", "--no-index", "-q", "notes"])
+                    .from(&dir)
+                    .run();
+                if asked.end == End::Code(128) {
+                    names(warnings[1], b"exposure was not checked");
+                } else {
+                    names(warnings[1], b"notes");
+                    names(warnings[1], b".gitignore");
+                    names_number(warnings[1], 2);
+                }
                 assert_eq!(fs::read_link(&link).unwrap(), target);
                 let after = Tree::of(&dir).without_the_lock_file(&git);
                 assert!(before.changed_in(&after).is_empty());
@@ -162,7 +174,7 @@ fn a_resolving_exclude_link_is_replaced_and_its_target_is_untouched() {
             let output = settled_by_stash_refusal(s, &from);
             let warnings = output.lines("warning");
             assert_eq!(warnings.len(), 1, "{output:?}");
-            names(warnings[0], b".git/info/exclude");
+            names_path(warnings[0], b".git/info/exclude");
             assert!(fs::symlink_metadata(&exclude).unwrap().is_file());
             assert_eq!(fs::read(&target).unwrap(), b"# target without newline");
             assert_eq!(
@@ -248,12 +260,25 @@ fn an_exclude_directory_warns_and_changes_nothing_under_git() {
             assert_eq!(output.end, End::Code(128), "{output:?}");
             assert!(output.stdout.is_empty(), "{output:?}");
             assert_eq!(output.lines("fatal")[0], stash_untracked_line(s));
-            // Two warnings: the replacement that failed, naming the file, and the
-            // exposure question, which Git cannot answer while its exclude file is a
-            // directory and which is then one warning of its own.
+            // The replacement that failed, naming the file, and, where Git cannot answer
+            // while its exclude file is a directory, the exposure question: a warning of its
+            // own. Git's own answer says which, and any line of Git's stands beside them.
             let warnings = output.lines("warning");
-            assert_eq!(warnings.len(), 2, "{output:?}");
-            names(warnings[0], b".git/info/exclude");
+            let replacement: Vec<_> = warnings
+                .iter()
+                .filter(|line| holds(line, b"cannot replace the managed region"))
+                .collect();
+            assert_eq!(replacement.len(), 1, "{output:?}");
+            names_path(replacement[0], b".git/info/exclude");
+            let unasked = warnings
+                .iter()
+                .filter(|line| holds(line, b"exposure was not checked"))
+                .count();
+            let asked = s
+                .git(["check-ignore", "--no-index", "-q", ".gitdupe"])
+                .from(&dir)
+                .run();
+            assert_eq!(unasked == 1, asked.end == End::Code(128), "{output:?}");
             let after = Tree::of(&git).without_the_lock_file(&git);
             assert!(before.changed_in(&after).is_empty());
             assert!(

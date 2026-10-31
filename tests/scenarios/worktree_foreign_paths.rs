@@ -2,8 +2,8 @@
 //! Git decides exposure; a shared exclude file is only maintained where G6 allows it.
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, as_git_spells, identity, name, name_accepted, offered,
-    public_status, symlink, under_each_release, write,
+    End, Output, Scenario, Tree, Worktree, identity, name, name_accepted, offered, public_status,
+    symlink, under_each_release, write,
 };
 use std::ffi::OsStr;
 use std::fs;
@@ -631,11 +631,33 @@ fn foreign_paths_are_not_named_when_the_region_cannot_be_maintained() {
                 .git(["dupe", "status", "--porcelain"])
                 .from(&wt.root)
                 .succeeds();
-            let mut expected = vec![format!("the managed region cannot be maintained: {} {cause}; private files may be visible to public Git", as_git_spells(&link)).into_bytes()];
-            if name == "exclude-link" {
+            let mut expected = vec![format!("the managed region cannot be maintained: {} {cause}; private files may be visible to public Git", link.display()).into_bytes()];
+            // Git for Windows cannot read its exclude file through a link to nothing, and its
+            // own lines then stand beside these.
+            let unanswered = name == "exclude-link"
+                && s.git(["check-ignore", "--no-index", "-q", ".gitdupe"])
+                    .from(&wt.root)
+                    .run()
+                    .end
+                    == End::Code(128);
+            if unanswered {
+                expected.push(
+                    b"cannot ask public Git whether it ignores the hidden paths \
+                      (git exited with 128); exposure was not checked"
+                        .to_vec(),
+                );
+            } else if name == "exclude-link" {
                 expected.push(b".gitdupe is hidden but public Git does not ignore it".to_vec());
             }
-            warnings(&output, &expected);
+            let as_slices = || expected.iter().map(Vec::as_slice).collect::<Vec<_>>();
+            if unanswered {
+                assert_eq!(output.end, End::Code(0), "{output:?}");
+                assert_eq!(output.lines("warning"), as_slices(), "{output:?}");
+                assert_eq!(output.lines("fatal").len(), 1, "Git's own: {output:?}");
+                assert!(output.lines("error").is_empty(), "{output:?}");
+            } else {
+                warnings(&output, &expected);
+            }
             // G6 keeps a failing handler's status too, without foreign attribution.
             let direct = wt.private(s).git(["config", "--get", "absent.key"]).run();
             assert_eq!(direct.end, End::Code(1), "{direct:?}");
@@ -645,11 +667,16 @@ fn foreign_paths_are_not_named_when_the_region_cannot_be_maintained() {
                 .run();
             assert_eq!(failed.end, direct.end, "{failed:?}");
             assert_eq!(failed.stdout, direct.stdout, "{failed:?}");
-            let expected_stderr: Vec<u8> = expected
-                .iter()
-                .flat_map(|line| [b"warning: ", line.as_slice(), b"\n"].concat())
-                .collect();
-            assert_eq!(failed.stderr, expected_stderr, "{failed:?}");
+            assert_eq!(failed.lines("warning"), as_slices(), "{failed:?}");
+            if unanswered {
+                assert_eq!(failed.lines("fatal").len(), 1, "Git's own: {failed:?}");
+            } else {
+                let expected_stderr: Vec<u8> = expected
+                    .iter()
+                    .flat_map(|line| [b"warning: ", line.as_slice(), b"\n"].concat())
+                    .collect();
+                assert_eq!(failed.stderr, expected_stderr, "{failed:?}");
+            }
             assert!(working.changed_in(&Tree::working(&wt.root)).is_empty());
             assert_eq!(
                 wt.private(s)
@@ -672,7 +699,9 @@ fn foreign_paths_are_not_named_when_the_region_cannot_be_maintained() {
                 public_status_is(s, &wt, b"");
             } else {
                 assert!(!target.exists());
-                public_status_is(s, &wt, b"?? .gitdupe\n?? notes/x.md\n");
+                if !unanswered {
+                    public_status_is(s, &wt, b"?? .gitdupe\n?? notes/x.md\n");
+                }
             }
         }
     });
@@ -686,8 +715,9 @@ fn foreign_and_released_hide_remedies_take_their_path_whole() {
         // Quotes and `$` a shell reads, `!` that an interactive shell expands from its
         // history inside double quotes, and a leading `:` that `hide` reads as magic
         // unless it is typed `./:colon`.
-        let paths = [":colon", "it's $HOME", "it's x!!y", "two words"];
-        for path in paths {
+        let mut paths = vec![":colon", "it's $HOME", "it's x!!y", "two words"];
+        paths.retain(|path| name_accepted(&wt.root, path.as_bytes(), "a hidden path so named"));
+        for path in &paths {
             s.git(["dupe", "hide", "--", &format!("./{path}")])
                 .from(&main.root)
                 .succeeds();
@@ -706,7 +736,11 @@ fn foreign_and_released_hide_remedies_take_their_path_whole() {
         }
         assert_eq!(
             fs::read(wt.root.join(".gitdupe")).unwrap(),
-            b":colon\nit's $HOME\nit's x!!y\ntwo words\n"
+            paths
+                .iter()
+                .map(|path| format!("{path}\n"))
+                .collect::<String>()
+                .into_bytes()
         );
         let settled = s.git(["dupe", "status"]).from(&wt.root).succeeds();
         assert!(settled.lines("warning").is_empty(), "{settled:?}");
@@ -733,7 +767,12 @@ fn foreign_and_released_hide_remedies_take_their_path_whole() {
             .succeeds();
         assert_eq!(
             fs::read(wt.root.join(".gitdupe")).unwrap(),
-            b":colon\nit's $HOME\nit's x!!y\ntwo words\nown words\n"
+            [&paths[..], &["own words"]]
+                .concat()
+                .iter()
+                .map(|path| format!("{path}\n"))
+                .collect::<String>()
+                .into_bytes()
         );
         let settled = s.git(["dupe", "status"]).from(&wt.root).succeeds();
         assert!(settled.lines("warning").is_empty(), "{settled:?}");

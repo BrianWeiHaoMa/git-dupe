@@ -56,6 +56,11 @@ fn public_words_are_refused_without_effects() {
         let sub = t.root.join("sub");
         fs::create_dir(&sub).unwrap();
         let dot_git = t.root.join(".git");
+        let dot_git_spelled = as_git_spells(&dot_git);
+        let root = as_git_spells(&t.root);
+        let root = root.as_str();
+        let linked = as_git_spells(&t.linked);
+        let linked = linked.as_str();
         let linked_url = format!("file://{}", as_git_spells(&t.linked));
         let relative = format!("../{}", t.root.file_name().unwrap().to_str().unwrap());
         for (words, from, place) in [
@@ -69,16 +74,12 @@ fn public_words_are_refused_without_effects() {
                 &t.root,
                 "origin",
             ),
-            (vec!["push", ".", "main:leak"], &sub, text(&t.root)),
-            (vec!["fetch", text(&t.root)], &t.root, text(&t.root)),
-            (
-                vec!["push", text(&t.linked), "main:leak"],
-                &t.root,
-                text(&t.linked),
-            ),
-            (vec!["pull", text(&dot_git)], &t.root, text(&dot_git)),
-            (vec!["fetch", &linked_url], &t.root, text(&t.linked)),
-            (vec!["pull", &relative], &t.root, text(&t.root)),
+            (vec!["push", ".", "main:leak"], &sub, root),
+            (vec!["fetch", text(&t.root)], &t.root, root),
+            (vec!["push", text(&t.linked), "main:leak"], &t.root, linked),
+            (vec!["pull", text(&dot_git)], &t.root, &dot_git_spelled),
+            (vec!["fetch", &linked_url], &t.root, linked),
+            (vec!["pull", &relative], &t.root, root),
             (
                 vec!["remote", "add", "origin", PROJECT_URL],
                 &t.root,
@@ -231,11 +232,13 @@ fn a_remote_groups_members_are_compared_whatever_the_words_name() {
         let t = s.transfer_workspace("workspace");
         add_origin(s, &t);
         let private = text(&t.private_remote);
+        let root = as_git_spells(&t.root);
+        let linked = as_git_spells(&t.linked);
         for (key, value, place) in [
             (
                 "remotes.g",
                 format!("{private} {}", text(&t.root)),
-                text(&t.root),
+                root.as_str(),
             ),
             (
                 "remotes.one",
@@ -245,7 +248,7 @@ fn a_remote_groups_members_are_compared_whatever_the_words_name() {
             (
                 "remotes.mixed",
                 format!("origin\t{private}\n{}", text(&t.linked)),
-                text(&t.linked),
+                linked.as_str(),
             ),
         ] {
             s.git(["dupe", "git", "config", key, &value])
@@ -296,11 +299,15 @@ fn command_line_remote_url_is_guarded() {
             .git(["-c", &setting, "dupe", "fetch", "origin"])
             .from(&t.root)
             .run();
-        refusal(
-            &output,
-            &[b"git dupe remote remove", as_git_spells(&t.root).as_bytes()],
+        let fatal = refusal(&output, &[b"git dupe remote remove"]);
+        names(fatal, b"private remote 'extra'");
+        // The word is a URL of the public configuration too, and a path where its host is one
+        // letter: the refusal names the root, or that URL.
+        assert!(
+            holds(fatal, as_git_spells(&t.root).as_bytes())
+                || holds(fatal, b"the project's remote 'extra'"),
+            "{output:?}"
         );
-        names(output.only_line("fatal"), b"private remote 'extra'");
         before.unchanged();
     });
 }
@@ -314,7 +321,7 @@ fn empty_remote_url_is_guarded() {
             .from(&t.root)
             .succeeds();
         for command in ["push", "pull", "fetch"] {
-            configured_refused(s, &t, &[command], "empty", text(&t.root));
+            configured_refused(s, &t, &[command], "empty", &as_git_spells(&t.root));
         }
     });
 }
@@ -414,7 +421,7 @@ fn push_alias_is_guarded_and_git_push_is_unguarded() {
                 &t,
                 &t.root,
                 &[command, text(&t.root), "main:leak"],
-                text(&t.root),
+                &as_git_spells(&t.root),
             );
         }
         s.git(["dupe", "git", "push", text(&t.root), "main:leak"])

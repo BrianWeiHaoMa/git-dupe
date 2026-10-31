@@ -7,7 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    Everything, Scenario, Transfer, Tree, refusal, symlink, text, unchanged, under_each_release,
+    Everything, Scenario, Transfer, Tree, as_git_spells, refusal, symlink, text, unchanged,
+    under_each_release,
 };
 
 /// The transfer workspace with the scenario's `HOME` holding `project`, a link to the
@@ -59,7 +60,8 @@ fn refused(s: &Scenario, t: &Transfer, home: &Path, words: &[&str], parts: &[&st
 fn tilde_words_are_read_from_home() {
     under_each_release(|s| {
         let (t, home) = workspace(s);
-        let root = text(&t.root);
+        let root = as_git_spells(&t.root);
+        let root = root.as_str();
         for words in [
             &["push", "~/project", "main:leak"][..],
             &["push", "~/project/", "main:leak"],
@@ -91,7 +93,8 @@ fn tilde_words_are_read_from_home() {
 fn tilde_in_the_private_configuration_is_read_from_home() {
     under_each_release(|s| {
         let (t, home) = workspace(s);
-        let root = text(&t.root);
+        let root = as_git_spells(&t.root);
+        let root = root.as_str();
         let private = s.private(&t.root);
         private
             .git(["remote", "add", "home", "~/project"])
