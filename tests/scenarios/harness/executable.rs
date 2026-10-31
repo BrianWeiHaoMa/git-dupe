@@ -1,5 +1,6 @@
 //! A program a scenario runs, a hook, an editor, or a `git` in place of the release's,
-//! written by a process of its own.
+//! written by a process of its own where the platform has mode bits, and at once where it
+//! has none, because the reasoning below, and the shell's `chmod`, are Unix's.
 //!
 //! The scenarios run on many threads of one process. A descriptor this process holds open
 //! to write a file is inherited by every child another thread forks meanwhile, and stays
@@ -14,12 +15,14 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
+use super::platform::permissions;
 use super::scenario::Scenario;
 
-/// Writes `bytes` at `path`, below the scenario's directory, as a file of mode 0755,
-/// making the directories above it first, and returns once it can be run. The path is one
-/// word of the shell's and the bytes its standard input, so that neither is read as shell
-/// text. Fails the scenario, naming the path, when the file cannot be written whole.
+/// Writes `bytes` at `path`, below the scenario's directory, as a file of mode 0755 where
+/// there are modes, making the directories above it first, and returns once it can be run.
+/// The path is one word of the shell's and the bytes its standard input, so that neither is
+/// read as shell text. Fails the scenario, naming the path, when the file cannot be written
+/// whole.
 pub fn write_executable(s: &Scenario, path: &Path, bytes: &[u8]) {
     assert!(
         path.starts_with(s.dir()),
@@ -35,8 +38,13 @@ pub fn write_executable(s: &Scenario, path: &Path, bytes: &[u8]) {
             path.display()
         )
     });
+    if permissions(0o755).is_none() {
+        fs::write(path, bytes)
+            .unwrap_or_else(|cause| panic!("{}: cannot write it: {cause}", path.display()));
+        return;
+    }
     s.program(
-        "/bin/sh",
+        s.shell(),
         [
             OsStr::new("-c"),
             OsStr::new(r#"cat > "$0" && chmod 755 "$0""#),
@@ -49,11 +57,9 @@ pub fn write_executable(s: &Scenario, path: &Path, bytes: &[u8]) {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::PermissionsExt;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    use super::super::files::name_accepted;
+    use super::super::files::{mode, name, name_accepted};
     use super::super::output::End;
     use super::*;
 
@@ -64,19 +70,22 @@ mod tests {
     #[test]
     fn the_file_is_written_whole_and_runs_at_once() {
         let s = Scenario::of_the_first_release();
-        // Its last byte, which is no UTF-8, is left out where the filesystem refuses such a
-        // name.
-        let whole: &[u8] = b"a b'c\"d $(touch ran) `touch ran`; * \xff";
-        let name = match name_accepted(
-            s.dir(),
-            whole,
-            "harness::executable: a file named by bytes that are no UTF-8",
-        ) {
-            true => whole,
-            false => &whole[..whole.len() - 1],
-        };
-        let name = OsStr::from_bytes(name);
-        let path = s.dir().join("missing/below").join(name);
+        // Bytes that are no UTF-8, then a shell's every reading of its own, then what no
+        // filesystem here refuses: the first name this filesystem holds is the one written.
+        let names: [&[u8]; 3] = [
+            b"a b'c\"d $(touch ran) `touch ran`; * \xff",
+            b"a b'c\"d $(touch ran) `touch ran`; *",
+            b"a b'c d $(touch ran) `touch ran`; #",
+        ];
+        let accepted = names.into_iter().find(|bytes| {
+            name_accepted(
+                s.dir(),
+                bytes,
+                "harness::executable: a file named by these bytes",
+            )
+        });
+        let accepted = name(accepted.expect("a name every filesystem here holds"));
+        let path = s.dir().join("missing/below").join(&accepted);
         let bytes: Vec<u8> = (0..1u32 << 20).map(|n| (n % 256) as u8).collect();
         write_executable(&s, &path, &bytes);
         assert!(
@@ -85,13 +94,15 @@ mod tests {
         );
         let metadata = fs::symlink_metadata(&path).unwrap();
         assert!(metadata.is_file());
-        assert_eq!(metadata.permissions().mode() & 0o7777, 0o755);
+        if let Some(bits) = mode(&s, &path, "harness::executable") {
+            assert_eq!(bits, 0o755);
+        }
         assert_eq!(
             fs::read_dir(path.parent().unwrap())
                 .unwrap()
                 .map(|entry| entry.unwrap().file_name())
                 .collect::<Vec<_>>(),
-            [name]
+            [accepted]
         );
         assert!(
             !s.dir().join("ran").exists(),
@@ -101,7 +112,13 @@ mod tests {
         let script = b"#!/bin/sh\nprintf 'ran %s\\n' \"$#\"\n";
         write_executable(&s, &path, script);
         assert_eq!(fs::read(&path).unwrap(), script);
-        let ran = s.program(&path, ["word"]).run();
+        // Where a script is not a program of its own, the release's shell runs it.
+        let ran = match permissions(0o755) {
+            Some(_) => s.program(&path, ["word"]).run(),
+            None => s
+                .program(s.shell(), [path.as_os_str(), OsStr::new("word")])
+                .run(),
+        };
         assert_eq!(ran.end, End::Code(0), "{ran:?}");
         assert_eq!(ran.stdout, b"ran 1\n");
     }

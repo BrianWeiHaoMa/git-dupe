@@ -4,10 +4,9 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::PathBuf;
 
-use crate::harness::{End, daily_state, under_each_release};
+use crate::harness::{End, daily_state, name, under_each_release};
 
 #[test]
 fn a_config_env_in_an_alias_reads_the_private_runs_own_variables() {
@@ -60,7 +59,7 @@ fn a_config_env_in_an_alias_reads_the_private_runs_own_variables() {
             .unwrap_or_else(|| panic!("{ours:?}"));
         let expected = [parts[0], value, parts[1], value, parts[2]].concat();
         assert_eq!(ours.stdout, expected, "{ours:?}");
-        let read = Path::new(OsStr::from_bytes(value));
+        let read = PathBuf::from(name(value));
         assert_eq!(
             fs::canonicalize(read).unwrap(),
             fs::canonicalize(dir.join(".git/dupe")).unwrap(),

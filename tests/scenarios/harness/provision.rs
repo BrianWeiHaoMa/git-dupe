@@ -6,7 +6,6 @@
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::ErrorKind;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -144,7 +143,7 @@ impl Store {
         // The ceiling keeps that from finding the repository that holds this directory,
         // and no variable of the caller's names another.
         for (name, _) in std::env::vars_os() {
-            if name.as_bytes().starts_with(b"GIT_") {
+            if name.as_encoded_bytes().starts_with(b"GIT_") {
                 make.env_remove(name);
             }
         }

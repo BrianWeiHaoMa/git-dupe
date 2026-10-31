@@ -2,13 +2,12 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    End, IGNORED_HINT, Output, Scenario, Tree, changed_since, gits_then_one_hint, holds,
-    leaving_public_git, names, privately_staged, public_status, region_rules, staged_gitdupe,
-    unchanged, under_each_release, warnings_in_any_order, write,
+    End, IGNORED_HINT, Output, Scenario, Tree, as_git_spells, changed_since, gits_then_one_hint,
+    holds, leaving_public_git, name, names, privately_staged, public_status, region_rules,
+    staged_gitdupe, unchanged, under_each_release, warnings_in_any_order, write,
 };
 
 const DATE: &str = "2000-01-01T00:00:00Z";
@@ -66,7 +65,10 @@ fn cloned_project_through_first_commit_and_daily_private_work() {
 
         // Step 1: attach in the clone, preserving the project's branch and index.
         let init = succeeds(dupe(s, &dir, &["init"]));
-        names(&init.stdout, dir.join(".git/dupe").as_os_str().as_bytes());
+        names(
+            &init.stdout,
+            as_git_spells(&dir.join(".git/dupe")).as_bytes(),
+        );
         for level in [b"hint: ".as_slice(), b"warning: ", b"fatal: ", b"error: "] {
             assert!(!holds(&init.stdout, level), "{init:?}");
         }
@@ -185,7 +187,7 @@ fn cloned_project_through_first_commit_and_daily_private_work() {
         s.git(["clone", dir.to_str().unwrap(), fresh.to_str().unwrap()])
             .succeeds();
         for path in private_paths.split(|b| *b == 0).filter(|p| !p.is_empty()) {
-            assert!(!fresh.join(std::ffi::OsStr::from_bytes(path)).exists());
+            assert!(!fresh.join(name(path)).exists());
         }
 
         // Step 3: daily changes stay confined even from a public subdirectory.
@@ -432,7 +434,7 @@ fn cloned_project_through_first_commit_and_daily_private_work() {
             .collect();
         s.git(["clean", "-fdx"]).from(&dir).succeeds();
         for path in &tracked {
-            let path = dir.join(OsStr::from_bytes(path));
+            let path = dir.join(name(path));
             assert!(
                 !path.exists(),
                 "{} survived plain git clean",
@@ -455,14 +457,10 @@ fn cloned_project_through_first_commit_and_daily_private_work() {
             let staged = [b":".as_slice(), path].concat();
             let staged = s
                 .private(&dir)
-                .git([
-                    OsStr::new("cat-file"),
-                    OsStr::new("blob"),
-                    OsStr::from_bytes(&staged),
-                ])
+                .git([OsStr::new("cat-file"), OsStr::new("blob"), &name(&staged)])
                 .succeeds();
             assert_eq!(
-                fs::read(dir.join(OsStr::from_bytes(path))).unwrap(),
+                fs::read(dir.join(name(path))).unwrap(),
                 staged.stdout,
                 "{}",
                 path.escape_ascii()

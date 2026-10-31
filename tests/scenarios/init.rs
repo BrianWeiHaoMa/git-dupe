@@ -2,14 +2,12 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, entry_names, holds, locate_words, name_accepted, names,
-    names_number, private_config_value, refused_stash_untracked, region, region_rules, unchanged,
+    End, Output, Scenario, Tree, Worktree, as_git_spells, as_git_spells_bytes, command_line_limit,
+    entry_names, holds, locate_words, name, name_accepted, names, names_number,
+    private_config_value, refused_stash_untracked, region, region_rules, symlink, unchanged,
     under_each_release, usage_line,
 };
 
@@ -58,7 +56,10 @@ fn succeeded_with_hints(output: &Output, hints: usize) {
 }
 
 fn gits_init_line(output: &Output, dir: &Path) {
-    names(&output.stdout, dir.join(".git/dupe").as_os_str().as_bytes());
+    names(
+        &output.stdout,
+        as_git_spells(&dir.join(".git/dupe")).as_bytes(),
+    );
     // Only Git's output belongs on stdout; git-dupe's levels belong on stderr.
     for line in output.stdout.split(|&byte| byte == b'\n') {
         for level in [b"hint: ".as_slice(), b"warning: ", b"fatal: ", b"error: "] {
@@ -328,13 +329,7 @@ fn repeated_init_preserves_edits_and_restores_unfinished_or_deleted_config() {
 #[test]
 fn settle_over_arg_max_replaces_success_after_the_hint_and_replaces_the_region() {
     under_each_release(|s| {
-        let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
-        assert!(limit.status.success());
-        let limit: usize = std::str::from_utf8(&limit.stdout)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        let limit = command_line_limit();
         let count = limit / 128 + 1;
         let mut listed = Vec::new();
         for index in 0..count {
@@ -613,13 +608,13 @@ fn a_linked_worktree_git_worktree_add_did_not_make_is_refused_naming_its_git_dir
             .succeeds();
         let moved = s.dir().join("moved");
         s.linked_worktree(&main, &moved);
-        let elsewhere = main.join(".git").join(OsStr::from_bytes(elsewhere_name));
+        let elsewhere = main.join(".git").join(name(elsewhere_name));
         fs::create_dir(&elsewhere).unwrap();
         let admin = elsewhere.join("moved");
         fs::rename(main.join(".git/worktrees/moved"), &admin).unwrap();
         fs::write(
             moved.join(".git"),
-            [b"gitdir: ", admin.as_os_str().as_bytes(), b"\n"].concat(),
+            [b"gitdir: ", &as_git_spells_bytes(&admin)[..], b"\n"].concat(),
         )
         .unwrap();
         let asked = Worktree::read(s, &moved);
@@ -639,7 +634,7 @@ fn a_linked_worktree_git_worktree_add_did_not_make_is_refused_naming_its_git_dir
                 .run();
             assert_eq!(output.end, End::Code(128), "{words:?}: {output:?}");
             assert!(output.stdout.is_empty(), "{words:?}: {output:?}");
-            names(output.only_line("fatal"), admin.as_os_str().as_bytes());
+            names(output.only_line("fatal"), &as_git_spells_bytes(&admin));
             unchanged(&before, &main.join(".git"));
             assert!(!admin.join("dupe").exists());
         }

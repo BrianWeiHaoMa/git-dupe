@@ -2,11 +2,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::harness::{
-    End, Output, Runs, Scenario, holds, names, names_number, private_add, private_commit,
-    region_rules, run_traced, under_each_release, write, write_executable,
+    End, Output, Runs, Scenario, command_line_limit, holds, names, names_number, private_add,
+    private_commit, region_rules, run_traced, under_each_release, write, write_executable,
 };
 
 const SCOPE: [&str; 4] = [
@@ -329,13 +328,7 @@ fn a_reincluded_privately_tracked_file_warns_with_the_deciding_rule() {
 #[test]
 fn exclusions_over_arg_max_are_refused_with_the_scope_count_and_still_settle() {
     under_each_release(|s| {
-        let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
-        assert!(limit.status.success());
-        let limit: usize = std::str::from_utf8(&limit.stdout)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        let limit = command_line_limit();
         let count = limit / 128 + 1;
         let dir = s.dir().join("workspace");
         s.attached_project(&dir);
@@ -366,13 +359,7 @@ fn exclusions_over_arg_max_are_refused_with_the_scope_count_and_still_settle() {
 #[test]
 fn staged_deletions_below_a_hidden_directory_add_nothing_to_the_run() {
     under_each_release(|s| {
-        let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
-        assert!(limit.status.success());
-        let limit: usize = std::str::from_utf8(&limit.stdout)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        let limit = command_line_limit();
         // A few thousand files (`Scale`), each path long enough that the deletions' paths
         // alone exceed ARG_MAX, in components no filesystem refuses.
         let count = 2_000;

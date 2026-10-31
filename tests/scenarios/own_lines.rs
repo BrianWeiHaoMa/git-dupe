@@ -5,9 +5,8 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::symlink;
 
-use crate::harness::{End, daily_state, holds, under_each_release, write};
+use crate::harness::{End, daily_state, holds, name_accepted, symlink, under_each_release, write};
 
 /// A locale other than English, in every variable that selects one.
 const GERMAN: [(&str, &str); 3] = [
@@ -127,6 +126,10 @@ fn own_lines_are_the_same_uncolored_english_bytes_whatever_color_and_locale_say(
 #[test]
 fn a_rules_file_whose_name_holds_a_newline_is_named_on_one_line() {
     under_each_release(|s| {
+        let case = "own_lines: a rules file whose name holds a newline";
+        if !name_accepted(s.dir(), b"global\nignore", case) {
+            return;
+        }
         let dir = s.dir().join("workspace");
         s.attached_project(&dir);
         let rules = s.dir().join("global\nignore");

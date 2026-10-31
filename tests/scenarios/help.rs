@@ -3,15 +3,14 @@
 //! a word that is not one of git-dupe's commands. The texts of `init`, `hide`, `unhide`,
 //! `status`, `add`, and `clean` are pinned beside their commands, and `clone`'s here.
 
+use std::env::consts::EXE_SUFFIX;
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, general_text, holds, oldest_supported, run_traced, under_each_release, usage_line,
-    write_executable,
+    End, general_text, holds, name, oldest_supported, run_traced, under_each_release, usage_line,
+    word_of, write_executable,
 };
 
 #[test]
@@ -20,27 +19,26 @@ fn help_needs_only_the_installed_executable_outside_any_repository() {
         let built = Path::new(env!("CARGO_BIN_EXE_git-dupe"));
         let installed = s.dir().join("installed");
         fs::create_dir(&installed).unwrap();
-        let executable = installed.join("git-dupe");
+        let executable = installed.join(format!("git-dupe{EXE_SUFFIX}"));
         write_executable(s, &executable, &fs::read(built).unwrap());
         fs::set_permissions(&executable, fs::metadata(built).unwrap().permissions()).unwrap();
         assert_eq!(
-            fs::metadata(&executable).unwrap().permissions().mode(),
-            fs::metadata(built).unwrap().permissions().mode()
+            fs::metadata(&executable).unwrap().permissions(),
+            fs::metadata(built).unwrap().permissions()
         );
         assert_eq!(
             fs::read_dir(&installed)
                 .unwrap()
                 .map(|entry| entry.unwrap().file_name())
                 .collect::<Vec<_>>(),
-            [OsStr::new("git-dupe")]
+            [executable.file_name().unwrap()]
         );
 
         let answer = s.git(["--exec-path"]).succeeds();
-        let exec_path = Path::new(OsStr::from_bytes(answer.stdout.trim_ascii_end()));
+        let exec_path = PathBuf::from(name(answer.stdout.trim_ascii_end()));
         assert!(exec_path.ends_with("libexec/git-core"));
-        let release = exec_path.parent().unwrap().parent().unwrap();
-        let bin = release.join("bin");
-        assert!(bin.join("git").is_file());
+        let bin = s.release_git().parent().unwrap().to_path_buf();
+        assert!(s.release_git().is_file());
         let path = std::env::join_paths([&installed, &bin]).unwrap();
         let directories = std::env::split_paths(&path).collect::<Vec<_>>();
         assert_eq!(directories, [installed.as_path(), bin.as_path()]);
@@ -138,9 +136,10 @@ fn a_misused_help_is_a_usage_error_without_a_repository() {
 
 #[test]
 fn help_for_any_other_word_is_git_help_with_gits_own_end() {
-    let not_utf8 = OsStr::from_bytes(b"\xff\xfe");
     under_each_release(|s| {
-        for command in [OsStr::new("log"), not_utf8] {
+        let case = "help: a command word of bytes that are no UTF-8";
+        let not_utf8 = word_of(s, b"\xff\xfe", case);
+        for command in [OsStr::new("log")].into_iter().chain(not_utf8.as_deref()) {
             // Where no repository is, `git help` still answers, and git-dupe adds nothing.
             let gits = s.git([OsStr::new("help"), command]).run();
             let ours = s
@@ -216,6 +215,9 @@ fn help_clone_prints_its_text_anywhere_without_running_git() {
 fn a_git_child_killed_by_a_signal_ends_git_dupe_with_128_plus_its_number() {
     const SIGTERM: i32 = 15;
     under_each_release(|s| {
+        if !s.child_signals("help") {
+            return;
+        }
         // A viewer that kills the `git help` that runs it.
         for setting in [["man.viewer", "boom"], ["man.boom.cmd", "kill -TERM $$ #"]] {
             let set = s.git(["config", "--global"].iter().chain(&setting)).run();

@@ -8,10 +8,10 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use super::attached::{Private, Region, region_in};
+use super::files::name;
 use super::output::records;
 use super::scenario::Scenario;
 use super::tree::Tree;
@@ -62,7 +62,7 @@ impl Worktree {
         let [git_directory, common_directory, top] = lines[..] else {
             panic!("{}: {answer:?}", root.display());
         };
-        let path = |bytes: &[u8]| PathBuf::from(OsStr::from_bytes(bytes));
+        let path = |bytes: &[u8]| PathBuf::from(name(bytes));
         Worktree {
             root: path(top),
             git_directory: path(git_directory),

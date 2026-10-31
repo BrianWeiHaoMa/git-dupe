@@ -4,11 +4,10 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
-    End, Point, Scenario, Tree, Worktree, after_git, holds, names, now_visible, unchanged,
+    End, Point, Scenario, Tree, Worktree, after_git, holds, names, now_visible, symlink, unchanged,
     under_each_release, write,
 };
 

@@ -4,32 +4,29 @@
 //! From its start, a thread feeds the run's standard input, when it has any, and one
 //! collects each captured stream, so that a run printing more than a pipe holds while it
 //! reads its input never stalls the scenario, and an observation made before the run ends
-//! loses nothing it prints. A run in a process group of its own is waited for until no
-//! process of that group is left. A handle dropped before its run was collected whole, by
-//! a scenario that failed while the run went on or by a failed check of the run itself,
-//! kills what is left of the run, its group where it has one, and reaps it, so that no
-//! process of a failed scenario goes on or holds up the check.
-//!
-//! Processes are observed through `ps`, which answers alike on Linux and macOS for the
-//! columns read here, never through Linux's process filesystem, which macOS lacks.
-//! `ps -g` is not used: it selects a group on macOS and a session on Linux.
+//! loses nothing it prints. A run in a group of its own, `platform::Group`, is waited for
+//! until no process of that group is left. A handle dropped before its run was collected
+//! whole, by a scenario that failed while the run went on or by a failed check of the run
+//! itself, kills what is left of the run, its group where it has one, and reaps it, so that
+//! no process of a failed scenario goes on or holds up the check.
 
 use std::io::{self, Read, Write};
-use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use super::output::{End, Output};
+pub(super) use super::platform::ended;
+use super::platform::{Group, signal_of, spawn_grouped};
 
 pub struct Running {
     /// The program and its words, for a message.
     named: String,
     child: Child,
-    /// The process group the run leads, when it has one of its own.
-    group: Option<u32>,
+    /// The group holding the run, when it has one of its own.
+    group: Option<Group>,
     /// Whether `child` has been reaped: from then on only the other processes of its
-    /// group keep its process ID from naming another.
+    /// group keep a process group's ID from naming another.
     reaped: bool,
     feeder: Option<JoinHandle<io::Result<()>>>,
     stdout: Option<JoinHandle<io::Result<Vec<u8>>>>,
@@ -39,20 +36,20 @@ pub struct Running {
 }
 
 impl Running {
-    /// Starts `command`, built with its streams, in a process group of its own when
-    /// `grouped`, and feeds it `input` when there is some.
+    /// Starts `command`, built with its streams, in a group of its own when `grouped`, and
+    /// feeds it `input` when there is some.
     pub(super) fn start(
         mut command: Command,
         input: Option<Vec<u8>>,
         named: String,
         grouped: bool,
     ) -> Running {
-        if grouped {
-            command.process_group(0);
-        }
-        let mut child = command
-            .spawn()
-            .unwrap_or_else(|cause| panic!("cannot run {named}: {cause}"));
+        let started = match grouped {
+            true => spawn_grouped(&mut command).map(|(child, group)| (child, Some(group))),
+            false => command.spawn().map(|child| (child, None)),
+        };
+        let (mut child, group) =
+            started.unwrap_or_else(|cause| panic!("cannot run {named}: {cause}"));
         let feeder = input.map(|bytes| {
             let mut stdin = child.stdin.take().expect("piped standard input");
             thread::spawn(move || stdin.write_all(&bytes))
@@ -61,7 +58,7 @@ impl Running {
         let stderr = child.stderr.take().map(collecting);
         Running {
             named,
-            group: grouped.then(|| child.id()),
+            group,
             child,
             reaped: false,
             feeder,
@@ -136,11 +133,11 @@ impl Running {
                 .expect("the thread feeding the run")
                 .unwrap_or_else(|cause| panic!("cannot feed {}: {cause}", self.named));
         }
-        if let Some(group) = self.group {
+        if let Some(group) = &self.group {
             no_process_left(group, &self.named);
         }
         self.collected = true;
-        let end = match status.signal() {
+        let end = match signal_of(&status) {
             Some(signal) => End::Signal(signal),
             None => End::Code(status.code().expect("an exit code where no signal")),
         };
@@ -169,15 +166,10 @@ impl Drop for Running {
         if self.collected {
             return;
         }
-        match self.group {
-            // The group's ID is the leader's: while the leader is not reaped, or another
-            // process of the group runs, no other process can be given it.
-            Some(group) if !self.reaped || still_running(group, &self.named) => {
-                let _ = Command::new("/bin/sh")
-                    .args(["-c", r#"kill -s KILL -- "-$0" 2>/dev/null"#])
-                    .arg(group.to_string())
-                    .status();
-            }
+        match &self.group {
+            // A process group's ID is the leader's: while the leader is not reaped, or
+            // another process of the group runs, no other process can be given it.
+            Some(group) if !self.reaped || still_running(group, &self.named) => group.kill(),
             Some(_) => {}
             // A child already reaped is not signalled.
             None => {
@@ -222,12 +214,14 @@ fn collected(stream: Option<JoinHandle<io::Result<Vec<u8>>>>, named: &str) -> Ve
         .unwrap_or_else(|cause| panic!("cannot read what {named} printed: {cause}"))
 }
 
-/// Waits, ten seconds at most, until no process of the process group `group` is running.
-/// A zombie has ended and is not counted: who reaps an orphan is the machine's.
-fn no_process_left(group: u32, named: &str) {
+/// Waits, ten seconds at most, until no process of `group` is running. A zombie has ended
+/// and is not counted: who reaps an orphan is the machine's.
+fn no_process_left(group: &Group, named: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let running = running_in(group).unwrap_or_else(|cause| panic!("{named}: {cause}"));
+        let running = group
+            .running()
+            .unwrap_or_else(|cause| panic!("{named}: {cause}"));
         if running.is_empty() {
             return;
         }
@@ -235,43 +229,22 @@ fn no_process_left(group: u32, named: &str) {
             Instant::now() < deadline,
             "{named} left processes running: {running:?}"
         );
-        // Each look is a run of `ps` over every process of the machine.
+        // Each look reads every process of the machine.
         thread::sleep(Duration::from_millis(20));
     }
 }
 
-/// Whether a process of the group `group` is still running. Where `ps` cannot say, the
-/// answer is no and the cause is printed: the group's ID may name another's by now, and a
-/// panic here would abort a check that is already failing.
-fn still_running(group: u32, named: &str) -> bool {
-    match running_in(group) {
+/// Whether a process of `group` is still running. Where that cannot be said, the answer is
+/// no and the cause is printed: a process group's ID may name another's by now, and a panic
+/// here would abort a check that is already failing.
+fn still_running(group: &Group, named: &str) -> bool {
+    match group.running() {
         Ok(running) => !running.is_empty(),
         Err(cause) => {
             eprintln!("{named}: {cause}");
             false
         }
     }
-}
-
-/// The processes of the group `group` that have not ended, each as its row of
-/// `ps -A -o pid=,stat=,pgid=,comm=`: the process, its state, its group, and its name.
-fn running_in(group: u32) -> Result<Vec<String>, String> {
-    let rows = ps(&["-A", "-o", "pid=,stat=,pgid=,comm="])?;
-    Ok(rows
-        .lines()
-        .filter(|row| {
-            let mut columns = row.split_whitespace();
-            let (_, state, of) = (columns.next(), columns.next(), columns.next());
-            of == Some(group.to_string().as_str()) && state.is_some_and(|state| !ended_in(state))
-        })
-        .map(|row| row.trim().to_owned())
-        .collect())
-}
-
-/// Whether the process `process` has ended: gone, or a zombie.
-pub(super) fn ended(process: &str) -> bool {
-    let state = ps(&["-o", "stat=", "-p", process]).unwrap_or_else(|cause| panic!("{cause}"));
-    state.trim().is_empty() || ended_in(state.trim())
 }
 
 /// The lines by which a `git` script the harness puts in `GIT_EXEC_PATH` names the process
@@ -286,32 +259,6 @@ parent=${parent##*/}
     };
 }
 pub(super) use parent_name;
-
-/// Whether a state `ps` prints is a zombie's, whatever letters follow its first: `Z` on
-/// Linux, `Z`, `Z+`, or `Zs` on macOS.
-fn ended_in(state: &str) -> bool {
-    state.starts_with('Z')
-}
-
-/// What `ps <words>` printed. `ps` exits 1 and prints nothing on either stream when the
-/// processes it was asked about are gone, which is an answer; any other status, and
-/// anything on standard error, is a failure, never an empty answer.
-fn ps(words: &[&str]) -> Result<String, String> {
-    let ps = Command::new("ps")
-        .args(words)
-        .output()
-        .map_err(|cause| format!("cannot run ps {words:?}: {cause}"))?;
-    let printed = String::from_utf8_lossy(&ps.stdout).into_owned();
-    match (ps.status.code(), ps.stderr.is_empty()) {
-        (Some(0), true) => Ok(printed),
-        (Some(1), true) if printed.trim().is_empty() => Ok(printed),
-        _ => Err(format!(
-            "ps {words:?} {}: {}",
-            ps.status,
-            String::from_utf8_lossy(&ps.stderr)
-        )),
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -414,21 +361,6 @@ mod tests {
             }
             fs::remove_file(&left).unwrap();
         }
-    }
-
-    /// `ps` refusing what it was asked is no answer: a process it says nothing about is
-    /// gone only where it says nothing on either stream, as for a process that has ended.
-    #[test]
-    fn a_failing_ps_is_no_answer_about_a_process() {
-        assert!(ps(&["-o", "stat=", "-p", "not-a-process"]).is_err());
-        let mut child = Command::new("/bin/sh")
-            .args(["-c", "exit 0"])
-            .spawn()
-            .unwrap();
-        let process = child.id().to_string();
-        child.wait().unwrap();
-        assert_eq!(ps(&["-o", "stat=", "-p", &process]).as_deref(), Ok(""));
-        assert!(ended(&process));
     }
 
     /// Kills the process whose ID the stalled run recorded in `file`: it is still at work,

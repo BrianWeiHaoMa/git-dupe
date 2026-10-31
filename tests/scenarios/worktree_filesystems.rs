@@ -3,11 +3,11 @@
 
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::MetadataExt;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use crate::harness::{
-    End, Scenario, Tree, Worktree, names, report, second_filesystem, under_each_release, write,
+    End, Scenario, Tree, Worktree, identity, names, report, second_filesystems, under_each_release,
+    write,
 };
 
 /// One refusal leaves both indexes, all working files, and the declared hidden list
@@ -69,93 +69,96 @@ fn replacement_refused(s: &Scenario, wt: &Worktree, words: &[&str], cause: &str)
 #[test]
 fn a_linked_worktree_on_another_filesystem_refuses_hidden_list_replacements() {
     under_each_release(|s| {
-        let second = match second_filesystem() {
-            Ok(second) => second,
-            Err(reason) => {
-                report(&format!(
-                    "no second filesystem: {reason}; replacement cases unavailable"
-                ));
-                return;
-            }
-        };
-        let second_path = second.path().to_path_buf();
-        let main = s.dir().join("project");
-        // Catch failures so removal is checked and Git pruned before the main fixture drops.
-        let checked = catch_unwind(AssertUnwindSafe(|| {
-            let first_device = fs::metadata(s.dir()).unwrap().dev();
-            let second_device = fs::metadata(&second_path).unwrap().dev();
-            report(&format!(
-                "worktree filesystems: scenario device {first_device}, second device {second_device}"
-            ));
-            assert_ne!(first_device, second_device, "one filesystem, not two");
-            s.attached_project(&main);
-            let root = second_path.join("linked");
-            s.linked_worktree(&main, &root);
-            let wt = Worktree::read(s, &root);
-            assert_eq!(fs::metadata(&wt.git_directory).unwrap().dev(), first_device);
-            assert_eq!(fs::metadata(&wt.root).unwrap().dev(), second_device);
-            let init = s.git(["dupe", "init"]).from(&root).run();
-            if init.end != End::Code(0) {
-                report(&format!(
-                    "cross-filesystem linked worktree init refused: {init:?}"
-                ));
-            }
-            assert_eq!(init.end, End::Code(0), "{init:?}");
-
-            // Observe this filesystem's rename cause directly, rather than fixing its wording.
-            let source = s.dir().join("rename-probe");
-            fs::write(&source, b"probe\n").unwrap();
-            let cause = fs::rename(&source, second_path.join("rename-probe")).unwrap_err();
-            assert_eq!(cause.kind(), ErrorKind::CrossesDevices);
-            fs::remove_file(&source).unwrap();
-            let cause = cause.to_string();
-
-            write(&root, "unrelated", b"leave this file\n");
-            write(&root, "notes/kept", b"already hidden\n");
-            write(&root, "newpath", b"not hidden\n");
-            write(&root, "new-directory/file", b"not staged\n");
-            assert!(!root.join(".gitdupe").exists());
-            assert!(
-                wt.private(s)
-                    .git(["ls-files", "-s"])
-                    .succeeds()
-                    .stdout
-                    .is_empty()
-            );
-            for present in [false, true] {
-                if present {
-                    write(&root, ".gitdupe", b"notes\n");
-                    wt.private(s).git(["add", "-f", ".gitdupe"]).succeeds();
+        for (index, way) in second_filesystems().into_iter().enumerate() {
+            let second = match way.found {
+                Ok(second) => second,
+                Err(reason) => {
+                    report(&format!(
+                        "the second filesystem {} unavailable: {reason}; replacement cases left out",
+                        way.reached
+                    ));
+                    continue;
                 }
-                replacement_refused(s, &wt, &["dupe", "hide", "newpath"], &cause);
-                replacement_refused(s, &wt, &["dupe", "add", "new-directory"], &cause);
-                if present {
-                    replacement_refused(s, &wt, &["dupe", "unhide", "notes"], &cause);
+            };
+            let second_path = second.path().to_path_buf();
+            let main = s.dir().join(format!("project-{index}"));
+            // Catch failures so removal is checked and Git pruned before the main fixture drops.
+            let checked = catch_unwind(AssertUnwindSafe(|| {
+                let first_device = identity(s.dir()).0;
+                let second_device = identity(&second_path).0;
+                report(&format!(
+                    "worktree filesystems: scenario device {first_device}, second device {second_device}"
+                ));
+                assert_ne!(first_device, second_device, "one filesystem, not two");
+                s.attached_project(&main);
+                let root = second_path.join("linked");
+                s.linked_worktree(&main, &root);
+                let wt = Worktree::read(s, &root);
+                assert_eq!(identity(&wt.git_directory).0, first_device);
+                assert_eq!(identity(&wt.root).0, second_device);
+                let init = s.git(["dupe", "init"]).from(&root).run();
+                if init.end != End::Code(0) {
+                    report(&format!(
+                        "cross-filesystem linked worktree init refused: {init:?}"
+                    ));
                 }
+                assert_eq!(init.end, End::Code(0), "{init:?}");
+
+                // Observe this filesystem's rename cause directly, rather than fixing its wording.
+                let source = s.dir().join("rename-probe");
+                fs::write(&source, b"probe\n").unwrap();
+                let cause = fs::rename(&source, second_path.join("rename-probe")).unwrap_err();
+                assert_eq!(cause.kind(), ErrorKind::CrossesDevices);
+                fs::remove_file(&source).unwrap();
+                let cause = cause.to_string();
+
+                write(&root, "unrelated", b"leave this file\n");
+                write(&root, "notes/kept", b"already hidden\n");
+                write(&root, "newpath", b"not hidden\n");
+                write(&root, "new-directory/file", b"not staged\n");
+                assert!(!root.join(".gitdupe").exists());
+                assert!(
+                    wt.private(s)
+                        .git(["ls-files", "-s"])
+                        .succeeds()
+                        .stdout
+                        .is_empty()
+                );
+                for present in [false, true] {
+                    if present {
+                        write(&root, ".gitdupe", b"notes\n");
+                        wt.private(s).git(["add", "-f", ".gitdupe"]).succeeds();
+                    }
+                    replacement_refused(s, &wt, &["dupe", "hide", "newpath"], &cause);
+                    replacement_refused(s, &wt, &["dupe", "add", "new-directory"], &cause);
+                    if present {
+                        replacement_refused(s, &wt, &["dupe", "unhide", "notes"], &cause);
+                    }
+                }
+            }));
+            drop(second);
+            let removed = fs::symlink_metadata(&second_path);
+            if main.exists() {
+                s.git(["worktree", "prune", "--expire=now"])
+                    .from(&main)
+                    .succeeds();
+                let remaining = s
+                    .git(["worktree", "list", "--porcelain"])
+                    .from(&main)
+                    .succeeds();
+                assert_eq!(
+                    remaining
+                        .stdout
+                        .split(|&b| b == b'\n')
+                        .filter(|line| line.starts_with(b"worktree "))
+                        .count(),
+                    1
+                );
             }
-        }));
-        drop(second);
-        let removed = fs::symlink_metadata(&second_path);
-        if main.exists() {
-            s.git(["worktree", "prune", "--expire=now"])
-                .from(&main)
-                .succeeds();
-            let remaining = s
-                .git(["worktree", "list", "--porcelain"])
-                .from(&main)
-                .succeeds();
-            assert_eq!(
-                remaining
-                    .stdout
-                    .split(|&b| b == b'\n')
-                    .filter(|line| line.starts_with(b"worktree "))
-                    .count(),
-                1
-            );
-        }
-        assert_eq!(removed.unwrap_err().kind(), ErrorKind::NotFound);
-        if let Err(failure) = checked {
-            resume_unwind(failure);
+            assert_eq!(removed.unwrap_err().kind(), ErrorKind::NotFound);
+            if let Err(failure) = checked {
+                resume_unwind(failure);
+            }
         }
     });
 }

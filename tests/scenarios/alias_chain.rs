@@ -4,13 +4,12 @@
 use std::ffi::OsStr;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, Output, Scenario, Tree, daily_state, global_alias, names, private_add, private_alias,
     private_commit, refused_stash_untracked, region_rules, run_traced, unchanged,
-    under_each_release, warnings_in_any_order, write, write_executable,
+    under_each_release, warnings_in_any_order, word_of, write, write_executable,
 };
 
 fn fixture(s: &Scenario, name: &str) -> PathBuf {
@@ -450,9 +449,13 @@ fn unrelated_aliases_do_not_guard_private_log_and_still_settle() {
 #[test]
 fn alias_stash_guard_accepts_non_utf8_operands() {
     under_each_release(|s| {
+        let case = "alias_chain: an alias holding bytes that are no UTF-8";
+        let Some(value) = word_of(s, b"stash -u -- \xff", case) else {
+            return;
+        };
         for global in [true, false] {
             let dir = fixture(s, if global { "global" } else { "private" });
-            alias(s, &dir, global, "w", OsStr::from_bytes(b"stash -u -- \xff"));
+            alias(s, &dir, global, "w", &value);
             let before = Tree::of(&dir);
             let ours = s.git(["dupe", "w"]).from(&dir).run();
             stash_refusal(s, &dir, &ours, &before);

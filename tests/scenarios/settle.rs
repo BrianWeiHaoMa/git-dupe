@@ -2,12 +2,11 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, Output, Scenario, holds, private_add, private_commit, refused_stash_untracked,
-    region_rules, stash_refusal_first, stash_untracked_line, under_each_release,
+    region_rules, stash_refusal_first, stash_untracked_line, symlink, under_each_release,
     warnings_in_any_order, write,
 };
 

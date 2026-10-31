@@ -8,8 +8,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Runs, Scenario, Tree, copy, daily_state, general_text, holds, names, region_rules,
-    run_traced, unchanged, under_each_release, usage_line, warnings_in_any_order, write,
+    End, Output, Runs, Scenario, Tree, as_git_spells, copy, daily_state, general_text, holds,
+    names, region_rules, run_traced, unchanged, under_each_release, usage_line,
+    warnings_in_any_order, write,
 };
 
 fn aliases(s: &Scenario, dir: &Path, private: bool, entries: &[(&str, &str)]) {
@@ -338,7 +339,7 @@ fn init_alias_attaches_and_refuses_a_submodule_and_help_works_outside() {
             String::from_utf8(output.stdout).unwrap(),
             String::from_utf8(literal.stdout)
                 .unwrap()
-                .replace(expected.to_str().unwrap(), actual.to_str().unwrap())
+                .replace(&as_git_spells(&expected), &as_git_spells(&actual))
         );
         assert_eq!(region_rules(&actual), region_rules(&expected));
         assert_eq!(

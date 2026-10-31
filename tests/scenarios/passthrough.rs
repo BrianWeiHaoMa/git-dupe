@@ -2,13 +2,12 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Runs, Scenario, Tree, daily_state, holds, names, private_add, private_commit,
+    End, Runs, Scenario, Tree, daily_state, holds, name, names, private_add, private_commit,
     private_head, region_rules, run_traced, unchanged, under_each_release, warnings_in_any_order,
-    write, write_executable,
+    word_of, write, write_executable,
 };
 
 fn fixture(s: &Scenario, name: &str) -> PathBuf {
@@ -201,6 +200,9 @@ fn a_passed_command_asks_gits_own_questions_and_takes_the_answers() {
 #[test]
 fn a_private_hook_signal_becomes_the_shell_exit_status() {
     under_each_release(|s| {
+        if !s.child_signals("passthrough") {
+            return;
+        }
         let dir = fixture(s, "workspace");
         stage_change(s, &dir);
         write_executable(
@@ -333,7 +335,7 @@ fn branches_merge_and_history_commands_use_the_private_repository() {
             .git([
                 OsStr::new("reset"),
                 OsStr::new("--hard"),
-                OsStr::from_bytes(main.trim_ascii_end()),
+                &name(main.trim_ascii_end()),
             ])
             .succeeds();
         let output = s.git(["dupe", "merge", "experiment"]).from(&dir).run();
@@ -387,7 +389,11 @@ fn unknown_command_bytes_keep_gits_answer_and_only_the_expected_runs() {
             .into_iter()
             .enumerate()
         {
-            let word = OsStr::from_bytes(word);
+            let case = "passthrough: an unknown command of bytes that are no UTF-8";
+            let Some(word) = word_of(s, word, case) else {
+                continue;
+            };
+            let word = word.as_os_str();
             let expected = s
                 .private(&dir)
                 .git([OsStr::new("-c"), OsStr::new("help.autocorrect=0"), word])
@@ -401,7 +407,12 @@ fn unknown_command_bytes_keep_gits_answer_and_only_the_expected_runs() {
             let commands = runs.commands();
             assert_eq!(
                 &commands[..4],
-                &[b"dupe".as_slice(), b"rev-parse", b"config", word.as_bytes()]
+                &[
+                    b"dupe".as_slice(),
+                    b"rev-parse",
+                    b"config",
+                    word.as_encoded_bytes()
+                ]
             );
             assert_eq!(
                 &commands[4..],

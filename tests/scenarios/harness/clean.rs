@@ -43,12 +43,12 @@
 
 use std::cell::Cell;
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use super::attached::{private_add, private_commit};
 use super::files::{copy, write};
 use super::output::{End, Output};
+use super::platform::{as_git_spells, symlink};
 use super::scenario::Scenario;
 use super::tree::Tree;
 
@@ -261,9 +261,9 @@ impl<'t> Comparison<'t, '_> {
             let gone = !after.holds(path);
             let gone_from_plain = fs::symlink_metadata(plains.join(relative)).is_err();
             if gone_from_plain && !gone {
-                kept_beyond_plain.push(relative.to_str().unwrap().to_owned());
+                kept_beyond_plain.push(as_git_spells(relative));
             } else if gone && !gone_from_plain {
-                gone_beyond_plain.push(relative.to_str().unwrap().to_owned());
+                gone_beyond_plain.push(as_git_spells(relative));
             }
         }
         kept_beyond_plain.sort();

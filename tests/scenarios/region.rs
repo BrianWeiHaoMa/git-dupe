@@ -1,15 +1,12 @@
 //! The managed region as settle leaves it in `.git/info/exclude`.
 
-use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, name_accepted, names, names_number, refused_stash_untracked,
-    region, region_rules, stash_refusal_first, stash_untracked_line, under_each_release,
+    End, Output, Scenario, Tree, command_line_limit, mode_is, name, name_accepted, names,
+    names_number, refused_stash_untracked, region, region_rules, set_mode, stash_refusal_first,
+    stash_untracked_line, symlink, under_each_release,
 };
 
 const ONLY_GITDUPE: &[u8] = b"# BEGIN git-dupe\n/.gitdupe\n# END git-dupe\n";
@@ -157,7 +154,7 @@ fn a_resolving_exclude_link_is_replaced_and_its_target_is_untouched() {
             let target = dir.join("target");
             let exclude = dir.join(".git/info/exclude");
             fs::write(&target, b"# target without newline").unwrap();
-            fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+            set_mode(s, &target, 0o600, "region");
             fs::remove_file(&exclude).unwrap();
             symlink(&target, &exclude).unwrap();
             let git = dir.join(".git");
@@ -173,10 +170,7 @@ fn a_resolving_exclude_link_is_replaced_and_its_target_is_untouched() {
                 [b"# target without newline\n".as_slice(), ONLY_GITDUPE].concat()
             );
             assert_eq!(region_rules(&dir), [b"/.gitdupe"]);
-            assert_eq!(
-                fs::metadata(&exclude).unwrap().permissions().mode() & 0o7777,
-                0o600
-            );
+            mode_is(s, &exclude, 0o600, "region");
             let after = Tree::of(&dir).without_the_lock_file(&git);
             assert!(
                 before
@@ -212,17 +206,14 @@ fn replacement_keeps_permissions_and_a_new_exclude_gets_a_new_files_mode() {
             let (dir, from) = fixture_workspace(s, below);
             let exclude = dir.join(".git/info/exclude");
             fs::write(&exclude, b"# user\n").unwrap();
-            fs::set_permissions(&exclude, fs::Permissions::from_mode(0o600)).unwrap();
+            set_mode(s, &exclude, 0o600, "region");
             let output = settled_by_stash_refusal(s, &from);
             assert!(output.lines("warning").is_empty(), "{output:?}");
             assert_eq!(
                 fs::read(&exclude).unwrap(),
                 [b"# user\n".as_slice(), ONLY_GITDUPE].concat()
             );
-            assert_eq!(
-                fs::metadata(&exclude).unwrap().permissions().mode() & 0o7777,
-                0o600
-            );
+            mode_is(s, &exclude, 0o600, "region");
             fs::remove_file(&exclude).unwrap();
             let reference = dir.join("new-file-mode");
             fs::write(&reference, b"").unwrap();
@@ -231,8 +222,8 @@ fn replacement_keeps_permissions_and_a_new_exclude_gets_a_new_files_mode() {
             assert_eq!(fs::read(&exclude).unwrap(), ONLY_GITDUPE);
             assert_eq!(region_rules(&dir), [b"/.gitdupe"]);
             assert_eq!(
-                fs::metadata(&exclude).unwrap().permissions().mode(),
-                fs::metadata(reference).unwrap().permissions().mode()
+                fs::metadata(&exclude).unwrap().permissions(),
+                fs::metadata(reference).unwrap().permissions()
             );
         }
     });
@@ -296,7 +287,11 @@ fn every_literal_rule_ignores_its_path_and_leaves_its_sibling_visible() {
             (b"caf\xe9", b"cafe", b"/caf\xe9"),
         ]
         .into_iter()
-        .filter(|(path, _, _)| not_utf8 || std::str::from_utf8(path).is_ok())
+        .filter(|(path, _, _)| {
+            std::str::from_utf8(path).map_or(not_utf8, |_| {
+                name_accepted(s.dir(), path, "region: the rule of a path by that name")
+            })
+        })
         .collect();
         for below in [false, true] {
             let (dir, from) = fixture_workspace(s, below);
@@ -304,8 +299,8 @@ fn every_literal_rule_ignores_its_path_and_leaves_its_sibling_visible() {
             for &(path, sibling, _) in &paths {
                 listed.extend_from_slice(path);
                 listed.push(b'\n');
-                fs::write(dir.join(OsStr::from_bytes(path)), b"private\n").unwrap();
-                fs::write(dir.join(OsStr::from_bytes(sibling)), b"public\n").unwrap();
+                fs::write(dir.join(name(path)), b"private\n").unwrap();
+                fs::write(dir.join(name(sibling)), b"public\n").unwrap();
             }
             fs::write(dir.join(".gitdupe"), listed).unwrap();
             // Byte order is path order; escaping must not change that ordering.
@@ -349,13 +344,7 @@ fn every_literal_rule_ignores_its_path_and_leaves_its_sibling_visible() {
 #[test]
 fn an_argument_list_over_arg_max_is_refused_with_its_count_after_replacing_the_region() {
     under_each_release(|s| {
-        let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
-        assert!(limit.status.success());
-        let limit: usize = std::str::from_utf8(&limit.stdout)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        let limit = command_line_limit();
         // Each distinct path has at least 128 bytes, so the path bytes alone exceed ARG_MAX.
         let count = limit / 128 + 1;
         let mut listed = Vec::new();

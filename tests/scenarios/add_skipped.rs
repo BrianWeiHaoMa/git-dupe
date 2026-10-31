@@ -2,14 +2,12 @@
 //! its Git runs (G13, G14, G22, G23).
 
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::Path;
-use std::process::Command;
 
 use crate::harness::{
-    End, Output, Runs, Scenario, daily_edited, holds, lines_in_order, names, names_number,
-    names_the_route_to_private, private_add, private_commit, region_rules, run_traced,
-    under_each_release, write,
+    End, Output, Runs, Scenario, command_line_limit, daily_edited, holds, lines_in_order, names,
+    names_number, names_the_route_to_private, private_add, private_commit, region_rules,
+    run_traced, symlink, under_each_release, write,
 };
 
 fn staged_blob(s: &Scenario, dir: &Path, path: &str, expected: &[u8]) {
@@ -178,13 +176,7 @@ fn ignored_public_files_lose_exclusions_but_remain_unstaged_with_force() {
 #[test]
 fn exclusions_over_arg_max_refuse_with_the_carried_count_and_preserve_the_index() {
     under_each_release(|s| {
-        let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
-        assert!(limit.status.success());
-        let limit: usize = std::str::from_utf8(&limit.stdout)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        let limit = command_line_limit();
         let count = limit / 128 + 1;
         let dir = daily_edited(s, "too-long");
         write(&dir, ".gitdupe", b"notes\n.vscode\nvendor\n");

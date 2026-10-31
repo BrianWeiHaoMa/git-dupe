@@ -3,11 +3,10 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 
 use crate::harness::{
-    End, IGNORED_HINT, Output, gits_then_one_hint, holds, names, private_commit, privately_tracked,
-    run_traced, under_each_release, write,
+    End, IGNORED_HINT, Output, gits_then_one_hint, holds, name, names, private_commit,
+    privately_tracked, run_traced, under_each_release, write,
 };
 
 /// A file the project ignores is added with `-f` once: tracked privately, its later
@@ -95,7 +94,7 @@ fn each_ignore_source_of_the_private_repository_keeps_gits_answer_until_forced()
             assert_eq!(adds.len(), 1, "{path}: {runs:?}");
             // The same words, given to the release's own Git in the private repository
             // from the same directory, which the refused run left as it was.
-            let words = adds[0].iter().map(|word| OsStr::from_bytes(word));
+            let words = adds[0].iter().map(|word| name(word));
             let gits = s.private(&dir).git(words).run();
             assert_ne!(gits.end, End::Code(0), "{path} is not ignored: {gits:?}");
             // Git's answer whole, then the hint naming the `git dupe` forms of what Git's

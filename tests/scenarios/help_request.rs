@@ -1,12 +1,11 @@
 //! Help requests after words Git runs: the selected repository, guards, and settle.
 
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, lines_in_order, names, private_add, private_commit, region_rules,
-    unchanged, under_each_release, warnings_in_any_order, write,
+    End, Output, Scenario, Tree, lines_in_order, name, names, private_add, private_commit,
+    region_rules, unchanged, under_each_release, warnings_in_any_order, write,
 };
 
 fn private_help(s: &Scenario, common: &Path, from: &Path, command: &str) -> Output {
@@ -110,8 +109,7 @@ fn linked_worktree_help_runs_where_no_repository_exists() {
             .git(["rev-parse", "--absolute-git-dir"])
             .from(&linked)
             .succeeds();
-        let git_directory =
-            Path::new(OsStr::from_bytes(asked.stdout.strip_suffix(b"\n").unwrap())).to_path_buf();
+        let git_directory = PathBuf::from(name(asked.stdout.strip_suffix(b"\n").unwrap()));
         let private = main.join(".git/dupe");
         let before = Tree::of(&private);
         for words in [&["commit", "-am", "-h"][..], &["log", "-h"]] {
@@ -174,8 +172,7 @@ fn help_inside_a_linked_worktrees_git_directory_runs_where_no_repository_exists(
             .git(["rev-parse", "--absolute-git-dir"])
             .from(&linked)
             .succeeds();
-        let git_directory =
-            Path::new(OsStr::from_bytes(asked.stdout.strip_suffix(b"\n").unwrap())).to_path_buf();
+        let git_directory = PathBuf::from(name(asked.stdout.strip_suffix(b"\n").unwrap()));
         let private = main.join(".git/dupe");
         let before = Tree::of(&private);
         for words in [

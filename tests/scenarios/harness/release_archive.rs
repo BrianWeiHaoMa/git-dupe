@@ -10,13 +10,12 @@
 
 use std::ffi::OsString;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 use super::fresh::FreshDirectory;
-use super::platform::{architecture, word};
+use super::platform::{architecture, permissions, word};
 use super::scenario::Scenario;
 
 /// What one check command made.
@@ -84,8 +83,9 @@ fn make() -> Result<ReleaseArchive, String> {
     for (from, name, mode) in members {
         let to = staged.join(name);
         fs::copy(from, &to).map_err(because("copy", from))?;
-        fs::set_permissions(&to, fs::Permissions::from_mode(mode))
-            .map_err(because("set the mode of", &to))?;
+        if let Some(permissions) = permissions(mode) {
+            fs::set_permissions(&to, permissions).map_err(because("set the mode of", &to))?;
+        }
     }
 
     // Packed beside the archive and renamed over it, so that the path holds a whole

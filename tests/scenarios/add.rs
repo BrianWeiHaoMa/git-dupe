@@ -1,12 +1,11 @@
 //! `add` with literal operands: hiding directories first, tracking files, and refusals.
 
 use std::fs;
-use std::os::unix::fs::symlink;
 
 use crate::harness::{
     End, IGNORED_HINT, daily_state, gitdupe_written_and_staged, gits_then_one_hint, holds,
     lines_in_order, names, names_number, names_the_route_to_private, private_add, region_rules,
-    staged_gitdupe, under_each_release, warnings_in_any_order, write,
+    staged_gitdupe, symlink, under_each_release, warnings_in_any_order, write,
 };
 
 #[test]

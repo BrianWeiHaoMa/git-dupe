@@ -11,12 +11,11 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use crate::harness::{
-    End, Scenario, Tree, Worktree, changed_since, dupe_succeeds, names, public_status, unchanged,
-    under_each_release, warnings_in_any_order, write,
+    End, Scenario, Tree, Worktree, changed_since, dupe_succeeds, name, names, public_status,
+    unchanged, under_each_release, warnings_in_any_order, write,
 };
 
 /// The root that a private repository's `core.worktree`, read by plain Git, names.
@@ -31,10 +30,7 @@ fn recorded_root(s: &Scenario, wt: &Worktree) -> PathBuf {
     ];
     let value = s.git(words).succeeds().stdout;
     let value = value.strip_suffix(b"\n").unwrap_or(&value);
-    private
-        .join(OsStr::from_bytes(value))
-        .canonicalize()
-        .unwrap()
+    private.join(name(value)).canonicalize().unwrap()
 }
 
 #[test]

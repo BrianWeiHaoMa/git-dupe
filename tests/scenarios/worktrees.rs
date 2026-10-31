@@ -3,13 +3,12 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::symlink;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, held_publicly, holds, name_accepted, names,
-    names_number, records, region_in, unchanged, under_each_release, write,
+    End, Output, Scenario, Tree, Worktree, as_git_spells, canonical, held_publicly, holds, name,
+    name_accepted, names, names_number, records, region_in, symlink, unchanged, under_each_release,
+    write,
 };
 
 fn refused(output: &Output, main: &Path) {
@@ -17,7 +16,7 @@ fn refused(output: &Output, main: &Path) {
     assert!(output.stdout.is_empty(), "{output:?}");
     let fatal = output.only_line("fatal");
     names(fatal, b"git dupe init");
-    assert!(!holds(fatal, main.as_os_str().as_bytes()), "{output:?}");
+    assert!(!holds(fatal, as_git_spells(main).as_bytes()), "{output:?}");
 }
 
 /// One command's public-state boundary, including the other private repositories.
@@ -142,10 +141,10 @@ fn linked_inits_create_distinct_private_directories_and_preserve_the_main_region
                 .git(["config", "core.worktree"])
                 .succeeds()
                 .stdout;
-            let relative = Path::new(OsStr::from_bytes(config.trim_ascii_end()));
+            let relative = PathBuf::from(name(config.trim_ascii_end()));
             assert!(!relative.is_absolute());
             assert_eq!(
-                fs::canonicalize(wt.private_directory().join(relative)).unwrap(),
+                canonical(&wt.private_directory().join(relative)).unwrap(),
                 wt.root
             );
             assert!(!worktrees_config.contains(&config));
@@ -221,10 +220,13 @@ fn sanitized_colliding_and_non_utf8_roots_use_gits_admin_names_for_regions() {
         let main_private = Tree::of(&main_wt.private_directory());
         let mut roots = vec![
             s.dir().join("with space"),
-            s.dir().join("a:b"),
             s.dir().join("first/same"),
             s.dir().join("second/same"),
         ];
+        let colon = name_accepted(s.dir(), b"a:b", "worktrees: a linked root named a:b");
+        if colon {
+            roots.push(s.dir().join("a:b"));
+        }
         // The root whose name is not UTF-8 is left out where the filesystem refuses such a
         // name.
         let not_utf8 = name_accepted(
@@ -233,7 +235,7 @@ fn sanitized_colliding_and_non_utf8_roots_use_gits_admin_names_for_regions() {
             "worktrees: a linked root named by bytes that are no UTF-8",
         );
         if not_utf8 {
-            roots.push(s.dir().join(OsStr::from_bytes(b"caf\xe9")));
+            roots.push(s.dir().join(name(b"caf\xe9")));
         }
         let mut worktrees = Vec::new();
         for root in roots {
@@ -244,16 +246,21 @@ fn sanitized_colliding_and_non_utf8_roots_use_gits_admin_names_for_regions() {
             worktrees.push(wt);
         }
         assert_eq!(worktrees[0].name(), Some(OsStr::new("with-space")));
-        assert_eq!(worktrees[1].name(), Some(OsStr::new("a-b")));
-        assert_eq!(worktrees[2].name(), Some(OsStr::new("same")));
-        let collision = worktrees[3].name().unwrap().as_bytes();
+        assert_eq!(worktrees[1].name(), Some(OsStr::new("same")));
+        if colon {
+            assert_eq!(worktrees[3].name(), Some(OsStr::new("a-b")));
+        }
+        let collision = worktrees[2].name().unwrap().as_encoded_bytes();
         assert!(
             collision.starts_with(b"same")
                 && collision[4..].iter().all(u8::is_ascii_digit)
                 && collision.len() > 4
         );
         if not_utf8 {
-            assert_eq!(worktrees[4].name(), Some(OsStr::from_bytes(b"caf\xe9")));
+            assert_eq!(
+                worktrees.last().unwrap().name(),
+                Some(name(b"caf\xe9").as_os_str())
+            );
         }
         for (index, wt) in worktrees.iter().enumerate() {
             let before: Vec<_> = worktrees.iter().map(Worktree::region_bytes).collect();
@@ -668,7 +675,7 @@ fn init_and_clone_write_nothing_through_what_stands_at_the_private_path() {
                 assert!(output.stdout.is_empty(), "{output:?}");
                 names(
                     output.only_line("fatal"),
-                    wt.private_directory().as_os_str().as_bytes(),
+                    wt.private_directory().as_os_str().as_encoded_bytes(),
                 );
                 // Read through no link: the link itself, the common Git directory with
                 // every private repository and the exclude file, byte for byte.
@@ -689,7 +696,7 @@ fn init_and_clone_write_nothing_through_what_stands_at_the_private_path() {
         assert_eq!(output.end, End::Code(128), "{output:?}");
         names(
             output.only_line("fatal"),
-            other_wt.private_directory().as_os_str().as_bytes(),
+            other_wt.private_directory().as_os_str().as_encoded_bytes(),
         );
         unchanged(&before[0], &other_wt.common_directory);
         unchanged(&before[1], &main_wt.common_directory);
@@ -720,7 +727,7 @@ fn the_private_path_is_refused_before_a_tracked_gitdupe_or_a_public_url() {
             assert!(output.stdout.is_empty(), "{words:?}: {output:?}");
             names(
                 output.only_line("fatal"),
-                wt.private_directory().as_os_str().as_bytes(),
+                wt.private_directory().as_os_str().as_encoded_bytes(),
             );
             unchanged(&before, &wt.common_directory);
         };
@@ -813,7 +820,7 @@ fn a_help_request_runs_nothing_through_what_stands_at_the_private_path() {
                 assert!(output.stdout.is_empty(), "{words:?}: {output:?}");
                 names(
                     output.only_line("fatal"),
-                    wt.private_directory().as_os_str().as_bytes(),
+                    wt.private_directory().as_os_str().as_encoded_bytes(),
                 );
                 unchanged(&before[0], &main_wt.common_directory);
                 unchanged(&before[1], &wt.common_directory);

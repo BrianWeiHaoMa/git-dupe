@@ -2,13 +2,11 @@
 //! Git decides exposure; a shared exclude file is only maintained where G6 allows it.
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, name_accepted, offered, public_status,
-    under_each_release, write,
+    End, Output, Scenario, Tree, Worktree, as_git_spells, identity, name, name_accepted, offered,
+    public_status, symlink, under_each_release, write,
 };
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, symlink};
 
 fn main_worktree(s: &Scenario, name: &str) -> Worktree {
     let root = s.dir().join(name);
@@ -87,7 +85,7 @@ fn steady(s: &Scenario, wt: &Worktree, expected: &[Vec<u8>]) -> Output {
         .stdout;
     let exclude = wt.common_directory.join("info/exclude");
     let bytes = fs::read(&exclude).unwrap();
-    let inode = fs::metadata(&exclude).unwrap().ino();
+    let inode = identity(&exclude);
     let output = s
         .git(["dupe", "status", "--porcelain"])
         .from(&wt.root)
@@ -109,7 +107,7 @@ fn steady(s: &Scenario, wt: &Worktree, expected: &[Vec<u8>]) -> Output {
         public_index
     );
     assert_eq!(fs::read(&exclude).unwrap(), bytes);
-    assert_eq!(fs::metadata(&exclude).unwrap().ino(), inode);
+    assert_eq!(identity(&exclude), inode);
     output
 }
 
@@ -196,10 +194,10 @@ fn foreign_owners_use_whole_worktree_names_and_preserve_non_utf8_bytes() {
         let main = main_worktree(s, "project");
         let agent = linked(s, &main, OsStr::new("agent"));
         let agent2 = linked(s, &main, OsStr::new("agent2"));
-        let bytes = linked(s, &main, OsStr::from_bytes(owner));
+        let bytes = linked(s, &main, &name(owner));
         assert_eq!(agent.name(), Some(OsStr::new("agent")));
         assert_eq!(agent2.name(), Some(OsStr::new("agent2")));
-        assert_eq!(bytes.name(), Some(OsStr::from_bytes(owner)));
+        assert_eq!(bytes.name(), Some(name(owner).as_os_str()));
         hide(s, &agent2, "scratch");
         hide(s, &bytes, "notes");
         write(&main.root, "scratch/a.py", b"scratch\n");
@@ -628,12 +626,12 @@ fn foreign_paths_are_not_named_when_the_region_cannot_be_maintained() {
                 .from(&wt.root)
                 .succeeds()
                 .stdout;
-            let inode = fs::symlink_metadata(&link).unwrap().ino();
+            let inode = identity(&link);
             let output = s
                 .git(["dupe", "status", "--porcelain"])
                 .from(&wt.root)
                 .succeeds();
-            let mut expected = vec![format!("the managed region cannot be maintained: {} {cause}; private files may be visible to public Git", link.display()).into_bytes()];
+            let mut expected = vec![format!("the managed region cannot be maintained: {} {cause}; private files may be visible to public Git", as_git_spells(&link)).into_bytes()];
             if name == "exclude-link" {
                 expected.push(b".gitdupe is hidden but public Git does not ignore it".to_vec());
             }
@@ -668,7 +666,7 @@ fn foreign_paths_are_not_named_when_the_region_cannot_be_maintained() {
                 public_index
             );
             assert_eq!(fs::read_link(&link).unwrap(), target);
-            assert_eq!(fs::symlink_metadata(&link).unwrap().ino(), inode);
+            assert_eq!(identity(&link), inode);
             if name == "info-link" {
                 assert_eq!(fs::read(&exclude).unwrap(), saved);
                 public_status_is(s, &wt, b"");
@@ -702,7 +700,7 @@ fn foreign_and_released_hide_remedies_take_their_path_whole() {
             // The command as the line shows it, run by a shell as typed (G25).
             let command = offered(line, b"run from the root, '", b"' hides it here too");
             let shell = std::str::from_utf8(command).unwrap();
-            s.program("/bin/sh", ["-c", shell])
+            s.program(s.shell(), ["-c", shell])
                 .from(&wt.root)
                 .succeeds();
         }
@@ -730,7 +728,7 @@ fn foreign_and_released_hide_remedies_take_their_path_whole() {
             "{unhidden:?}"
         );
         let command = offered(released[0], b"run from the root, '", b"' hides it again");
-        s.program("/bin/sh", ["-c", std::str::from_utf8(command).unwrap()])
+        s.program(s.shell(), ["-c", std::str::from_utf8(command).unwrap()])
             .from(&wt.root)
             .succeeds();
         assert_eq!(

@@ -14,7 +14,7 @@ use std::path::Path;
 
 use crate::harness::{
     End, Output, Scenario, holds, names, offered, private_commit, privately_tracked,
-    publicly_tracked, under_each_release, write,
+    publicly_tracked, symlink, under_each_release, write,
 };
 
 /// A path a shell reads as two words, the second expanded, unless it is quoted.
@@ -51,7 +51,7 @@ fn run_as_offered_under(
     setting: Option<&str>,
 ) -> Output {
     let command = std::str::from_utf8(command).expect("a UTF-8 command");
-    let shell = s.program("/bin/sh", ["-c", command]).from(root);
+    let shell = s.program(s.shell(), ["-c", command]).from(root);
     match setting {
         Some(name) => shell.variable(name, "1").run(),
         None => shell.run(),
@@ -247,7 +247,7 @@ fn hides_hint_offers_no_add_beyond_a_symbolic_link() {
         s.attached_project(&root);
         hidden_decoy(s, &root);
         write(&root, "target/secret", b"private\n");
-        std::os::unix::fs::symlink("target", root.join("link")).unwrap();
+        symlink("target", root.join("link")).unwrap();
         let hidden = s
             .git(["dupe", "hide", "link/secret"])
             .from(&root)

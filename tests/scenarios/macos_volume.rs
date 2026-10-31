@@ -8,12 +8,11 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    End, holds, names, privately_tracked, records, region_rules, report, under_each_release,
-    watched_dupe_succeeds, word, write,
+    End, as_git_spells, holds, names, privately_tracked, records, region_rules, report,
+    under_each_release, watched_dupe_succeeds, word, write,
 };
 
 /// Whether `dir` equates spellings that differ in case: an `a` made there is found as `A`.
@@ -119,7 +118,7 @@ fn notes_hidden_before_it_stands_hides_the_directory_made_as_capital_notes() {
         let push = s.git(words).from(&root).run();
         assert_eq!(push.end, End::Code(128), "{push:?}");
         let refusal = push.only_line("fatal");
-        names(refusal, root.as_os_str().as_bytes());
+        names(refusal, as_git_spells(&root).as_bytes());
         names(refusal, b"git dupe git");
     });
 }

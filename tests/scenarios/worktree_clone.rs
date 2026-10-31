@@ -3,12 +3,11 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, linked_on_branch, names, private_add, private_commit,
-    unchanged, under_each_release, warnings_in_any_order, write,
+    End, Output, Scenario, Tree, Worktree, as_git_spells, linked_on_branch, names, private_add,
+    private_commit, unchanged, under_each_release, warnings_in_any_order, write,
 };
 
 fn history(s: &Scenario) -> Worktree {
@@ -46,7 +45,10 @@ fn origin(s: &Scenario, wt: &Worktree, url: &Path) {
         .private(s)
         .git(["config", "--get", "remote.origin.url"])
         .succeeds();
-    assert_eq!(config.stdout, [url.as_os_str().as_bytes(), b"\n"].concat());
+    assert_eq!(
+        config.stdout,
+        [url.as_os_str().as_encoded_bytes(), b"\n"].concat()
+    );
 }
 
 fn arrived(s: &Scenario, main: &Worktree, wt: &Worktree) {
@@ -316,7 +318,7 @@ fn linked_clone_refuses_every_public_place_before_attachment() {
             assert_eq!(output.end, End::Code(128), "{place:?}: {output:?}");
             assert!(output.stdout.is_empty(), "{output:?}");
             let fatal = output.only_line("fatal");
-            names(fatal, place.as_os_str().as_bytes());
+            names(fatal, as_git_spells(&place).as_bytes());
             names(fatal, b"git dupe git");
             assert!(!wt.private_directory().exists());
             assert!(wt.region().is_none());

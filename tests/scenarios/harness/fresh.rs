@@ -5,6 +5,8 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use super::platform::canonical;
+
 pub struct FreshDirectory {
     path: PathBuf,
 }
@@ -15,7 +17,7 @@ impl FreshDirectory {
     pub fn create() -> FreshDirectory {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let temporary = std::env::temp_dir();
-        let temporary = fs::canonicalize(&temporary).unwrap_or_else(|cause| {
+        let temporary = canonical(&temporary).unwrap_or_else(|cause| {
             panic!("the temporary directory {}: {cause}", temporary.display())
         });
         loop {
@@ -42,7 +44,7 @@ impl FreshDirectory {
     /// when that base is unavailable or cannot hold a fresh directory.
     pub fn create_in(base: &Path) -> Option<FreshDirectory> {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let base = fs::canonicalize(base).ok()?;
+        let base = canonical(base).ok()?;
         loop {
             let path = base.join(format!(
                 "git-dupe-checks-base-{}-{}",

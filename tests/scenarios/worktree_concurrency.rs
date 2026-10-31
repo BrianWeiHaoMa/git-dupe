@@ -14,7 +14,6 @@
 use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use crate::harness::{
@@ -119,7 +118,7 @@ fn region_holding(wt: &Worktree, listed: &[String]) -> Vec<u8> {
     if let Some(name) = wt.name() {
         for marker in [&mut begin, &mut end] {
             marker.extend_from_slice(b" worktree ");
-            marker.extend_from_slice(name.as_bytes());
+            marker.extend_from_slice(name.as_encoded_bytes());
         }
     }
     let lines = [begin].into_iter().chain(rules(listed)).chain([end]);
@@ -433,7 +432,7 @@ fn killed_beside_another_hide(s: &Scenario, name: &str, main_killed: bool) {
     let [fresh] = &left[..] else {
         panic!("{left:?} were left in {}", private.display());
     };
-    let fresh_name = fresh.as_bytes();
+    let fresh_name = fresh.as_encoded_bytes();
     assert!(
         fresh_name.starts_with(b"git-dupe-") && fresh_name.ends_with(b".new"),
         "{fresh:?}"

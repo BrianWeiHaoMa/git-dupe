@@ -5,13 +5,11 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, holds, locate_words, private_add, region, region_rules,
-    staged_gitdupe, under_each_release, usage_line, write,
+    End, Output, Scenario, Tree, holds, locate_words, mode_is, private_add, region, region_rules,
+    set_mode, staged_gitdupe, symlink, under_each_release, usage_line, word_of, write,
 };
 
 /// A workspace attached by `git dupe init`, with a directory `sub` below its root.
@@ -220,8 +218,10 @@ fn each_path_given_is_named_with_what_still_hides_it() {
         assert_eq!(staged_gitdupe(s, &dir).unwrap(), left);
 
         // A path that is not UTF-8 is named as its bytes, listed and then not.
-        let word = OsStr::from_bytes(b"caf\xe9");
-        for said in [REMOVED, UNLISTED] {
+        let case = "unhide: a path typed as bytes that are no UTF-8";
+        let word = word_of(s, b"caf\xe9", case);
+        for said in word.iter().flat_map(|_| [REMOVED, UNLISTED]) {
+            let word = word.as_deref().expect("the word the loop stands on");
             let dupe = [OsStr::new("dupe"), OsStr::new("unhide"), word];
             let output = s.git(dupe).from(&dir).run();
             unhidden(&output, &[(b"caf\xe9", said)]);
@@ -437,12 +437,11 @@ fn a_rewrite_keeps_the_files_permissions_and_replaces_a_link_by_a_regular_file()
     under_each_release(|s| {
         let dir = init_attached(s, "workspace");
         write(&dir, ".gitdupe", b"notes\nx\n");
-        fs::set_permissions(dir.join(".gitdupe"), fs::Permissions::from_mode(0o600)).unwrap();
+        set_mode(s, &dir.join(".gitdupe"), 0o600, "unhide");
         let output = unhide(s, &dir, &["notes"]);
         unhidden(&output, &[(b"notes", REMOVED)]);
         assert!(output.lines("warning").is_empty(), "{output:?}");
-        let found = fs::symlink_metadata(dir.join(".gitdupe")).unwrap();
-        assert_eq!(found.permissions().mode() & 0o7777, 0o600);
+        mode_is(s, &dir.join(".gitdupe"), 0o600, "unhide");
         assert_eq!(gitdupe(&dir), b"x\n");
 
         // A link read through: nothing named leaves it as it is.

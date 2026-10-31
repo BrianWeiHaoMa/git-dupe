@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, Transfer, names, private_commit, refusal, run_traced,
+    End, Output, Scenario, Transfer, as_git_spells, names, private_commit, refusal, run_traced,
     under_each_release, write,
 };
 
@@ -30,7 +30,7 @@ fn refused_default(s: &Scenario, transfer: &Transfer, words: &[&str], key: &str,
     );
     refusal(
         &output,
-        &[transfer.root.to_str().unwrap().as_bytes(), b"git dupe git"],
+        &[as_git_spells(&transfer.root).as_bytes(), b"git dupe git"],
     );
     names(
         output.only_line("fatal"),
@@ -206,10 +206,7 @@ fn transfer_default_help_inside_git_directory_still_guards_destinations() {
             .git(["dupe", "fetch", "-o", "-h", root.to_str().unwrap(), "main"])
             .from(&directory)
             .run();
-        refusal(
-            &output,
-            &[root.to_str().unwrap().as_bytes(), b"git dupe git"],
-        );
+        refusal(&output, &[as_git_spells(root).as_bytes(), b"git dupe git"]);
         assert!(!directory.join("dupe/FETCH_HEAD").exists());
         before.unchanged();
         defaults(s, root, &[("branch.main.remote", ".")]);

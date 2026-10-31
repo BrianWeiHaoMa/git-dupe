@@ -1,17 +1,20 @@
 //! What a scenario is given: a fresh directory, and `git` as the release under test in an
 //! environment built from nothing.
 
+use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
+use super::files::name;
 use super::fresh::FreshDirectory;
 use super::output::{End, Output};
+use super::platform;
+use super::platform::canonical;
 use super::provision::Store;
 use super::releases::{NARROWING_VARIABLE, selection};
 use super::running::Running;
@@ -64,7 +67,7 @@ fn select_and_provide() -> Result<Vec<Release>, String> {
         .into_iter()
         .map(|version| {
             let directory = store.release_directory(version);
-            let directory = fs::canonicalize(&directory)
+            let directory = canonical(&directory)
                 .map_err(|cause| format!("{}: {cause}", directory.display()))?;
             Ok(Release { version, directory })
         })
@@ -82,6 +85,10 @@ pub struct Scenario {
     environment: Vec<(OsString, OsString)>,
     /// The release's own `git`, behind everything the scenario's `PATH` can put first.
     release_git: PathBuf,
+    /// The release's own directory.
+    release: PathBuf,
+    /// The parts already reported unavailable, each once.
+    unavailable: Mutex<BTreeSet<String>>,
 }
 
 impl Scenario {
@@ -119,6 +126,8 @@ impl Scenario {
             ],
             directory,
             release_git: release.directory.join("bin/git"),
+            release: release.directory.clone(),
+            unavailable: Mutex::new(BTreeSet::new()),
         };
         scenario.check_git_is(release);
         scenario
@@ -135,10 +144,10 @@ impl Scenario {
             release.version
         );
         let exec_path = self.git(["--exec-path"]).run();
-        let reported = Path::new(OsStr::from_bytes(exec_path.stdout.trim_ascii_end()));
+        let reported = name(exec_path.stdout.trim_ascii_end());
         assert!(
             exec_path.end == End::Code(0)
-                && fs::canonicalize(reported)
+                && canonical(Path::new(&reported))
                     .is_ok_and(|path| path.starts_with(&release.directory)),
             "`git --exec-path` is not inside {}: {exec_path:?}",
             release.directory.display()
@@ -156,6 +165,39 @@ impl Scenario {
     /// must still reach the release.
     pub fn release_git(&self) -> &Path {
         &self.release_git
+    }
+
+    /// The shell of this release's platform, the one way a scenario or a module runs a
+    /// command line through `sh`.
+    pub fn shell(&self) -> PathBuf {
+        platform::shell(&self.release)
+    }
+
+    /// Says once, for this scenario under this release, that `part` cannot run on this
+    /// platform and why; the rest of the scenario runs.
+    pub fn unavailable(&self, part: &str, why: &str) {
+        let line = format!("{part} unavailable: {why}");
+        if self.first_time(&line) {
+            report(&line);
+        }
+    }
+
+    /// Whether this scenario has not said `line` yet.
+    fn first_time(&self, line: &str) -> bool {
+        self.unavailable.lock().unwrap().insert(line.to_owned())
+    }
+
+    /// Whether a child can end by a signal here. Where it cannot, `part` of the scenario,
+    /// which turns on one, reports itself; the rest of the scenario runs.
+    pub fn child_signals(&self, part: &str) -> bool {
+        let signals = platform::signals();
+        if !signals {
+            self.unavailable(
+                &format!("{part}: a child's signal"),
+                "this platform has none",
+            );
+        }
+        signals
     }
 
     /// `git <words>`, to be run from the scenario's directory unless told otherwise. The
@@ -342,6 +384,15 @@ impl Git<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A part says it cannot run once for each scenario, however many of its lines ask.
+    #[test]
+    fn a_part_reports_itself_once() {
+        let scenario = Scenario::begin(&selected()[0]);
+        assert!(scenario.first_time("a part"));
+        assert!(!scenario.first_time("a part"));
+        assert!(scenario.first_time("another"));
+    }
 
     /// Where the caller's environment is clean, the isolation scenarios pass whatever the
     /// harness inherits. Here they run again as a check command of their own whose caller

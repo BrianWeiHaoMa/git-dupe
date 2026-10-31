@@ -2,14 +2,13 @@
 //! leave them, around the main worktree's: every command changes the main worktree's
 //! region alone and copies every other byte through in its order (F3, G3, G6, G9).
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{PermissionsExt, symlink};
 
 use crate::harness::{
-    End, Region, Tree, holds, inode, mode, name_accepted, names, refused_stash_untracked, region,
-    region_in, run_traced, unchanged, under_each_release, write,
+    End, Region, Tree, as_git_spells, holds, identity, mode_is, name, name_accepted, names,
+    refused_stash_untracked, region, region_in, run_traced, set_mode, symlink, unchanged,
+    under_each_release, write,
 };
 
 /// The user's text before every region.
@@ -63,12 +62,12 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
             false => (b"cafe", CAFE_IN_ASCII),
         };
         // G27: only live regions are copied; these foreign private directories stand.
-        for name in [OsStr::new("agent"), OsStr::from_bytes(cafe_name)] {
-            fs::create_dir_all(root.join(".git/worktrees").join(name).join("dupe")).unwrap();
+        for worktree in [OsString::from("agent"), name(cafe_name)] {
+            fs::create_dir_all(root.join(".git/worktrees").join(worktree).join("dupe")).unwrap();
         }
         let exclude = root.join(".git/info/exclude");
         fs::write(&exclude, around(&main_region(&[b"/.gitdupe"]), cafe)).unwrap();
-        fs::set_permissions(&exclude, fs::Permissions::from_mode(0o640)).unwrap();
+        set_mode(s, &exclude, 0o640, "worktree_regions");
         // `shared` stands here and only the other worktree's region names it; a rule of
         // the user's makes public Git see it here, so that a false release would be named.
         write(&root, "shared", b"here\n");
@@ -80,7 +79,7 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
             fs::read(&exclude).unwrap(),
             around(&main_region(&[b"/.gitdupe", b"/notes"]), cafe)
         );
-        assert_eq!(mode(&exclude), 0o640);
+        mode_is(s, &exclude, 0o640, "worktree_regions");
         // The named reader finds each region by its own markers, from the common Git
         // directory.
         let common = root.join(".git");
@@ -99,7 +98,7 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
             })
         );
         assert_eq!(
-            region_in(&common, Some(OsStr::from_bytes(cafe_name))).map(|found| found.rules),
+            region_in(&common, Some(&name(cafe_name))).map(|found| found.rules),
             Some(vec![[b"/", cafe_name].concat()])
         );
         assert_eq!(
@@ -131,12 +130,12 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
         assert_eq!(fs::read(&exclude).unwrap(), three);
 
         // A refusal settles, and a composition equal to the file writes nothing.
-        let written = inode(&exclude);
+        let written = identity(&exclude);
         let refused = s.git(["dupe", "stash", "-u"]).from(&root).run();
         refused_stash_untracked(s, &refused);
         assert!(refused.lines("warning").is_empty(), "{refused:?}");
         assert_eq!(fs::read(&exclude).unwrap(), three);
-        assert_eq!(inode(&exclude), written);
+        assert_eq!(identity(&exclude), written);
 
         // The released directory is named; the path only the other region names is not.
         let unhide = s.git(["dupe", "unhide", "notes"]).from(&root).succeeds();
@@ -147,7 +146,7 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
             fs::read(&exclude).unwrap(),
             around(&main_region(&[b"/.gitdupe", b"/docs/private.md"]), cafe)
         );
-        assert_eq!(mode(&exclude), 0o640);
+        mode_is(s, &exclude, 0o640, "worktree_regions");
 
         // `detach` takes the main region and the private repository, nothing else.
         let detach = s.git(["dupe", "detach", "--force"]).from(&root).succeeds();
@@ -169,11 +168,11 @@ fn every_command_changes_the_main_region_alone_and_copies_the_rest_in_order() {
         s.init(&root);
         let appended = [&without[..], b"\n", &main_region(&[b"/.gitdupe"])].concat();
         assert_eq!(fs::read(&exclude).unwrap(), appended);
-        let written = inode(&exclude);
+        let written = identity(&exclude);
         let status = s.git(["dupe", "status"]).from(&root).succeeds();
         assert!(status.lines("warning").is_empty(), "{status:?}");
         assert_eq!(fs::read(&exclude).unwrap(), appended);
-        assert_eq!(inode(&exclude), written);
+        assert_eq!(identity(&exclude), written);
     });
 }
 
@@ -205,7 +204,7 @@ fn detach_refuses_a_link_at_info_only_while_the_main_region_stands_beyond_it() {
                     let (output, runs) =
                         run_traced(s.git(words).from(&root), &s.dir().join("trace"));
                     assert_eq!(output.end, End::Code(128), "{output:?}");
-                    names(output.only_line("fatal"), info.as_os_str().as_bytes());
+                    names(output.only_line("fatal"), as_git_spells(&info).as_bytes());
                     let own = runs.own();
                     assert_eq!(own.commands(), [b"rev-parse".as_slice()], "{own:?}");
                     assert!(root.join(".git/dupe").is_dir());

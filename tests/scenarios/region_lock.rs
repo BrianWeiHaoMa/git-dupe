@@ -9,13 +9,12 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 
 use crate::harness::{
-    End, Output, Point, Scenario, Tree, entry_names, inode, lock_is_free, lock_path, mode, names,
-    refused_stash_untracked, region, region_rules, under_each_release, write,
+    End, Output, Point, Scenario, Tree, entry_names, identity, lock_is_free, lock_path, mode_is,
+    names, refused_stash_untracked, region, region_rules, set_mode, under_each_release, write,
 };
 
 /// How long a command is given to end.
@@ -187,7 +186,7 @@ fn a_command_killed_while_it_holds_the_lock_holds_up_none_after_it() {
             .collect();
         fs::write(&exclude, &user).unwrap();
         s.git(["dupe", "status"]).from(&dir).succeeds();
-        fs::set_permissions(&exclude, fs::Permissions::from_mode(0o640)).unwrap();
+        set_mode(s, &exclude, 0o640, "region_lock");
         // `.gitdupe` edited by hand: the next `status` replaces the region.
         write(&dir, ".gitdupe", b"notes\n");
         let as_it_was = fs::read(&exclude).unwrap();
@@ -203,9 +202,9 @@ fn a_command_killed_while_it_holds_the_lock_holds_up_none_after_it() {
             assert_eq!(fs::read(&link).unwrap(), as_it_was);
             run.wait();
             assert_eq!(fs::read(&exclude).unwrap(), as_it_was);
-            assert_eq!(inode(&exclude), inode(&link));
+            assert_eq!(identity(&exclude), identity(&link));
             assert_eq!(fs::read(&link).unwrap(), as_it_was);
-            assert_eq!(mode(&exclude), 0o640);
+            mode_is(s, &exclude, 0o640, "region_lock");
             for left in entry_names(&private).difference(&private_before) {
                 let name = left.to_string_lossy();
                 assert!(
@@ -228,7 +227,7 @@ fn a_command_killed_while_it_holds_the_lock_holds_up_none_after_it() {
         ]
         .concat();
         assert_eq!(fs::read(&exclude).unwrap(), replaced);
-        assert_eq!(mode(&exclude), 0o640);
+        mode_is(s, &exclude, 0o640, "region_lock");
     });
 }
 
@@ -247,10 +246,10 @@ fn a_write_that_fails_leaves_the_file_and_the_private_repository_and_is_named() 
         let exclude = common.join("info/exclude");
         fs::write(&exclude, b"*.o\n").unwrap();
         s.git(["dupe", "status"]).from(&dir).succeeds();
-        fs::set_permissions(&exclude, fs::Permissions::from_mode(0o640)).unwrap();
+        set_mode(s, &exclude, 0o640, "region_lock");
         write(&dir, ".gitdupe", b"scratch\n");
         let as_it_was = fs::read(&exclude).unwrap();
-        let file = inode(&exclude);
+        let file = identity(&exclude);
         let private = common.join("dupe");
         let private_before = entry_names(&private);
         let not_written = |output: &Output| {
@@ -272,8 +271,8 @@ fn a_write_that_fails_leaves_the_file_and_the_private_repository_and_is_named() 
                 "{output:?}"
             );
             assert_eq!(fs::read(&exclude).unwrap(), as_it_was);
-            assert_eq!(inode(&exclude), file);
-            assert_eq!(mode(&exclude), 0o640);
+            assert_eq!(identity(&exclude), file);
+            mode_is(s, &exclude, 0o640, "region_lock");
             assert_eq!(entry_names(&private), private_before);
         };
 
@@ -304,14 +303,14 @@ fn a_write_that_fails_leaves_the_file_and_the_private_repository_and_is_named() 
             "{detach:?}"
         );
         assert_eq!(fs::read(&exclude).unwrap(), as_it_was);
-        assert_eq!(inode(&exclude), file);
+        assert_eq!(identity(&exclude), file);
         assert!(private.join("HEAD").is_file());
         assert_eq!(entry_names(&private), private_before);
 
         // Then every command writes the region as it would have.
         s.git(["dupe", "status"]).from(&dir).succeeds();
         assert_eq!(region_rules(&dir), [&b"/.gitdupe"[..], b"/scratch"]);
-        assert_eq!(mode(&exclude), 0o640);
+        mode_is(s, &exclude, 0o640, "region_lock");
         s.git(["dupe", "hide", "notes"]).from(&dir).succeeds();
         assert_eq!(
             region_rules(&dir),

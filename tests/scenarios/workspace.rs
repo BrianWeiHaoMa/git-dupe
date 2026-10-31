@@ -6,11 +6,11 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Scenario, Tree, Worktree, holds, locate_words, name_accepted, names, under_each_release,
+    End, Scenario, Tree, Worktree, as_git_spells_bytes, holds, locate_words, name, name_accepted,
+    names, under_each_release, word_of,
 };
 
 /// `git dupe <words>` from `directory` must be the refusal of an unattached repository:
@@ -51,17 +51,27 @@ fn where_git_finds_no_working_tree_the_command_ends_with_gits_message_and_status
 
 #[test]
 fn an_unattached_repository_is_refused_naming_git_dupe_init_from_any_directory() {
-    let not_utf8 = OsStr::from_bytes(b"\xff\xfe");
     let typed = OsStr::new("status\nhint: typed\x1b[31m");
     under_each_release(|s| {
+        let case = "workspace: a command word of bytes that are no UTF-8";
+        let not_utf8 = word_of(s, b"\xff\xfe", case);
         let plain = s.dir().join("plain");
         let below = plain.join("sub/dir");
         // A newline in a directory below the root is inside the envelope of a repository
         // git-dupe is not attached to; its prefix answer holds `\n/`.
         let newline = plain.join("new\nline\n");
+        let case = "workspace: a directory whose name holds a newline";
+        let holds_newlines = name_accepted(s.dir(), b"new\nline\n", case);
         s.repository(&plain);
         fs::create_dir_all(&below).unwrap();
-        fs::create_dir(&newline).unwrap();
+        if holds_newlines {
+            fs::create_dir(&newline).unwrap();
+        }
+        let directories: Vec<&Path> = [&plain, &below, &newline]
+            .into_iter()
+            .filter(|directory| holds_newlines || *directory != &newline)
+            .map(PathBuf::as_path)
+            .collect();
         let before = Tree::of(&plain);
 
         let line = refused_as_unattached(s, &plain, &[OsStr::new("status")]);
@@ -71,8 +81,9 @@ fn an_unattached_repository_is_refused_naming_git_dupe_init_from_any_directory()
         private_git_dir.push(plain.join(".git/dupe"));
         let mut private_work_tree = OsString::from("--work-tree=");
         private_work_tree.push(&plain);
-        for directory in [&plain, &below, &newline] {
-            for word in [OsStr::new("status"), OsStr::new("log"), not_utf8, typed] {
+        for directory in &directories {
+            let words = [OsStr::new("status"), OsStr::new("log"), typed];
+            for word in words.into_iter().chain(not_utf8.as_deref()) {
                 assert_eq!(refused_as_unattached(s, directory, &[word]), line);
                 // `-h` after a command whose help is git-dupe's is that help, whatever the
                 // workspace (G4); a passthrough word asks Git in the private repository,
@@ -128,7 +139,7 @@ fn an_unattached_repository_is_refused_naming_git_dupe_init_from_any_directory()
         // The commands that attach are not told to attach first: `clone` gets as far as
         // its own refusals, here of a word naming the project's working tree, read from
         // the root wherever it is typed, and `init` attaches.
-        for directory in [&plain, &below, &newline] {
+        for directory in &directories {
             let refusal = s.git(["dupe", "clone", "."]).from(directory).run();
             assert!(refusal.stdout.is_empty(), "{refusal:?}");
             let line = refusal.only_line("fatal");
@@ -140,7 +151,8 @@ fn an_unattached_repository_is_refused_naming_git_dupe_init_from_any_directory()
         let changed = before.changed_in(&Tree::of(&plain));
         assert!(changed.is_empty(), "changed: {changed:?}");
 
-        let init = s.git(["dupe", "init"]).from(&newline).run();
+        let deepest = directories[directories.len() - 1];
+        let init = s.git(["dupe", "init"]).from(deepest).run();
         assert_eq!(init.end, End::Code(0), "{init:?}");
         assert!(init.lines("fatal").is_empty(), "{init:?}");
         assert!(plain.join(".git/dupe/HEAD").is_file(), "{init:?}");
@@ -172,23 +184,31 @@ fn a_linked_worktree_is_unattached_until_its_own_init_whatever_the_main_worktree
             true => b"-caf\xe9",
             false => b"-cafe",
         };
-        for (name, attached) in [("plain", false), ("attached", true)] {
-            let main = s.dir().join(OsStr::from_bytes(
-                [name.as_bytes(), suffix].concat().as_slice(),
-            ));
-            let linked = s.dir().join(format!("linked-of-{name}"));
+        let case = "workspace: a directory whose name holds a newline";
+        let holds_newlines = name_accepted(s.dir(), b"new\nline\n", case);
+        for (kind, attached) in [("plain", false), ("attached", true)] {
+            let main = s
+                .dir()
+                .join(name([kind.as_bytes(), suffix].concat().as_slice()));
+            let linked = s.dir().join(format!("linked-of-{kind}"));
             s.repository(&main);
             if attached {
                 fs::create_dir(main.join(".git/dupe")).unwrap();
             }
             s.linked_worktree(&main, &linked);
             fs::create_dir(linked.join("sub")).unwrap();
-            fs::create_dir(linked.join("new\nline\n")).unwrap();
-            for directory in [&linked, &linked.join("sub"), &linked.join("new\nline\n")] {
+            let newline = linked.join("new\nline\n");
+            let sub = linked.join("sub");
+            let mut directories = vec![&linked, &sub];
+            if holds_newlines {
+                fs::create_dir(&newline).unwrap();
+                directories.push(&newline);
+            }
+            for directory in directories {
                 let line = refused_as_unattached(s, directory, &[OsStr::new("status")]);
                 assert!(
-                    !holds(&line, main.as_os_str().as_bytes()),
-                    "{name}: {}",
+                    !holds(&line, &as_git_spells_bytes(&main)),
+                    "{kind}: {}",
                     line.escape_ascii()
                 );
             }

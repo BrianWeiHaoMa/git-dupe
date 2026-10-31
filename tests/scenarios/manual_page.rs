@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use crate::harness::manpage::Kind;
 use crate::harness::{
     End, FreshDirectory, TERMINAL, asking_for_the_page, every_text_shown,
-    holds_a_line_of_the_general_text, lines_of, manpage, page_texts_present, shown_by_man,
-    shown_under, text_present, texts_present, under_each_release,
+    holds_a_line_of_the_general_text, lines_of, manpage, page_texts_present, report, shown_by_man,
+    shown_under, text_present, texts_present, under_each_release, word,
 };
 
 /// The page as the build script wrote it for this build.
@@ -30,6 +30,18 @@ fn shown(page: &str, columns: usize) -> Vec<String> {
     let file = directory.path().join("git-dupe.1");
     fs::write(&file, page).unwrap();
     shown_by_man(&file, columns)
+}
+
+/// Whether this machine has a `man` to show a page. Where it has none, `check` reports
+/// itself, or the part of it that asks: what reads the renderer alone still runs.
+fn man_here(check: &str) -> bool {
+    let here = word() != "windows";
+    if !here {
+        report(&format!(
+            "manual_page: {check} unavailable: what `man` shows"
+        ));
+    }
+    here
 }
 
 /// The lines of `shown` wider than `columns`.
@@ -52,6 +64,9 @@ fn sample_page(text: &str) -> String {
 
 #[test]
 fn the_built_page_shows_every_text_present_within_80_columns() {
+    if !man_here("the built page within 80 columns") {
+        return;
+    }
     let narrow = shown_by_man(&built_page(), TERMINAL);
     every_text_shown(&narrow, "`man` given its path at 80 columns");
     assert_eq!(wider_than(&narrow, TERMINAL), Vec::<&str>::new());
@@ -88,6 +103,9 @@ fn the_page_s_own_texts_stand_between_the_description_and_the_commands() {
         "the quick start and the examples come first: {expected:?}"
     );
 
+    if !man_here("the headings as shown") {
+        return;
+    }
     // A heading is the one kind of line `man` shows at the left margin, beside the title
     // line above the page and the footer below it.
     let shown = shown_by_man(&built_page(), TERMINAL);
@@ -102,6 +120,9 @@ fn the_page_s_own_texts_stand_between_the_description_and_the_commands() {
 
 #[test]
 fn a_page_text_has_no_usage_line_and_keeps_its_indented_lines_as_written() {
+    if !man_here("a page text as shown") {
+        return;
+    }
     // A first line of prose long enough that `man` fills it over two lines, a command
     // line, and a line as wide as a line that keeps its layout may be.
     let text = format!(
@@ -169,6 +190,9 @@ fn a_page_text_takes_its_place_and_heading_from_its_file_name() {
 
 #[test]
 fn the_installed_page_is_what_man_git_dupe_and_git_dupe_help_show() {
+    if !man_here("the installed page") {
+        return;
+    }
     let page = fs::read(built_page()).unwrap();
     under_each_release(|s| {
         // Two manual paths: one holding exactly the page this build rendered, and one
@@ -225,6 +249,9 @@ fn every_hyphen_of_the_built_page_is_escaped() {
 
 #[test]
 fn lines_that_are_markup_to_man_are_shown_as_written() {
+    if !man_here("lines that are markup to man") {
+        return;
+    }
     let text = "usage: git dupe sample [-n | --dry-run] <path>\n\
                 \n\
                 .gitdupe begins with a dot\n\
@@ -248,6 +275,9 @@ fn lines_that_are_markup_to_man_are_shown_as_written() {
 
 #[test]
 fn prose_and_the_lines_that_keep_their_layout_each_start_a_line_of_their_own() {
+    if !man_here("lines that start a line of their own") {
+        return;
+    }
     let text = "usage: git dupe sample <path>\n\
                 Prose right below the usage line, long enough to fill more than one line of\n\
                 the page on a terminal of 80 columns, which it does once it runs on a while.\n\
@@ -298,6 +328,9 @@ fn prose_and_the_lines_that_keep_their_layout_each_start_a_line_of_their_own() {
 
 #[test]
 fn prose_is_filled_with_every_word_whole_and_single_spaces_between_words() {
+    if !man_here("filled prose") {
+        return;
+    }
     // Words a terminal of 80 columns tempts `man` to break or space out: option names,
     // hyphenated words, paths, quoted commands, a long path, and a URL.
     let text = "usage: git dupe sample\n\
@@ -344,6 +377,9 @@ fn prose_is_filled_with_every_word_whole_and_single_spaces_between_words() {
 
 #[test]
 fn a_line_that_keeps_its_layout_fits_80_columns_at_73_columns_and_not_at_74() {
+    if !man_here("a line at 80 columns") {
+        return;
+    }
     let prose = "A line of prose as wide as a help text allows any of its lines; man fills it in.";
     assert_eq!(prose.len(), 80);
     for width in [73, 74] {

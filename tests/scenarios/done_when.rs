@@ -4,13 +4,13 @@
 //! story ends the public repository holds nothing private.
 
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    EVERY_OBJECT, End, Scenario, Tree, changed_since, held_publicly, holds, names, names_number,
-    privately_tracked, public_git, public_status, publicly_tracked, records, region_rules,
-    under_each_release, warnings_in_any_order, watched_dupe, watched_dupe_succeeds, write,
+    EVERY_OBJECT, End, Scenario, Tree, as_git_spells, changed_since, held_publicly, holds, names,
+    names_number, privately_tracked, public_git, public_status, publicly_tracked, records,
+    region_rules, under_each_release, warnings_in_any_order, watched_dupe, watched_dupe_succeeds,
+    write,
 };
 
 /// The developer's own text in `.git/info/exclude`, before `init` and after the region.
@@ -117,7 +117,10 @@ fn a_project_made_private_then_used_daily_never_shows_public_git_a_private_file(
 
         // Bullet 1: attach, make three kinds of path private, commit.
         let init = watched_dupe_succeeds(s, &dir, &["init"]);
-        names(&init.stdout, dir.join(".git/dupe").as_os_str().as_bytes());
+        names(
+            &init.stdout,
+            as_git_spells(&dir.join(".git/dupe")).as_bytes(),
+        );
         let head = s.private(&dir).git(["symbolic-ref", "HEAD"]).succeeds();
         assert_eq!(head.stdout, b"refs/heads/main\n");
         let mut exclude = fs::read(dir.join(".git/info/exclude")).unwrap();

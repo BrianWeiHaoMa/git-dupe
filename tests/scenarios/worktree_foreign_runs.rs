@@ -2,11 +2,10 @@
 //! no handler scope or Git run grows with another worktree's hidden paths (G22, G27).
 
 use std::fs;
-use std::os::unix::fs::symlink;
 
 use crate::harness::{
     End, Output, Runs, Scenario, Tree, Worktree, names, private_add, private_commit, run_traced,
-    stash_untracked_line, under_each_release, write,
+    stash_untracked_line, symlink, under_each_release, write,
 };
 
 fn workspace(s: &Scenario) -> Worktree {

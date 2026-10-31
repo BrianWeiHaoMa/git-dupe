@@ -134,14 +134,16 @@ fn a_stopped_rebase_or_am_ends_with_one_hint() {
 
         // Git killed by a signal while its rebase stands stopped: git-dupe ends with 128
         // plus the signal, and the hint follows.
-        let killed = hinted(
-            s,
-            &root,
-            &["rebase", "-x", "kill -9 $PPID", "HEAD~1"],
-            &REBASE,
-        );
-        assert_eq!(killed.end, End::Code(128 + 9), "{killed:?}");
-        unhinted(s, &root, &["rebase", "--abort"]);
+        if s.child_signals("passthrough_advice") {
+            let killed = hinted(
+                s,
+                &root,
+                &["rebase", "-x", "kill -9 $PPID", "HEAD~1"],
+                &REBASE,
+            );
+            assert_eq!(killed.end, End::Code(128 + 9), "{killed:?}");
+            unhinted(s, &root, &["rebase", "--abort"]);
+        }
         // The stopped rebase is read by `lstat`, at no Git run.
         assert_eq!(
             own_runs(s, &root, &["rebase", "side"]),

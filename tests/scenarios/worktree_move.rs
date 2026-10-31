@@ -3,13 +3,11 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Point, Scenario, Tree, Worktree, completed_hint, linked_on_branch, name_accepted,
-    unchanged, under_each_release,
+    End, Output, Point, Scenario, Tree, Worktree, as_git_spells, as_git_spells_bytes,
+    completed_hint, linked_on_branch, name, name_accepted, symlink, unchanged, under_each_release,
 };
 
 fn git_directory(path: &Path) -> OsString {
@@ -30,7 +28,7 @@ fn plain_top(s: &Scenario, wt: &Worktree, from: &Path) {
         .succeeds();
     assert_eq!(
         output.stdout,
-        [wt.root.as_os_str().as_bytes(), b"\n"].concat(),
+        [&as_git_spells_bytes(&wt.root)[..], b"\n"].concat(),
         "{output:?}"
     );
 }
@@ -58,7 +56,8 @@ fn relative(wt: &Worktree) -> Vec<u8> {
         path.push("..");
     }
     path.push(to.strip_prefix(common).unwrap());
-    path.as_os_str().as_bytes().to_vec()
+    let components: Vec<&[u8]> = path.iter().map(OsStr::as_encoded_bytes).collect();
+    components.join(&b'/')
 }
 
 fn relative_and_resolved(s: &Scenario, wt: &Worktree) {
@@ -208,7 +207,7 @@ fn moved_init(s: &Scenario, recreate_old: bool) {
             ])
             .from(&new)
             .succeeds();
-        assert_eq!(top.stdout, [old.as_os_str().as_bytes(), b"\n"].concat());
+        assert_eq!(top.stdout, [as_git_spells(&old).as_bytes(), b"\n"].concat());
     }
     let config_path = moved.private_directory().join("config");
     let private_before = Tree::of(&moved.private_directory()).without(&[&config_path]);
@@ -298,12 +297,7 @@ fn linked_init_records_canonical_git_directory_and_non_utf8_root_bytes() {
             b"caf\xe9",
             "worktree_move: a linked root named by bytes that are no UTF-8",
         ) {
-            let bytes = linked_on_branch(
-                s,
-                &main,
-                &s.dir().join(OsStr::from_bytes(b"caf\xe9")),
-                "bytes",
-            );
+            let bytes = linked_on_branch(s, &main, &s.dir().join(name(b"caf\xe9")), "bytes");
             init(s, &bytes);
             relative_and_resolved(s, &bytes);
             completed_hint(&init(s, &bytes), false);

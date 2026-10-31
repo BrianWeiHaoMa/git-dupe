@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, PROJECT_URL, Scenario, Transfer, Tree, holds, names, refusal, region, text,
+    End, PROJECT_URL, Scenario, Transfer, Tree, as_git_spells, holds, names, refusal, region, text,
     under_each_release,
 };
 
@@ -56,7 +56,7 @@ fn public_words_are_refused_without_effects() {
         let sub = t.root.join("sub");
         fs::create_dir(&sub).unwrap();
         let dot_git = t.root.join(".git");
-        let linked_url = format!("file://{}", t.linked.display());
+        let linked_url = format!("file://{}", as_git_spells(&t.linked));
         let relative = format!("../{}", t.root.file_name().unwrap().to_str().unwrap());
         for (words, from, place) in [
             (
@@ -110,7 +110,10 @@ fn refused_push_settles_a_stale_region() {
             .git(["dupe", "push", text(&t.root), "main:leak"])
             .from(&t.root)
             .run();
-        refusal(&output, &[b"git dupe git", text(&t.root).as_bytes()]);
+        refusal(
+            &output,
+            &[b"git dupe git", as_git_spells(&t.root).as_bytes()],
+        );
         assert_eq!(fs::read(&exclude).unwrap(), settled);
         assert_eq!(before.changed_in(&Tree::of(&t.root)), [exclude]);
         for (before, place) in others
@@ -150,7 +153,10 @@ fn configured_url_precedes_words_and_removal_restores_push() {
         let before = t.everything();
         let output = s.git(["dupe", "fetch", text(&t.root)]).from(&t.root).run();
         refusal(&output, &[b"git dupe remote remove", b"leak"]);
-        assert!(!holds(output.only_line("fatal"), text(&t.root).as_bytes()));
+        assert!(!holds(
+            output.only_line("fatal"),
+            as_git_spells(&t.root).as_bytes()
+        ));
         before.unchanged();
         s.git(["dupe", "remote", "remove", "leak"])
             .from(&t.root)
@@ -292,7 +298,7 @@ fn command_line_remote_url_is_guarded() {
             .run();
         refusal(
             &output,
-            &[b"git dupe remote remove", text(&t.root).as_bytes()],
+            &[b"git dupe remote remove", as_git_spells(&t.root).as_bytes()],
         );
         names(output.only_line("fatal"), b"private remote 'extra'");
         before.unchanged();

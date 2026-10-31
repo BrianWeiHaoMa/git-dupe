@@ -6,7 +6,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use super::output::{End, Output, names};
@@ -242,7 +241,7 @@ pub fn region_in(common_directory: &Path, name: Option<&OsStr>) -> Option<Region
     let mut begin_marker = b"# BEGIN git-dupe".to_vec();
     if let Some(name) = name {
         begin_marker.extend_from_slice(b" worktree ");
-        begin_marker.extend_from_slice(name.as_bytes());
+        begin_marker.extend_from_slice(name.as_encoded_bytes());
     }
     let is_end = |line: &[u8]| {
         line == b"# END git-dupe"

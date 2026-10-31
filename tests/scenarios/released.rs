@@ -5,12 +5,11 @@
 //! or read it as a usage error.
 
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, holds, lines_in_order, private_add, private_commit, region_rules,
-    under_each_release, write,
+    End, Output, Scenario, holds, lines_in_order, name_accepted, private_add, private_commit,
+    region_rules, symlink, under_each_release, write,
 };
 
 fn workspace(s: &Scenario) -> PathBuf {
@@ -158,6 +157,9 @@ fn a_released_directory_with_a_publicly_tracked_child_names_no_hide_command() {
 #[test]
 fn a_released_star_path_names_no_hide_command() {
     under_each_release(|s| {
+        if !name_accepted(s.dir(), b"star*.txt", "released: a file named star*.txt") {
+            return;
+        }
         let dir = workspace(s);
         write(&dir, "star*.txt", b"private\n");
         s.git(["dupe", "git", "add", "--", ":(literal)star*.txt"])
@@ -180,6 +182,9 @@ fn a_released_star_path_names_no_hide_command() {
 #[test]
 fn a_released_colon_path_names_hide_with_its_dot_slash_operand() {
     under_each_release(|s| {
+        if !name_accepted(s.dir(), b":colon.txt", "released: a file named :colon.txt") {
+            return;
+        }
         let dir = workspace(s);
         write(&dir, ":colon.txt", b"private\n");
         s.git(["dupe", "git", "add", "--", ":(literal):colon.txt"])

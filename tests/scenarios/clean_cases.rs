@@ -6,12 +6,11 @@
 //! (G16, S4, S5, S9).
 
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
     End, Scenario, Tree, Twin, changed_since, copy, holds, names, private_add, private_commit,
-    run_traced, under_each_release, write, write_executable,
+    run_traced, symlink, under_each_release, write, write_executable,
 };
 
 /// An attached project whose `.gitignore`, committed, is `ignore`, with an untracked

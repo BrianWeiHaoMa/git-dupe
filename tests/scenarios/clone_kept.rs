@@ -7,20 +7,18 @@
 //! unwritten as Git leaves it.
 
 use std::collections::BTreeMap;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, holds, name_accepted, private_commit, region_rules,
-    under_each_release, warnings_in_any_order, write, write_executable,
+    End, Output, Scenario, Tree, holds, mode, name, name_accepted, private_commit, region_rules,
+    symlink, under_each_release, warnings_in_any_order, write, write_executable,
 };
 
 /// `path` below `dir`, from its bytes.
 fn at(dir: &Path, path: &[u8]) -> PathBuf {
-    dir.join(OsStr::from_bytes(path))
+    dir.join(name(path))
 }
 
 /// Writes `bytes` at `path` below `dir`, making the directories above it first.
@@ -33,8 +31,8 @@ fn file(dir: &Path, path: &[u8], bytes: &[u8]) {
 /// Makes `paths`, written below the first machine's root, privately tracked there,
 /// committed, and pushed to its private remote.
 fn pushed(s: &Scenario, first: &Path, paths: &[&[u8]]) {
-    let add = ["add", "-f", "--"].map(OsStr::new);
-    let paths = paths.iter().map(|path| OsStr::from_bytes(path));
+    let add = ["add", "-f", "--"].map(OsString::from);
+    let paths = paths.iter().map(|path| name(path));
     s.private(first)
         .git(add.into_iter().chain(paths))
         .succeeds();
@@ -182,8 +180,11 @@ fn present_files_are_kept_and_named_and_absent_ones_written_as_committed() {
             added.push(b"notes");
         }
         kept_and_added(&before, second, &added);
-        let run = fs::symlink_metadata(second.join("bin/run")).unwrap();
-        assert!(run.is_file() && run.permissions().mode() & 0o111 != 0);
+        let run = second.join("bin/run");
+        assert!(fs::symlink_metadata(&run).unwrap().is_file());
+        if let Some(bits) = mode(s, &run, "clone_kept") {
+            assert!(bits & 0o111 != 0, "{bits:o}");
+        }
         assert_eq!(fs::read(second.join("bin/run")).unwrap(), b"#!/bin/sh\n");
         assert_eq!(
             fs::read_link(second.join("link")).unwrap(),

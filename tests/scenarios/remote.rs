@@ -5,8 +5,8 @@ use std::fs;
 use std::io::Write;
 
 use crate::harness::{
-    End, PROJECT_URL, Tree, lines_in_order, refusal, region, run_traced, under_each_release,
-    warnings_in_any_order, write,
+    End, PROJECT_URL, Tree, as_git_spells, lines_in_order, refusal, region, run_traced,
+    under_each_release, warnings_in_any_order, write,
 };
 
 /// Adding and listing a private remote preserves the public remote's configuration.
@@ -104,10 +104,7 @@ fn a_refusal_settles_the_stale_region() {
             .git(["dupe", "remote", "add", "leak", root.to_str().unwrap()])
             .from(root)
             .run();
-        refusal(
-            &output,
-            &[b"git dupe git", root.to_str().unwrap().as_bytes()],
-        );
+        refusal(&output, &[b"git dupe git", as_git_spells(root).as_bytes()]);
         assert!(region(root).unwrap().rules.contains(&b"/extra".to_vec()));
         assert_eq!(
             before.changed_in(&Tree::of(root)),
@@ -160,10 +157,7 @@ fn a_private_alias_cannot_add_a_public_destination() {
         ] {
             let before = transfer.everything();
             let output = s.git(words).from(root).run();
-            refusal(
-                &output,
-                &[b"git dupe git", root.to_str().unwrap().as_bytes()],
-            );
+            refusal(&output, &[b"git dupe git", as_git_spells(root).as_bytes()]);
             before.unchanged();
         }
     });
@@ -184,10 +178,7 @@ fn alias_options_reach_the_guard_runs() {
                 .from(root),
             &s.dir().join("trace"),
         );
-        refusal(
-            &output,
-            &[b"git dupe git", root.to_str().unwrap().as_bytes()],
-        );
+        refusal(&output, &[b"git dupe git", as_git_spells(root).as_bytes()]);
         before.unchanged();
         let own = runs.own();
         for tail in [

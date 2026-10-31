@@ -6,11 +6,11 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::harness::{
-    End, Runs, Scenario, Tree, Twin, changed_since, daily_state, names, names_number, private_add,
-    private_commit, region_rules, run_traced, run_words, under_each_release, write,
+    End, Runs, Scenario, Tree, Twin, changed_since, command_line_limit, daily_state, name_accepted,
+    names, names_number, private_add, private_commit, region_rules, run_traced, run_words,
+    under_each_release, write,
 };
 
 /// The `-e` options git-dupe gives `clean` without `-X` in `daily_state`'s workspace:
@@ -86,7 +86,8 @@ fn a_pathspec_setting_before_dupe_governs_the_users_pathspecs_alone() {
         write(&built, ".gitdupe", b"");
         private_add(s, &built, ".gitdupe");
         private_commit(s, &built);
-        for path in ["a*", "ab", "ac"] {
+        let star = name_accepted(s.dir(), b"a*", "clean_run: a file named a*");
+        for path in ["a*", "ab", "ac"].into_iter().filter(|_| star) {
             write(&built, path, format!("{path}\n").as_bytes());
         }
         s.git(["dupe", "status"]).from(&built).succeeds();
@@ -94,28 +95,30 @@ fn a_pathspec_setting_before_dupe_governs_the_users_pathspecs_alone() {
         // No hidden path lies below a directory the project tracks nothing under, where
         // a pattern among the pathspecs is refused (G16): here it reaches Git.
         let twin = Twin::of(s, &built, &[".gitdupe", "build/local.cfg"]);
-        twin.clean(&["-f", "--", "a*"])
-            .global_option("--literal-pathspecs")
-            .run();
-        twin.clean(&["-f", "--", "a*"]).run();
+        if star {
+            twin.clean(&["-f", "--", "a*"])
+                .global_option("--literal-pathspecs")
+                .run();
+            twin.clean(&["-f", "--", "a*"]).run();
 
-        // What plain Git did, said without it: the literal pathspec names one file, the
-        // glob all three.
-        let before = Tree::working(&built);
-        let literal = s
-            .git(["--literal-pathspecs", "dupe", "clean", "-f", "--", "a*"])
-            .from(&built)
-            .run();
-        assert_eq!(literal.end, End::Code(0), "{literal:?}");
-        assert_eq!(changed_since(&before, &built), ["a*"]);
-        write(&built, "a*", b"a*\n");
-        let before = Tree::working(&built);
-        let glob = s
-            .git(["dupe", "clean", "-f", "--", "a*"])
-            .from(&built)
-            .run();
-        assert_eq!(glob.end, End::Code(0), "{glob:?}");
-        assert_eq!(changed_since(&before, &built), ["a*", "ab", "ac"]);
+            // What plain Git did, said without it: the literal pathspec names one file, the
+            // glob all three.
+            let before = Tree::working(&built);
+            let literal = s
+                .git(["--literal-pathspecs", "dupe", "clean", "-f", "--", "a*"])
+                .from(&built)
+                .run();
+            assert_eq!(literal.end, End::Code(0), "{literal:?}");
+            assert_eq!(changed_since(&before, &built), ["a*"]);
+            write(&built, "a*", b"a*\n");
+            let before = Tree::working(&built);
+            let glob = s
+                .git(["dupe", "clean", "-f", "--", "a*"])
+                .from(&built)
+                .run();
+            assert_eq!(glob.end, End::Code(0), "{glob:?}");
+            assert_eq!(changed_since(&before, &built), ["a*", "ab", "ac"]);
+        }
 
         write(&built, "build/local.cfg", b"private\n");
         private_add(s, &built, "build/local.cfg");
@@ -186,17 +189,6 @@ fn under_x_one_ignore_question_comes_before_clean_whatever_the_hidden_files() {
             }
         }
     });
-}
-
-/// `getconf ARG_MAX`: what one command line may carry here.
-fn command_line_limit() -> usize {
-    let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
-    assert!(limit.status.success());
-    std::str::from_utf8(&limit.stdout)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap()
 }
 
 /// Hidden paths that only `.gitdupe` lists, nothing at them, all directly inside the

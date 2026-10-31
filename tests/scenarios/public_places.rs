@@ -3,12 +3,11 @@
 //! directories, and the neighbors that name none, asked through `git dupe remote`.
 
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use crate::harness::{
-    End, Everything, MANY_URLS, PROJECT_URL, Scenario, Transfer, Tree, holds, refusal, text,
-    unchanged, under_each_release,
+    End, Everything, MANY_URLS, PROJECT_URL, Scenario, Transfer, Tree, as_git_spells, holds,
+    refusal, symlink, text, unchanged, under_each_release,
 };
 
 fn refused(s: &Scenario, t: &Transfer, from: &Path, word: &str, place: &str) {
@@ -306,8 +305,8 @@ fn file_urls_also_name_local_places() {
                 s,
                 &t,
                 &t.root,
-                &format!("file://{host}{}", path.display()),
-                text(path),
+                &format!("file://{host}{}", as_git_spells(path)),
+                &as_git_spells(path),
             );
         }
         let relative = format!("../{}", t.root.file_name().unwrap().to_str().unwrap());
@@ -328,7 +327,7 @@ fn a_file_scheme_spelled_otherwise_names_no_local_place() {
                 &t,
                 &t.root,
                 name,
-                &format!("{scheme}://{}", t.root.display()),
+                &format!("{scheme}://{}", as_git_spells(&t.root)),
             );
         }
     });
@@ -370,7 +369,10 @@ fn relative_words_outside_also_use_the_users_directory() {
             .variable("GIT_DIR", t.root.join(".git"))
             .variable("GIT_WORK_TREE", &t.root)
             .run();
-        refusal(&output, &[b"git dupe git", text(&t.root).as_bytes()]);
+        refusal(
+            &output,
+            &[b"git dupe git", as_git_spells(&t.root).as_bytes()],
+        );
         before.unchanged();
         s.git(["dupe", "remote", "add", "leak", word])
             .from(&t.root)
@@ -392,7 +394,10 @@ fn a_one_letter_host_names_a_place_through_the_path_after_its_colon() {
         for words in [["push", "x:.", "main:leak"], ["fetch", &up, "main:leak"]] {
             let before: Everything = t.everything();
             let output = s.git(["dupe"].iter().chain(&words)).from(&t.root).run();
-            refusal(&output, &[b"git dupe git", text(&t.root).as_bytes()]);
+            refusal(
+                &output,
+                &[b"git dupe git", as_git_spells(&t.root).as_bytes()],
+            );
             before.unchanged();
         }
         let before: Everything = t.everything();

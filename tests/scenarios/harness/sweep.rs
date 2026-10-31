@@ -16,7 +16,6 @@
 
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::PermissionsExt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
@@ -24,6 +23,7 @@ use super::exclude_lock::lock_is_free;
 use super::files::copy;
 use super::kill::{Killing, Point};
 use super::output::{End, Output};
+use super::platform::permissions;
 use super::scenario::Scenario;
 use super::tree::Tree;
 
@@ -31,12 +31,17 @@ use super::tree::Tree;
 #[derive(Clone, PartialEq, Eq)]
 pub struct Written {
     pub bytes: Vec<u8>,
-    pub mode: u32,
+    pub permissions: fs::Permissions,
 }
 
 impl std::fmt::Debug for Written {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:o} \"{}\"", self.mode, self.bytes.escape_ascii())
+        write!(
+            f,
+            "{:?} \"{}\"",
+            self.permissions,
+            self.bytes.escape_ascii()
+        )
     }
 }
 
@@ -56,7 +61,7 @@ pub fn files(dir: &Path) -> Files {
         match fs::symlink_metadata(&path) {
             Ok(metadata) => Some(Written {
                 bytes: fs::read(&path).unwrap_or_else(|cause| panic!("{path:?}: {cause}")),
-                mode: metadata.permissions().mode() & 0o7777,
+                permissions: metadata.permissions(),
             }),
             Err(cause) if cause.kind() == ErrorKind::NotFound => None,
             Err(cause) => panic!("{}: {cause}", path.display()),
@@ -172,7 +177,7 @@ impl<'s> Sweep<'s> {
             (&after.exclude, &before.exclude),
         ] {
             if let (Some(now), Some(was)) = (now, was) {
-                assert_eq!(now.mode, was.mode, "permissions not kept");
+                assert_eq!(now.permissions, was.permissions, "permissions not kept");
             }
         }
 
@@ -384,7 +389,7 @@ fn own_lines(first: usize, count: usize) -> Vec<u8> {
 
 /// Surrounds the managed region of the workspace at `dir` with the developer's own lines,
 /// and gives `.gitdupe`, where it exists, and the exclude file permissions other than a new
-/// file's.
+/// file's, on a platform that has mode bits.
 pub fn lived_in(dir: &Path) {
     let exclude = dir.join(EXCLUDE);
     let region = fs::read(&exclude).unwrap();
@@ -393,8 +398,10 @@ pub fn lived_in(dir: &Path) {
         [own_lines(0, 80), region, own_lines(80, 4)].concat(),
     )
     .unwrap();
-    fs::set_permissions(&exclude, fs::Permissions::from_mode(0o640)).unwrap();
-    if dir.join(GITDUPE).exists() {
-        fs::set_permissions(dir.join(GITDUPE), fs::Permissions::from_mode(0o600)).unwrap();
+    if let Some(permissions) = permissions(0o640) {
+        fs::set_permissions(&exclude, permissions).unwrap();
+    }
+    if let (true, Some(permissions)) = (dir.join(GITDUPE).exists(), permissions(0o600)) {
+        fs::set_permissions(dir.join(GITDUPE), permissions).unwrap();
     }
 }

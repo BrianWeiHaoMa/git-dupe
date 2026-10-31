@@ -4,11 +4,10 @@
 //! names the place Git would reach, and one that names no public place still receives
 //! private history, or for `clone` attaches.
 
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    Everything, Scenario, Transfer, Tree, refusal, text, unchanged, under_each_release,
+    Everything, Scenario, Transfer, Tree, refusal, symlink, text, unchanged, under_each_release,
 };
 
 /// The transfer workspace with the scenario's `HOME` holding `project`, a link to the

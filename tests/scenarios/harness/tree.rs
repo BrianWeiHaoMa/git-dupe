@@ -4,16 +4,24 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use super::exclude_lock::lock_path;
+use super::platform::as_git_spells;
 
 #[derive(PartialEq, Eq)]
 enum Entry {
-    Directory { mode: u32 },
-    File { mode: u32, content: Vec<u8> },
-    Link { target: PathBuf },
+    // Compared whole: mode bits on Linux and macOS, the read-only attribute on Windows.
+    Directory {
+        permissions: fs::Permissions,
+    },
+    File {
+        permissions: fs::Permissions,
+        content: Vec<u8>,
+    },
+    Link {
+        target: PathBuf,
+    },
 }
 
 pub struct Tree {
@@ -154,7 +162,7 @@ pub fn changed_since(before: &Tree, dir: &Path) -> Vec<String> {
         .iter()
         .map(|path| {
             let relative = path.strip_prefix(dir).unwrap();
-            relative.to_str().unwrap().to_owned()
+            as_git_spells(relative)
         })
         .collect()
 }
@@ -168,20 +176,58 @@ fn read_into(entries: &mut BTreeMap<PathBuf, Entry>, directory: &Path) {
             .path();
         let failed = |cause: std::io::Error| -> ! { panic!("{}: {cause}", path.display()) };
         let metadata = fs::symlink_metadata(&path).unwrap_or_else(|cause| failed(cause));
-        let mode = metadata.permissions().mode();
+        let permissions = metadata.permissions();
         let entry = if metadata.is_symlink() {
             Entry::Link {
                 target: fs::read_link(&path).unwrap_or_else(|cause| failed(cause)),
             }
         } else if metadata.is_dir() {
             read_into(entries, &path);
-            Entry::Directory { mode }
+            Entry::Directory { permissions }
         } else {
             Entry::File {
-                mode,
+                permissions,
                 content: fs::read(&path).unwrap_or_else(|cause| failed(cause)),
             }
         };
         entries.insert(path, entry);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::files::copy;
+    use super::super::fresh::FreshDirectory;
+    use super::*;
+
+    /// The read-only attribute is compared on every platform, where the mode bits are not
+    /// on Windows: a tree that lost it to a number read as zero would call the two equal.
+    #[test]
+    fn a_read_only_attribute_changed_is_a_change() {
+        let fresh = FreshDirectory::create();
+        let file = fresh.path().join("file");
+        fs::write(&file, b"data\n").unwrap();
+        let before = Tree::of(fresh.path());
+        let mut permissions = fs::metadata(&file).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&file, permissions).unwrap();
+        assert_eq!(before.changed_in(&Tree::of(fresh.path())), [file]);
+    }
+
+    /// A copy made by `copy` holds what the original holds, a read-only file included.
+    #[test]
+    fn the_trees_of_two_copies_compare_equal() {
+        let fresh = FreshDirectory::create();
+        let original = fresh.path().join("original");
+        fs::create_dir_all(original.join("below")).unwrap();
+        let file = original.join("below/file");
+        fs::write(&file, b"data\n").unwrap();
+        let mut permissions = fs::metadata(&file).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&file, permissions).unwrap();
+        let copied = fresh.path().join("copied");
+        copy(&original, &copied);
+        let changed = Tree::relative(&original).changed_in(&Tree::relative(&copied));
+        assert!(changed.is_empty(), "{changed:?}");
     }
 }

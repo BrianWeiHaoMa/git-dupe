@@ -4,11 +4,11 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Point, Scenario, Tree, Worktree, run_traced, unchanged, under_each_release, write,
+    End, Point, Scenario, Tree, Worktree, mode_is, run_traced, set_mode, symlink, unchanged,
+    under_each_release, write,
 };
 
 const TOP: &[u8] = b"# user first\n*.o\n";
@@ -70,7 +70,7 @@ impl Regions {
             regions,
             exclude,
         };
-        fixture.install(&(0..roots.len()).collect::<Vec<_>>());
+        fixture.install(s, &(0..roots.len()).collect::<Vec<_>>());
         fixture
     }
 
@@ -87,18 +87,15 @@ impl Regions {
         bytes
     }
 
-    fn install(&self, kept: &[usize]) {
+    fn install(&self, s: &Scenario, kept: &[usize]) {
         fs::write(&self.exclude, self.bytes(kept)).unwrap();
-        fs::set_permissions(&self.exclude, fs::Permissions::from_mode(0o640)).unwrap();
-        self.check(kept);
+        set_mode(s, &self.exclude, 0o640, "worktree_stale_regions");
+        self.check(s, kept);
     }
 
-    fn check(&self, kept: &[usize]) {
+    fn check(&self, s: &Scenario, kept: &[usize]) {
         assert_eq!(fs::read(&self.exclude).unwrap(), self.bytes(kept));
-        assert_eq!(
-            fs::metadata(&self.exclude).unwrap().permissions().mode() & 0o7777,
-            0o640
-        );
+        mode_is(s, &self.exclude, 0o640, "worktree_stale_regions");
         for &n in kept {
             assert_eq!(self.worktrees[n].region_bytes(), self.regions[n]);
         }
@@ -136,7 +133,7 @@ impl Regions {
             .from(&self.worktrees[n].root)
             .succeeds();
         assert!(status.lines("warning").is_empty(), "{status:?}");
-        self.check(kept);
+        self.check(s, kept);
     }
 }
 
@@ -174,11 +171,11 @@ fn peer_settle_drops_regions_after_private_removal_worktree_removal_and_prune() 
                 _ => unreachable!(),
             }
             // Removal itself does not edit exclude; the peer's own region is unchanged.
-            f.check(&[0, 1, 2]);
+            f.check(s, &[0, 1, 2]);
             f.settle(s, 2, &[0, 2]);
             unchanged(&live, &main.private_directory());
             f.survives(s, &[0, 2]);
-            f.check(&[0, 2]);
+            f.check(s, &[0, 2]);
         }
     });
 }
@@ -213,7 +210,7 @@ fn private_files_and_links_are_stale_without_touching_the_link_target() {
             }
             unchanged(&whole, &target);
             f.survives(s, &[0, 2]);
-            f.check(&[0, 2]);
+            f.check(s, &[0, 2]);
             unchanged(&whole, &target);
         }
     });
@@ -236,7 +233,7 @@ fn empty_and_unreadable_private_directories_keep_their_regions() {
             f.settle(s, 2, &[0, 1, 2]);
             unchanged(&whole, &private);
             f.survives(s, &[0, 2]);
-            f.check(&[0, 1, 2]);
+            f.check(s, &[0, 1, 2]);
         }
     });
 }
@@ -246,10 +243,10 @@ fn linked_settle_drops_the_removed_main_private_repositorys_region() {
     under_each_release(|s| {
         let f = Regions::ordinary(s, "main-gone");
         fs::remove_dir_all(f.worktrees[0].private_directory()).unwrap();
-        f.check(&[0, 1, 2]);
+        f.check(s, &[0, 1, 2]);
         f.settle(s, 2, &[1, 2]);
         f.survives(s, &[1, 2]);
-        f.check(&[1, 2]);
+        f.check(s, &[1, 2]);
     });
 }
 
@@ -274,10 +271,10 @@ fn bare_worktree_removal_leaves_only_the_surviving_linked_region() {
         let f = Regions::from_roots(s, &roots);
         assert_eq!(f.exclude, bare.join("info/exclude"));
         remove_worktree(s, &bare, &f.worktrees[0]);
-        f.check(&[0, 1]);
+        f.check(s, &[0, 1]);
         f.settle(s, 1, &[1]);
         f.survives(s, &[1]);
-        f.check(&[1]);
+        f.check(s, &[1]);
         assert!(!bare.join("dupe").exists());
     });
 }
@@ -311,13 +308,13 @@ fn peer_settle_never_fabricates_a_region_for_an_interrupted_linked_init() {
         assert!(pending.private_directory().is_dir());
         assert!(pending.private_directory().join("HEAD").is_file());
         assert!(pending.region().is_none());
-        f.check(&[0, 1, 2]);
+        f.check(s, &[0, 1, 2]);
         let whole = Tree::of(&pending.private_directory());
         f.settle(s, 2, &[0, 1, 2]);
         unchanged(&whole, &pending.private_directory());
         assert!(pending.region().is_none());
         f.survives(s, &[0, 1, 2]);
-        f.check(&[0, 1, 2]);
+        f.check(s, &[0, 1, 2]);
 
         let completed = s.git(["dupe", "init"]).from(&root).succeeds();
         assert!(completed.lines("warning").is_empty(), "{completed:?}");
@@ -329,10 +326,7 @@ fn peer_settle_never_fabricates_a_region_for_an_interrupted_linked_init() {
         assert_eq!(pending.region().unwrap().rules, [b"/.gitdupe".to_vec()]);
         let expected = [f.bytes(&[0, 1, 2]), b"\n".to_vec(), pending.region_bytes()].concat();
         assert_eq!(fs::read(&f.exclude).unwrap(), expected);
-        assert_eq!(
-            fs::metadata(&f.exclude).unwrap().permissions().mode() & 0o7777,
-            0o640
-        );
+        mode_is(s, &f.exclude, 0o640, "worktree_stale_regions");
         s.git(["dupe", "init"]).from(&root).succeeds();
         assert_eq!(fs::read(&f.exclude).unwrap(), expected);
         f.survives(s, &[0, 1, 2]);
@@ -376,7 +370,7 @@ fn interrupted_linked_detach_is_not_restored_and_finishes_without_an_own_region(
             assert!(leaving.region().is_none());
             assert!(leaving.private_directory().is_dir());
             unchanged(&whole, &leaving.private_directory());
-            f.check(&[0, 2]);
+            f.check(s, &[0, 2]);
             f.settle(s, 2, &[0, 2]);
             assert!(leaving.region().is_none());
             unchanged(&whole, &leaving.private_directory());
@@ -414,9 +408,9 @@ fn interrupted_linked_detach_is_not_restored_and_finishes_without_an_own_region(
             );
             assert_eq!(detached.lines("hint"), [b"1 formerly hidden path named above is now visible to public Git; check 'git status' before 'git add -A' stages it".as_slice()]);
             let kept: &[usize] = if stale_main { &[2] } else { &[0, 2] };
-            f.check(kept);
+            f.check(s, kept);
             f.survives(s, kept);
-            f.check(kept);
+            f.check(s, kept);
             assert_eq!(
                 fs::read(leaving.root.join("notes-1")).unwrap(),
                 b"private 1\n"

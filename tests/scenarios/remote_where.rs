@@ -2,12 +2,11 @@
 //! Git directory, and outside any repository; a help request among its words is compared
 //! as any other word wherever a run could follow (G18, `Holds/G18`, `Holds/G24`, G4).
 
-use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, holds, names, refusal, run_traced, unchanged, under_each_release,
+    End, Output, Scenario, Tree, as_git_spells, holds, name, names, refusal, run_traced, unchanged,
+    under_each_release,
 };
 
 fn git_directory(s: &Scenario, worktree: &Path) -> PathBuf {
@@ -15,10 +14,7 @@ fn git_directory(s: &Scenario, worktree: &Path) -> PathBuf {
         .git(["rev-parse", "--absolute-git-dir"])
         .from(worktree)
         .succeeds();
-    Path::new(OsStr::from_bytes(
-        answer.stdout.strip_suffix(b"\n").unwrap(),
-    ))
-    .to_path_buf()
+    PathBuf::from(name(answer.stdout.strip_suffix(b"\n").unwrap()))
 }
 
 fn help_in_git_directory(s: &Scenario, directory: &Path) -> Output {
@@ -43,12 +39,12 @@ fn git_directory_refuses_public_destinations_without_settling() {
             (
                 "leak2",
                 transfer.root.to_str().unwrap(),
-                transfer.root.as_os_str().as_bytes(),
+                as_git_spells(&transfer.root).as_bytes(),
             ),
             (
                 "leak3",
                 transfer.linked.to_str().unwrap(),
-                transfer.linked.as_os_str().as_bytes(),
+                as_git_spells(&transfer.linked).as_bytes(),
             ),
         ] {
             let before = transfer.everything();
@@ -114,7 +110,7 @@ fn linked_git_directory_refuses_the_main_working_tree() {
             .run();
         refusal(
             &output,
-            &[b"git dupe git", transfer.root.as_os_str().as_bytes()],
+            &[b"git dupe git", as_git_spells(&transfer.root).as_bytes()],
         );
         before.unchanged();
     });
@@ -133,7 +129,7 @@ fn an_unattached_linked_worktree_requires_its_own_init() {
         let line = output.only_line("fatal");
         names(line, b"git dupe init");
         assert!(
-            !holds(line, transfer.root.as_os_str().as_bytes()),
+            !holds(line, as_git_spells(&transfer.root).as_bytes()),
             "{output:?}"
         );
         before.unchanged();
@@ -160,7 +156,7 @@ fn linked_worktree_refuses_public_destination_before_init() {
             .run();
         refusal(
             &output,
-            &[b"git dupe git", transfer.root.as_os_str().as_bytes()],
+            &[b"git dupe git", as_git_spells(&transfer.root).as_bytes()],
         );
         assert!(!holds(output.only_line("fatal"), b"git dupe init"));
         before.unchanged();
@@ -238,7 +234,7 @@ fn unattached_repository_refuses_its_root_without_creating_private_state() {
             ])
             .from(&root)
             .run();
-        refusal(&output, &[b"git dupe git", root.as_os_str().as_bytes()]);
+        refusal(&output, &[b"git dupe git", as_git_spells(&root).as_bytes()]);
         unchanged(&before, &root);
         assert!(!root.join(".git/dupe").exists());
     });
@@ -263,7 +259,7 @@ fn bare_repository_refuses_itself_and_keeps_gits_private_help_answer() {
             ])
             .from(&bare)
             .run();
-        refusal(&output, &[b"git dupe git", bare.as_os_str().as_bytes()]);
+        refusal(&output, &[b"git dupe git", as_git_spells(&bare).as_bytes()]);
         unchanged(&before, &bare);
         let expected = help_in_git_directory(s, &bare);
         let output = s.git(["dupe", "remote", "-h"]).from(&bare).run();

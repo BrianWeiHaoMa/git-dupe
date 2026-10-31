@@ -2,14 +2,12 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{PermissionsExt, symlink};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::harness::{
-    End, Output, Tree, gitdupe_written_and_staged, holds, lines_in_order, names, names_number,
-    names_the_route_to_private, private_add, region_rules, unchanged, under_each_release,
-    usage_line, write_executable,
+    End, Output, Tree, gitdupe_written_and_staged, holds, lines_in_order, mode_is, name, names,
+    names_number, names_the_route_to_private, private_add, region_rules, set_mode, symlink,
+    unchanged, under_each_release, usage_line, word_of, write_executable,
 };
 
 /// The hints, in order, each naming its path and `git dupe unhide`.
@@ -176,7 +174,7 @@ fn operands_are_cleaned_lexically_from_the_callers_directory() {
             .from(&dir)
             .succeeds()
             .stdout;
-        let root = Path::new(OsStr::from_bytes(root.trim_ascii_end()));
+        let root = PathBuf::from(name(root.trim_ascii_end()));
         let absolute = root.join("sub/y");
         let output = s
             .git([OsStr::new("dupe"), OsStr::new("hide"), absolute.as_os_str()])
@@ -549,27 +547,20 @@ fn rewriting_replaces_symlinks_preserves_permissions_and_accepts_byte_paths() {
         s.project(&dir);
         s.init(&dir);
         fs::write(dir.join(".gitdupe"), b"notes\n").unwrap();
-        fs::set_permissions(dir.join(".gitdupe"), fs::Permissions::from_mode(0o600)).unwrap();
+        set_mode(s, &dir.join(".gitdupe"), 0o600, "hide");
         let output = s.git(["dupe", "hide", "x"]).from(&dir).run();
         succeeded_naming(&output, &[b"x"], &[]);
-        assert_eq!(
-            fs::metadata(dir.join(".gitdupe"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
+        mode_is(s, &dir.join(".gitdupe"), 0o600, "hide");
         gitdupe_written_and_staged(s, &dir, b"notes\nx\n");
+        let case = "hide: a path typed as bytes that are no UTF-8";
+        let Some(word) = word_of(s, b"caf\xe9", case) else {
+            return;
+        };
         let dir = s.dir().join("bytes");
         s.project(&dir);
         s.init(&dir);
         let output = s
-            .git([
-                OsStr::new("dupe"),
-                OsStr::new("hide"),
-                OsStr::from_bytes(b"caf\xe9"),
-            ])
+            .git([OsStr::new("dupe"), OsStr::new("hide"), &word])
             .from(&dir)
             .run();
         succeeded_naming(&output, &[b"caf\xe9"], &[]);

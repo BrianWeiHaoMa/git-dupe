@@ -1,17 +1,16 @@
 //! Files a scenario writes into a workspace, the names a filesystem refuses to hold, a
-//! workspace copied whole, and what a scenario reads of what stands at a path: its
-//! permission bits and its device and inode by `lstat`, a directory's entry names, and a
-//! path as text.
+//! workspace copied whole, and what a scenario reads or sets of what stands at a path: its
+//! permission bits, each reported unavailable where the platform has none, a directory's
+//! entry names, and a path as text.
 
 use std::collections::BTreeSet;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::Path;
 
-use super::platform::EILSEQ;
-use super::scenario::report;
+use super::platform;
+use super::platform::symlink;
+use super::scenario::{Scenario, report};
 
 /// Writes `bytes` at `path` below `dir`, making the directories above it first. A file a
 /// scenario runs is written by `write_executable` instead.
@@ -21,30 +20,38 @@ pub fn write(dir: &Path, path: &str, bytes: &[u8]) {
     fs::write(path, bytes).unwrap();
 }
 
+/// The name `bytes` spell, for a fixture whose name the platform holds: `name_accepted`
+/// has answered for it, or it is valid UTF-8 and of a form every platform holds. Panics on
+/// bytes the platform refuses, never converting them lossily.
+pub fn name(bytes: &[u8]) -> OsString {
+    platform::name(bytes)
+        .unwrap_or_else(|| panic!("\"{}\" names nothing here", bytes.escape_ascii()))
+}
+
+/// The word `bytes` spell, for a case that types them whole. Where this platform's command
+/// line cannot carry them, `case` is reported unavailable and the answer is `None` (S20).
+pub fn word_of(s: &Scenario, bytes: &[u8], case: &str) -> Option<OsString> {
+    let word = platform::name(bytes);
+    if word.is_none() {
+        s.unavailable(
+            &format!("{case}: a name Windows cannot hold or one that is not valid Unicode"),
+            &format!("\"{}\" crosses no command line here", bytes.escape_ascii()),
+        );
+    }
+    word
+}
+
 /// Whether the filesystem of `dir` holds an entry named `name`, one component whose bytes a
-/// case needs as they are: an empty file is made directly in `dir`, where nothing stands at
-/// that name, and removed. A filesystem that refuses the name as no valid encoding
-/// (`EILSEQ`), as macOS's APFS refuses bytes that are no UTF-8, makes `case` unavailable
-/// here: it is reported and the answer is no. Any other failure fails the scenario.
+/// case needs as they are (`platform::name_accepted`). A name this platform or filesystem
+/// cannot hold makes `case` unavailable here: it is reported and the answer is no. Any other
+/// failure fails the scenario.
 pub fn name_accepted(dir: &Path, name: &[u8], case: &str) -> bool {
-    let path = dir.join(OsStr::from_bytes(name));
-    let made = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path);
-    match made {
-        Ok(_) => {
-            fs::remove_file(&path).unwrap_or_else(|cause| panic!("{}: {cause}", path.display()));
-            true
-        }
-        Err(cause) if cause.raw_os_error() == Some(EILSEQ) => {
-            report(&format!(
-                "{case} unavailable: the name \"{}\" is refused here ({cause})",
-                name.escape_ascii()
-            ));
+    match platform::name_accepted(dir, name) {
+        Ok(()) => true,
+        Err(reason) => {
+            report(&format!("{case} unavailable: {reason}"));
             false
         }
-        Err(cause) => panic!("{}: {cause}", path.display()),
     }
 }
 
@@ -73,16 +80,39 @@ pub fn copy(from: &Path, to: &Path) {
     fs::set_permissions(to, permissions.permissions()).unwrap_or_else(|cause| failed(to, cause));
 }
 
-/// The permission bits of what stands at `path`, by `lstat`: a symbolic link's own.
-pub fn mode(path: &Path) -> u32 {
-    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o7777
+/// The permission bits of what stands at `path`, by `lstat`: a symbolic link's own. Where
+/// the platform has none, the `part` of the scenario that reads them reports itself
+/// unavailable and the answer is `None`.
+pub fn mode(s: &Scenario, path: &Path, part: &str) -> Option<u32> {
+    let bits = platform::mode(path);
+    if bits.is_none() {
+        unavailable(s, part);
+    }
+    bits
 }
 
-/// The device and inode of what stands at `path`, by `lstat`: the same pair after a
-/// command is the same file, and a rename onto `path` changes it.
-pub fn inode(path: &Path) -> (u64, u64) {
-    let found = fs::symlink_metadata(path).unwrap();
-    (found.dev(), found.ino())
+/// What stands at `path` has the permission bits `bits`, where the platform has any.
+pub fn mode_is(s: &Scenario, path: &Path, bits: u32, part: &str) {
+    if let Some(found) = mode(s, path, part) {
+        assert_eq!(found, bits, "the mode of {}", path.display());
+    }
+}
+
+/// Gives what stands at `path` the permission bits `bits`, where the platform has any.
+pub fn set_mode(s: &Scenario, path: &Path, bits: u32, part: &str) {
+    match platform::permissions(bits) {
+        Some(permissions) => fs::set_permissions(path, permissions)
+            .unwrap_or_else(|cause| panic!("{}: {cause}", path.display())),
+        None => unavailable(s, part),
+    }
+}
+
+/// `part` of a scenario turns on a mode bit, and this platform has none.
+fn unavailable(s: &Scenario, part: &str) {
+    s.unavailable(
+        &format!("{part}: a Unix mode bit"),
+        "this platform has none",
+    );
 }
 
 /// The names of the entries of the directory `directory`.

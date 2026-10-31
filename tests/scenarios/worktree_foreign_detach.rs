@@ -3,12 +3,10 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::process::Command;
 
 use crate::harness::{
-    End, ForwardEffect, Output, Point, Scenario, Tree, Worktree, holds, names, names_number,
-    now_visible, records, unchanged, under_each_release, warnings, write,
+    End, ForwardEffect, Output, Point, Scenario, Tree, Worktree, command_line_limit, holds, names,
+    names_number, now_visible, records, set_mode, unchanged, under_each_release, warnings, write,
 };
 
 struct Attached {
@@ -270,13 +268,7 @@ fn foreign_detach_oversized_public_query_keeps_repository_after_region_deletion_
     under_each_release(|s| {
         let fixture = attached(s, "oversized");
         let wt = &fixture.linked;
-        let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
-        assert!(limit.status.success());
-        let limit: usize = std::str::from_utf8(&limit.stdout)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        let limit = command_line_limit();
         let count = limit / 128 + 1;
         let mut listing = fs::read(wt.root.join(".gitdupe")).unwrap();
         let mut extra = Vec::new();
@@ -434,9 +426,9 @@ fn foreign_detach_failed_write_preserves_stale_and_live_regions_then_retry_drops
         fs::remove_dir_all(stale.private_directory()).unwrap();
         let stale_region = stale.region_bytes();
         let exclude = wt.common_directory.join("info/exclude");
-        fs::set_permissions(&exclude, fs::Permissions::from_mode(0o640)).unwrap();
+        set_mode(s, &exclude, 0o640, "worktree_foreign_detach");
         let bytes = fs::read(&exclude).unwrap();
-        let mode = fs::metadata(&exclude).unwrap().permissions().mode();
+        let permissions = fs::metadata(&exclude).unwrap().permissions();
         let private = Tree::of(&wt.private_directory());
         let files = Tree::of(&wt.root);
         let public = wt.public_git();
@@ -450,7 +442,7 @@ fn foreign_detach_failed_write_preserves_stale_and_live_regions_then_retry_drops
         names(fatal, exclude.as_os_str().as_encoded_bytes());
         assert!(fatal.ends_with(b"; nothing is detached"), "{output:?}");
         assert_eq!(fs::read(&exclude).unwrap(), bytes);
-        assert_eq!(fs::metadata(&exclude).unwrap().permissions().mode(), mode);
+        assert_eq!(fs::metadata(&exclude).unwrap().permissions(), permissions);
         assert_eq!(stale.region_bytes(), stale_region);
         assert!(wt.region().is_some());
         assert!(wt.private_directory().is_dir());
@@ -462,7 +454,7 @@ fn foreign_detach_failed_write_preserves_stale_and_live_regions_then_retry_drops
         fixture.detached();
         assert_eq!(stale.region(), None);
         assert!(!stale.private_directory().exists());
-        assert_eq!(fs::metadata(&exclude).unwrap().permissions().mode(), mode);
+        assert_eq!(fs::metadata(&exclude).unwrap().permissions(), permissions);
         unchanged(&files, &wt.root);
         assert!(public.changed_in(&wt.public_git()).is_empty());
     });

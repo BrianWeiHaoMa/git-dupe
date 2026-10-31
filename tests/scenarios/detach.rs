@@ -1,16 +1,13 @@
 //! What `git dupe detach` leaves, its warnings, its words, and attaching again (G3).
 
-use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::harness::{
-    End, Output, Scenario, Transfer, Tree, changed_since, daily_warnings, detached, holds,
-    locate_words, names, now_visible, private_add, private_commit, public_git, region,
-    region_rules, run_traced, unchanged, under_each_release, warnings, write, write_executable,
+    End, Output, Scenario, Transfer, Tree, as_git_spells, changed_since, command_line_limit,
+    daily_warnings, detached, holds, locate_words, mode_is, name, names, now_visible, permissions,
+    private_add, private_commit, public_git, region, region_rules, run_traced, symlink, unchanged,
+    under_each_release, warnings, write, write_executable,
 };
 
 const USER_BEFORE: &[u8] = b"# developer before\r\n*.o\n# caf\xe9\n";
@@ -28,7 +25,9 @@ fn developer_exclude(root: &Path) {
     bytes.extend_from_slice(USER_AFTER);
     let exclude = root.join(".git/info/exclude");
     fs::write(&exclude, bytes).unwrap();
-    fs::set_permissions(exclude, fs::Permissions::from_mode(0o640)).unwrap();
+    if let Some(bits) = permissions(0o640) {
+        fs::set_permissions(exclude, bits).unwrap();
+    }
 }
 
 /// Everything a successful detach must preserve, except its two authorized deletions.
@@ -102,10 +101,7 @@ fn leaves_files_user_exclude_public_git_and_remotes_from_root_or_notes() {
                 fs::read(&exclude).unwrap(),
                 [USER_BEFORE, USER_AFTER].concat()
             );
-            assert_eq!(
-                fs::metadata(exclude).unwrap().permissions().mode() & 0o7777,
-                0o640
-            );
+            mode_is(s, &exclude, 0o640, "detach");
             visible(s, &t.root, &["notes/", ".gitdupe"]);
         }
     });
@@ -248,7 +244,7 @@ fn exclude_link_is_replaced_with_user_bytes_and_its_target_is_untouched() {
             b"was a symbolic link; it is now a regular file",
         );
         names(replacement[0], b"its target is untouched");
-        names(replacement[0], exclude.as_os_str().as_bytes());
+        names(replacement[0], as_git_spells(&exclude).as_bytes());
         expected.push(replacement[0].to_vec());
         warnings(&output, expected);
         before.after_detach(&t);
@@ -327,14 +323,7 @@ fn force_removes_modified_stashed_and_unpushed_history_but_keeps_disk_bytes() {
             fs::read(t.root.join(".git/info/exclude")).unwrap(),
             [USER_BEFORE, USER_AFTER].concat()
         );
-        assert_eq!(
-            fs::metadata(t.root.join(".git/info/exclude"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o7777,
-            0o640
-        );
+        mode_is(s, &t.root.join(".git/info/exclude"), 0o640, "detach");
         visible(s, &t.root, &["notes/", ".gitdupe"]);
     });
 }
@@ -344,12 +333,12 @@ fn force_removes_modified_stashed_and_unpushed_history_but_keeps_disk_bytes() {
 /// runs the release's `git` from the release's own exec path.
 fn killing_check_ignore(s: &Scenario) -> PathBuf {
     let exec_path = s.git(["--exec-path"]).succeeds();
-    let release = Path::new(OsStr::from_bytes(exec_path.stdout.trim_ascii_end())).join("git");
+    let release = PathBuf::from(name(exec_path.stdout.trim_ascii_end())).join("git");
     let control = s.dir().join("killing-check-ignore");
     fs::create_dir(&control).unwrap();
     fs::write(
         control.join("release"),
-        [release.as_os_str().as_bytes(), b"\n"].concat(),
+        [as_git_spells(&release).as_bytes(), b"\n"].concat(),
     )
     .unwrap();
     write_executable(
@@ -368,6 +357,9 @@ fn killing_check_ignore(s: &Scenario) -> PathBuf {
 fn a_question_killed_by_a_signal_ends_detach_attached_and_force_completes_it() {
     const SIGTERM: i32 = 15;
     under_each_release(|s| {
+        if !s.child_signals("detach") {
+            return;
+        }
         let control = killing_check_ignore(s);
         let commands: [(&str, &[&str]); 2] = [
             ("signalled", &["dupe", "detach"]),
@@ -512,7 +504,7 @@ fn misuse_is_checked_after_workspace_refusals_and_never_settles() {
             assert!(linked.stdout.is_empty(), "{linked:?}");
             names(linked.only_line("fatal"), b"git dupe init");
             assert!(
-                !holds(linked.only_line("fatal"), t.root.as_os_str().as_bytes()),
+                !holds(linked.only_line("fatal"), as_git_spells(&t.root).as_bytes()),
                 "{linked:?}"
             );
             before.unchanged();
@@ -594,13 +586,7 @@ fn git_run_sequences_do_not_follow_private_file_counts() {
 #[test]
 fn force_detaches_a_hidden_directory_whose_files_exceed_one_command_line() {
     under_each_release(|s| {
-        let limit = Command::new("getconf").arg("ARG_MAX").output().unwrap();
-        assert!(limit.status.success());
-        let limit: usize = std::str::from_utf8(&limit.stdout)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        let limit = command_line_limit();
         // Each path long enough that the files' paths alone exceed ARG_MAX, in components
         // no filesystem refuses.
         let count = 2_000;

@@ -11,13 +11,13 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, MACHINES_WITHOUT_AN_ARCHIVE, Output, ReleaseSite, Scenario, asking_for_the_page,
-    entry_names, every_text_shown, hex_digest, inode, install_note, lines_of, mode,
-    path_for_an_install, release_archive, text, under_each_release, write_executable,
+    entry_names, every_text_shown, hex_digest, identity, install_note, lines_of, mode_is,
+    path_for_an_install, release_archive, report, symlink, text, under_each_release, word,
+    write_executable,
 };
 
 /// The line the installed executable prints for `git dupe --version`.
@@ -26,6 +26,16 @@ const VERSION_LINE: &str = concat!("git-dupe version ", env!("CARGO_PKG_VERSION"
 /// The `sh` of the pasted line with a umask that keeps every bit from the group and the
 /// others, reading the script on its standard input as the plain `sh` does.
 const UNDER_UMASK_077: [&str; 2] = ["-c", "umask 077 && exec sh"];
+
+/// Whether this platform has the POSIX `sh` and the tools `install.sh` names. Where it has
+/// not, `check` reports itself, before any archive is made for it (P3).
+fn the_script_runs_here(check: &str) -> bool {
+    let here = word() != "windows";
+    if !here {
+        report(&format!("install: {check} unavailable: install.sh's run"));
+    }
+    here
+}
 
 /// The tag of the release the stand-in serves, as a release is tagged.
 fn tag() -> String {
@@ -161,8 +171,8 @@ impl<'s> Install<'s> {
             executable.display()
         );
         assert_eq!(fs::read(&page).unwrap(), fs::read(&made.page).unwrap());
-        assert_eq!(mode(&executable), 0o755);
-        assert_eq!(mode(&page), 0o644);
+        mode_is(self.s, &executable, 0o755, "install");
+        mode_is(self.s, &page, 0o644, "install");
         assert!(entry_names(&self.temporary).is_empty(), "{output:?}");
     }
 
@@ -180,6 +190,9 @@ impl<'s> Install<'s> {
 
 #[test]
 fn the_pasted_line_installs_the_latest_release_s_executable_and_page() {
+    if !the_script_runs_here("the pasted line") {
+        return;
+    }
     under_each_release(|s| {
         let site = site_of_the_release();
         let install = Install::of(s);
@@ -232,12 +245,15 @@ fn the_pasted_line_installs_the_latest_release_s_executable_and_page() {
 /// link, its target untouched, where a copy onto the path would have written through it.
 #[test]
 fn run_again_it_replaces_the_installed_files_and_advises_nothing() {
+    if !the_script_runs_here("a second run") {
+        return;
+    }
     under_each_release(|s| {
         let site = site_of_the_release();
         let install = Install::of(s);
         let executable = install.bin().join("git-dupe");
         write_executable(s, &executable, b"#!/bin/sh\necho an earlier git-dupe\n");
-        let earlier = inode(&executable);
+        let earlier = identity(&executable);
         let elsewhere = s.dir().join("an-earlier-page.1");
         fs::write(&elsewhere, b"an earlier page\n").unwrap();
         let man1 = install.manual_path().join("man1");
@@ -246,7 +262,7 @@ fn run_again_it_replaces_the_installed_files_and_advises_nothing() {
 
         let output = install.pasted(&site, &path_for_an_install(s, &[&install.bin()]), &[]);
         install.installed(&output);
-        assert_ne!(inode(&executable), earlier, "{output:?}");
+        assert_ne!(identity(&executable), earlier, "{output:?}");
         assert!(
             fs::symlink_metadata(man1.join("git-dupe.1"))
                 .unwrap()
@@ -262,6 +278,9 @@ fn run_again_it_replaces_the_installed_files_and_advises_nothing() {
 /// The copies have the archive's modes, not the ones a strict umask gives a copy.
 #[test]
 fn under_a_strict_umask_the_files_have_the_archive_s_modes() {
+    if !the_script_runs_here("a strict umask") {
+        return;
+    }
     under_each_release(|s| {
         let site = site_of_the_release();
         let install = Install::of(s);
@@ -275,6 +294,9 @@ fn under_a_strict_umask_the_files_have_the_archive_s_modes() {
 /// archive's place, or the archive's digest by another archive's name.
 #[test]
 fn an_archive_that_does_not_match_its_digest_installs_nothing() {
+    if !the_script_runs_here("a mismatched digest") {
+        return;
+    }
     let archive = fs::read(&release_archive().path).unwrap();
     let [(sidecar, right), _] = &published(archive.clone())[..] else {
         panic!("an archive and its .sha256");
@@ -306,6 +328,9 @@ fn an_archive_that_does_not_match_its_digest_installs_nothing() {
 /// newer C library, or built for another machine, fails where it is run.
 #[test]
 fn an_executable_that_does_not_run_here_installs_nothing() {
+    if !the_script_runs_here("an executable that does not run") {
+        return;
+    }
     let made = release_archive();
     under_each_release(|s| {
         let leading = format!("git-dupe-{}", env!("CARGO_PKG_VERSION"));
@@ -339,6 +364,9 @@ fn an_executable_that_does_not_run_here_installs_nothing() {
 /// asks anything of the releases pages (F1, N10).
 #[test]
 fn a_machine_no_archive_is_built_for_is_refused_before_anything_is_asked() {
+    if !the_script_runs_here("a machine with no archive") {
+        return;
+    }
     under_each_release(|s| {
         let install = Install::of(s);
         for (system, machine) in MACHINES_WITHOUT_AN_ARCHIVE {
@@ -366,6 +394,9 @@ fn a_machine_no_archive_is_built_for_is_refused_before_anything_is_asked() {
 
 #[test]
 fn with_no_release_to_find_nothing_is_installed() {
+    if !the_script_runs_here("no release to find") {
+        return;
+    }
     under_each_release(|s| {
         let site = ReleaseSite::without_a_release();
         let install = Install::of(s);
@@ -379,6 +410,9 @@ fn with_no_release_to_find_nothing_is_installed() {
 /// leaves it, defines what it read and runs nothing.
 #[test]
 fn a_script_cut_short_runs_nothing() {
+    if !the_script_runs_here("a script cut short") {
+        return;
+    }
     let script = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh")).unwrap();
     let ends: Vec<usize> = script
         .iter()
@@ -408,6 +442,9 @@ fn a_script_cut_short_runs_nothing() {
 /// supported release in a warning.
 #[test]
 fn an_older_git_on_path_is_named_in_a_warning_and_the_install_goes_on() {
+    if !the_script_runs_here("an older Git on PATH") {
+        return;
+    }
     under_each_release(|s| {
         let site = site_of_the_release();
         let install = Install::of(s);

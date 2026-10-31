@@ -7,7 +7,6 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
@@ -99,7 +98,7 @@ fn a_branch_the_remote_lacks_ends_with_gits_status_attached_and_starts_over() {
             .private(second)
             .git(["config", "--get", "remote.origin.url"])
             .succeeds();
-        assert_eq!(origin.stdout, [url.as_bytes(), b"\n"].concat());
+        assert_eq!(origin.stdout, [url.as_encoded_bytes(), b"\n"].concat());
         s.private(second)
             .git(["rev-parse", "-q", "--verify", "refs/remotes/origin/main"])
             .succeeds();
@@ -259,7 +258,7 @@ fn a_remote_without_a_branch_attaches_with_origin_and_no_commit() {
             .succeeds();
         assert_eq!(
             configured.stdout,
-            [empty.as_os_str().as_bytes(), b"\n"].concat()
+            [empty.as_os_str().as_encoded_bytes(), b"\n"].concat()
         );
         let commit = s
             .private(second)

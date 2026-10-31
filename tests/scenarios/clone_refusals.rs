@@ -5,13 +5,11 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, dupe_clone, locate_words, names, region, region_rules,
-    run_traced, unchanged, under_each_release, usage_line,
+    End, Output, Scenario, Tree, Worktree, as_git_spells, dupe_clone, locate_words, name, names,
+    region, region_rules, run_traced, symlink, unchanged, under_each_release, usage_line,
 };
 
 /// The Git steps of `clone`'s own, none of which runs before a refusal.
@@ -112,21 +110,15 @@ fn a_word_naming_a_public_place_is_refused_before_anything_is_created() {
         let url = m.first.private_remote.as_os_str();
         // The second machine's public remote `origin` is the first machine's root.
         let public = m.first.root.as_os_str();
-        let file_url = [&b"file://"[..], public.as_bytes()].concat();
-        let assigned = [&b"x="[..], second.as_os_str().as_bytes()].concat();
+        let file_url = name(&[b"file://", as_git_spells(&m.first.root).as_bytes()].concat());
+        let assigned = name(&[b"x=", as_git_spells(second).as_bytes()].concat());
         let cases: [(&[&OsStr], &OsStr); 7] = [
             (&[public], public),
-            (
-                &[OsStr::from_bytes(&file_url)],
-                OsStr::from_bytes(&file_url),
-            ),
+            (&[&file_url], &file_url),
             (&[OsStr::new(".")], OsStr::new(".")),
             (&[second.as_os_str()], second.as_os_str()),
             (&[linked.as_os_str()], linked.as_os_str()),
-            (
-                &[OsStr::from_bytes(&assigned)],
-                OsStr::from_bytes(&assigned),
-            ),
+            (&[&assigned], &assigned),
             (&[url, OsStr::new("-b"), OsStr::new(".")], OsStr::new(".")),
         ];
         let before = Tree::of(second);
@@ -136,7 +128,7 @@ fn a_word_naming_a_public_place_is_refused_before_anything_is_created() {
                 assert_eq!(refusal.end, End::Code(128), "{words:?}: {refusal:?}");
                 assert!(refusal.stdout.is_empty(), "{refusal:?}");
                 let line = refusal.only_line("fatal");
-                names(line, &[b"'", word.as_bytes(), b"' names "].concat());
+                names(line, &[b"'", word.as_encoded_bytes(), b"' names "].concat());
                 names(line, b"git dupe git");
                 unchanged(&before, second);
             }
@@ -183,12 +175,12 @@ fn where_init_is_refused_clone_is_refused_alike_and_creates_nothing() {
         fs::rename(main.join(".git/worktrees/moved"), &admin).unwrap();
         fs::write(
             moved.join(".git"),
-            [b"gitdir: ", admin.as_os_str().as_bytes(), b"\n"].concat(),
+            [b"gitdir: ", as_git_spells(&admin).as_bytes(), b"\n"].concat(),
         )
         .unwrap();
         let refused = as_init_ends(s, &moved, &main.join(".git"), url);
         assert_eq!(refused.end, End::Code(128), "{refused:?}");
-        names(refused.only_line("fatal"), admin.as_os_str().as_bytes());
+        names(refused.only_line("fatal"), as_git_spells(&admin).as_bytes());
         let linked = s.dir().join("linked");
         s.linked_worktree(&main, &linked);
         let attached = dupe_clone(s, &linked, &[url]);

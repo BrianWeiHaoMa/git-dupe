@@ -2,12 +2,11 @@
 //! Composition/Keeper). Real Git runs are forwarded except at the selected seam.
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use crate::harness::{
-    End, ForwardEffect, Output, Point, Scenario, Tree, Worktree, holds, mode, under_each_release,
-    write,
+    End, ForwardEffect, Output, Point, Scenario, Tree, Worktree, holds, mode_is, set_mode,
+    under_each_release, write,
 };
 
 const PUBLIC_LISTING: &[&str] = &["ls-files", "-z", "--full-name", "--"];
@@ -76,7 +75,7 @@ fn pending(s: &Scenario, name: &str) -> Pending {
     for path in ["foreign", "exposed", "released"] {
         write(&pair.linked.root, path, b"here\n");
     }
-    fs::set_permissions(&pair.exclude, fs::Permissions::from_mode(0o640)).unwrap();
+    set_mode(s, &pair.exclude, 0o640, "settle_failures");
     assert_ne!(old, new);
     assert_eq!(
         s.git(["check-ignore", "--no-index", "foreign"])
@@ -158,7 +157,7 @@ fn indexes(pair: &Pair) -> Vec<Option<Vec<u8>>> {
     .collect()
 }
 
-fn still_stands(pending: &Pending) {
+fn still_stands(s: &Scenario, pending: &Pending) {
     assert!(pending.pair.main.private_directory().is_dir());
     assert!(pending.pair.linked.private_directory().is_dir());
     assert!(!pending.stale.private_directory().exists());
@@ -172,7 +171,7 @@ fn still_stands(pending: &Pending) {
         fs::read(pending.pair.linked.root.join(".gitdupe")).unwrap(),
         b"exposed\n"
     );
-    assert_eq!(mode(&pending.pair.exclude), 0o640);
+    mode_is(s, &pending.pair.exclude, 0o640, "settle_failures");
 }
 
 #[test]
@@ -210,7 +209,7 @@ fn failed_public_listing_keeps_the_replacement_and_the_handlers_status() {
             assert_eq!(pair.main.region_bytes(), main_region);
             assert!(pending.stale.region().is_none());
             unchanged_repositories(&before, &pending);
-            still_stands(&pending);
+            still_stands(s, &pending);
             // Without the injected failure, all suppressed warning kinds really apply.
             write(&pair.linked.root, ".gitdupe", b"released\n");
             s.git(["dupe", "status"]).from(&pair.linked.root).succeeds();
@@ -266,7 +265,7 @@ fn failed_or_truncated_ignore_answer_does_not_name_foreign_paths() {
             );
             assert_eq!(fs::read(&pair.exclude).unwrap(), pending.new);
             unchanged_repositories(&before, &pending);
-            still_stands(&pending);
+            still_stands(s, &pending);
         }
     });
 }
@@ -290,7 +289,7 @@ fn failed_region_write_keeps_the_whole_file_and_retry_prunes_stale_regions() {
         );
         assert_eq!(fs::read(&pair.exclude).unwrap(), pending.old);
         unchanged_repositories(&before, &pending);
-        still_stands(&pending);
+        still_stands(s, &pending);
         let retry = s.git(["dupe", "status"]).from(&pair.linked.root).succeeds();
         assert_eq!(
             retry.lines("warning"),
@@ -300,7 +299,7 @@ fn failed_region_write_keeps_the_whole_file_and_retry_prunes_stale_regions() {
         assert_eq!(fs::read(&pair.exclude).unwrap(), pending.new);
         assert!(pending.stale.region().is_none());
         unchanged_repositories(&before, &pending);
-        still_stands(&pending);
+        still_stands(s, &pending);
     });
 }
 
@@ -317,7 +316,7 @@ fn killed_region_write_leaves_a_whole_file_and_the_peer_can_proceed() {
         let bytes = fs::read(&pair.exclude).unwrap();
         assert!(bytes == pending.old || bytes == pending.new);
         assert_eq!(indexes(pair), before_indexes);
-        still_stands(&pending);
+        still_stands(s, &pending);
         // The killed run cannot keep the common-directory lock: this peer must end.
         let peer = s
             .git(["dupe", "status"])
@@ -341,7 +340,7 @@ fn killed_region_write_leaves_a_whole_file_and_the_peer_can_proceed() {
         s.git(["dupe", "status"]).from(&pair.linked.root).succeeds();
         assert_eq!(fs::read(&pair.exclude).unwrap(), pending.new);
         assert_eq!(indexes(pair), before_indexes);
-        still_stands(&pending);
+        still_stands(s, &pending);
     });
 }
 

@@ -6,12 +6,12 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, Tree, Worktree, completed_hint, linked_on_branch, private_add,
-    private_commit, unchanged, under_each_release, worktree_clone, worktree_dupe, write,
+    End, Output, Scenario, Tree, Worktree, as_git_spells, completed_hint, linked_on_branch,
+    private_add, private_commit, unchanged, under_each_release, worktree_clone, worktree_dupe,
+    write,
 };
 
 /// An identity in the local configuration of the project at `root`.
@@ -74,7 +74,10 @@ fn plain(s: &Scenario, wt: &Worktree, words: &[&str]) -> Output {
 fn plain_git_finds_the_root(s: &Scenario, wt: &Worktree) {
     let top = plain(s, wt, &["rev-parse", "--show-toplevel"]);
     assert_eq!(top.end, End::Code(0), "{top:?}");
-    assert_eq!(top.stdout, [wt.root.as_os_str().as_bytes(), b"\n"].concat());
+    assert_eq!(
+        top.stdout,
+        [as_git_spells(&wt.root).as_bytes(), b"\n"].concat()
+    );
 }
 
 /// A private sparse checkout of `notes` and `.gitdupe`, which turns on
