@@ -642,6 +642,41 @@ fn the_shells_proc_is_the_root_where_a_root_alone_is_not_absolute() {
 }
 
 #[test]
+fn what_the_shells_proc_opens_by_name_is_also_that_place_where_a_root_alone_is_not_absolute() {
+    let root = root();
+    let form = |path: &[u8]| local(path, from(Path::new(&root)))[0].clone();
+    let a_root_alone_is_absolute = Path::new("/").is_absolute();
+    let in_the_root = format!("{root}/sub/in.git");
+    for (word, place) in [
+        ("/proc/cygdrive/c/repo", &b"c:/repo"[..]),
+        ("/proc/self/root/c/repo", b"c:/repo"),
+        ("/proc/self/root/proc/cygdrive/c/repo", b"c:/repo"),
+        ("/proc/1486/root/c/repo", b"c:/repo"),
+        ("/proc/./self//root/./c/repo", b"c:/repo"),
+        ("/proc\\cygdrive\\c\\repo", b"c:/repo"),
+        ("file:///proc/cygdrive/c/repo", b"c:/repo"),
+        ("/proc/self/cwd/sub/in.git", in_the_root.as_bytes()),
+    ] {
+        assert_eq!(
+            of(word).contains(&form(place)),
+            !a_root_alone_is_absolute,
+            "{word}"
+        );
+    }
+    // Spelled otherwise, the file system opens none of them.
+    for word in [
+        "/proc/CYGDRIVE/c/repo",
+        "/proc/SELF/root/c/repo",
+        "/proc/self/ROOT/c/repo",
+        "/proc/self/fd/c/repo",
+        "/proc/14x/root/c/repo",
+        "/proc/1486/cwd/c/repo",
+    ] {
+        assert!(!of(word).contains(&form(b"c:/repo")), "{word}");
+    }
+}
+
+#[test]
 fn a_backslash_after_a_file_urls_drive_is_a_separator_where_the_platform_says_so() {
     let on_the_drive = Form::Local(canonical(
         joined(b"C:\\repo", from(Path::new(&root())))[0].as_slice(),

@@ -43,7 +43,7 @@
 //!   absolute on Windows alone, `/x` on Linux and macOS alone (`Holds/G18`). On Windows
 //!   `\x` and `/x` are read from the root as the platform joins them, on its drive, and
 //!   what Git for Windows's shell opens for a `/x` it rewrites is also a local path:
-//!   `drive_as_directory` and `through_the_shell`, the over-inclusive direction. A `/<path>`
+//!   `read_by_the_shell`, the over-inclusive direction. A `/<path>`
 //!   it reads below Git's own top directory has no form of it: the product admits it.
 //! - The canonical path is the real path, asked of the path as written, so that on Linux
 //!   and macOS `link/..` is where the link's target's parent is; where the real path cannot
@@ -342,14 +342,20 @@ fn stood_in_on(drive: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
         .collect()
 }
 
-/// `path` itself when absolute, else joined to each place `from` reads a relative one from.
-/// A path `drive_as_directory` or `through_the_shell` reads is also that path.
+/// `path` itself when absolute, else joined to each place `from` reads a relative one from,
+/// and what `read_by_the_shell` reads for it.
 fn joined(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
     if operand::absolute(path) {
         return vec![path.to_vec()];
     }
     let mut paths = join_to_each_place(path, from);
-    paths.extend(drive_as_directory(path));
+    paths.extend(read_by_the_shell(path, from));
+    paths
+}
+
+/// What Git for Windows's shell opens for `path`, which begins with a separator.
+fn read_by_the_shell(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
+    let mut paths = Vec::from_iter(drive_as_directory(path));
     paths.extend(through_the_shell(path, from));
     paths
 }
@@ -402,7 +408,9 @@ fn drive_as_directory(path: &[u8]) -> Option<Vec<u8>> {
 /// on the drive, `/tmp/<path>`, `tmp` in any case, that path below the directory `temp_dir`
 /// gives, which is the shell's `/tmp`, and `/proc/<path>` the root: that file system reaches any
 /// place and every spelling of it, so that no form of its own can hold one. The refused
-/// direction: it costs `git dupe git`.
+/// direction: it costs `git dupe git`. A public URL so spelled is compared by where it opens
+/// too, `below_proc`: the root alone would keep a word from the project and let one reach the
+/// remote.
 fn through_the_shell(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
     let Some((first, rest)) = first_component(path) else {
         return Vec::new();
@@ -417,10 +425,32 @@ fn through_the_shell(path: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
         [letter, b':', after @ ..] if letter.is_ascii_alphabetic() => {
             join_to_each_place(&[b"./", after, rest].concat(), from)
         }
-        b"proc" => join_to_each_place(b".", from),
+        b"proc" => {
+            let mut paths = join_to_each_place(b".", from);
+            paths.extend(below_proc(rest, from));
+            paths
+        }
         _ if first.eq_ignore_ascii_case(b"tmp") => {
             vec![[bytes::of(env::temp_dir().as_os_str()), b"/", rest].concat()]
         }
+        _ => Vec::new(),
+    }
+}
+
+/// The places `/proc/<rest>` opens by name, each component spelled in lower case: `cygdrive/<path>`
+/// and the `root/<path>` of `self` or of a running process's number are `/<path>`, and
+/// `self/cwd/<path>` is `<path>` from where Git stands. Another process's `cwd` is where that
+/// process stands, which nothing here can ask.
+fn below_proc(rest: &[u8], from: ReadFrom) -> Vec<Vec<u8>> {
+    let rest = operand::with_slashes(rest);
+    let Some((first, after)) = first_component(&rest) else {
+        return Vec::new();
+    };
+    let a_process = first == b"self" || first.iter().all(u8::is_ascii_digit);
+    match (first, first_component(after)) {
+        (b"cygdrive", _) => read_by_the_shell(after, from),
+        (_, Some((b"root", path))) if a_process => read_by_the_shell(path, from),
+        (b"self", Some((b"cwd", path))) => join_to_each_place(&[b"./", path].concat(), from),
         _ => Vec::new(),
     }
 }
