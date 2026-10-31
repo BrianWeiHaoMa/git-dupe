@@ -161,10 +161,17 @@ fn each_path_given_is_named_with_what_still_hides_it() {
         write(&dir, ".env", b"secret\n");
         private_add(s, &dir, ".env");
         write(&dir, "scratch/todo.txt", b"todo\n");
+        // A path that is not UTF-8 is named as its bytes, listed and then not.
+        let case = "unhide: a path typed as bytes that are no UTF-8";
+        let word = word_of(s, b"caf\xe9", case);
+        let listed = |lines: &[u8]| {
+            let not_utf8: &[u8] = if word.is_some() { b"caf\xe9\n" } else { b"" };
+            [lines, not_utf8].concat()
+        };
         write(
             &dir,
             ".gitdupe",
-            b".env\nscratch\nnotes\nnotes/sub\ncaf\xe9\n",
+            &listed(b".env\nscratch\nnotes\nnotes/sub\n"),
         );
         private_add(s, &dir, ".gitdupe");
         // Settled, the region holds every listed path when `unhide` begins.
@@ -179,7 +186,7 @@ fn each_path_given_is_named_with_what_still_hides_it() {
             "{output:?}"
         );
         assert!(output.lines("warning").is_empty(), "{output:?}");
-        let left = b"scratch\nnotes\nnotes/sub\ncaf\xe9\n";
+        let left = listed(b"scratch\nnotes\nnotes/sub\n");
         assert_eq!(gitdupe(&dir), left);
 
         // The same path again, now listed nowhere: privately tracked, it stays hidden.
@@ -205,7 +212,7 @@ fn each_path_given_is_named_with_what_still_hides_it() {
         assert!(holds(warnings[0], b"scratch"), "{output:?}");
         assert!(holds(warnings[0], b"visible to public Git"), "{output:?}");
 
-        let left = b"notes\ncaf\xe9\n";
+        let left = listed(b"notes\n");
         assert_eq!(gitdupe(&dir), left);
         let output = unhide(s, &dir, &["typo"]);
         unhidden(&output, &[(b"typo", UNLISTED)]);
@@ -217,9 +224,6 @@ fn each_path_given_is_named_with_what_still_hides_it() {
         assert_eq!(gitdupe(&dir), left);
         assert_eq!(staged_gitdupe(s, &dir).unwrap(), left);
 
-        // A path that is not UTF-8 is named as its bytes, listed and then not.
-        let case = "unhide: a path typed as bytes that are no UTF-8";
-        let word = word_of(s, b"caf\xe9", case);
         for said in word.iter().flat_map(|_| [REMOVED, UNLISTED]) {
             let word = word.as_deref().expect("the word the loop stands on");
             let dupe = [OsStr::new("dupe"), OsStr::new("unhide"), word];

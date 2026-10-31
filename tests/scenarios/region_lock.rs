@@ -196,7 +196,8 @@ fn a_command_killed_while_it_holds_the_lock_holds_up_none_after_it() {
         let private_before = entry_names(&private);
 
         let killing = s.killing("control", &["status"]);
-        for blocks in [0, 1] {
+        let inside_write = s.kills_inside_writes("region_lock");
+        for blocks in [0, 1].into_iter().filter(|_| inside_write) {
             let run = killing.start_killed(&dir, Point::InsideWrite { blocks });
             // While it runs, the file it replaces is never written.
             assert_eq!(fs::read(&link).unwrap(), as_it_was);
@@ -240,6 +241,9 @@ fn writes_failing(s: &Scenario, name: &str, dir: &Path, words: &[&str]) -> Outpu
 #[test]
 fn a_write_that_fails_leaves_the_file_and_the_private_repository_and_is_named() {
     under_each_release(|s| {
+        if !s.writes_can_be_made_to_fail("region_lock") {
+            return;
+        }
         let dir = s.dir().join("project");
         s.attached_project(&dir);
         let common = dir.join(".git");

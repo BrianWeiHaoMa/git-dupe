@@ -11,14 +11,16 @@ use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::{FromRawHandle, OwnedHandle};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::ExitStatus;
+use std::process::{Command, ExitStatus};
 use std::ptr;
+use std::sync::OnceLock;
 
 use super::{FreshDirectory, SecondFilesystem, SecondFilesystemFound};
 use crate::harness::releases::mingit;
+use crate::harness::scenario::report;
 
 mod job;
-pub use job::{Group, ended, spawn_grouped};
+pub use job::{Group, HeldProcess, ended, process_held, spawn_grouped};
 
 type Handle = *mut c_void;
 
@@ -88,9 +90,12 @@ pub fn canonical(path: &Path) -> io::Result<PathBuf> {
 }
 
 /// A symbolic link at `at` to `target`, a directory's link where `target`, read against
-/// `at`'s parent, is a directory. Developer Mode or an elevated session makes one (S24).
+/// `at`'s parent, is a directory, each `/` of it stored as `\`, because Windows reads a link
+/// holding a `/` as no name (error 123). Developer Mode or an elevated session makes one
+/// (S24).
 pub fn symlink(target: impl AsRef<Path>, at: impl AsRef<Path>) -> io::Result<()> {
-    let target = target.as_ref();
+    let target = target.as_ref().components().collect::<PathBuf>();
+    let target = target.as_path();
     let at = at.as_ref();
     let read = at.parent().unwrap_or(Path::new("")).join(target);
     if fs::metadata(read).is_ok_and(|found| found.is_dir()) {
@@ -141,9 +146,23 @@ pub fn signal_of(_: &ExitStatus) -> Option<i32> {
     None
 }
 
+/// Whether Git reaches a linked worktree's common Git directory through a symbolic link above
+/// its Git directory: no, because Windows folds the `..` of its `commondir` file by the path's
+/// spelling, below the link.
+pub fn commondir_read_through_a_link() -> bool {
+    false
+}
+
 /// Whether a run can be started under a soft `RLIMIT_FSIZE`: Windows has none.
 pub fn file_size_limits() -> bool {
     false
+}
+
+/// Whether a Git reading `.git/info/exclude` can fail at the moment another command replaces
+/// it, the seventh accepted limit: under every release here, because a check holds no value
+/// per release.
+pub fn a_replacement_can_fail_a_reader() -> bool {
+    true
 }
 
 /// What one command line may carry here, in UTF-16 code units (S20).
@@ -235,6 +254,58 @@ pub fn environment_passed_through() -> &'static [&'static str] {
 /// link (S21).
 pub fn environment_set() -> &'static [(&'static str, &'static str)] {
     &[("MSYS", "winsymlinks:nativestrict")]
+}
+
+/// A command of the shell's printing the process its parameter `$<parameter>` names, as
+/// `ended` reads it: the system's number, where the shell numbers its own.
+pub fn shell_process_number(parameter: &str) -> String {
+    format!(r#"cat "/proc/${parameter}/winpid""#)
+}
+
+/// A process that lives `seconds` and ends by itself: MinGit has no `sleep`, and `ping` waits
+/// a second between its replies.
+pub fn sleeping(seconds: u32) -> Command {
+    let root = std::env::var_os("SystemRoot").expect("SystemRoot names Windows's directory");
+    let mut ping = Command::new(Path::new(&root).join("System32").join("ping.exe"));
+    ping.args(["-n", &(seconds + 1).to_string(), "127.0.0.1"]);
+    ping
+}
+
+/// The stand-in `git` a caller copies into its control directory as `git.exe`, the one name
+/// `Command` finds (S20): `platform/forwarder.rs`, compiled once per check run, beside the
+/// built git-dupe.
+pub fn stand_in_git_program() -> Option<&'static Path> {
+    static COMPILED: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    match COMPILED.get_or_init(compiled_forwarder) {
+        Ok(program) => Some(program),
+        Err(cause) => panic!("{cause}"),
+    }
+}
+
+fn compiled_forwarder() -> Result<PathBuf, String> {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("scenarios")
+        .join("harness")
+        .join("platform")
+        .join("forwarder.rs");
+    let program = Path::new(env!("CARGO_BIN_EXE_git-dupe")).with_file_name("stand-in-git.exe");
+    report("compiling the stand-in git program with rustc");
+    let compiled = Command::new("rustc")
+        .args(["--edition", "2024", "-O", "-D", "warnings", "-o"])
+        .arg(&program)
+        .arg(&source)
+        .output()
+        .map_err(|cause| format!("cannot run rustc: {cause}"))?;
+    if !compiled.status.success() {
+        return Err(format!(
+            "rustc {}: {}: {}",
+            source.display(),
+            compiled.status,
+            String::from_utf8_lossy(&compiled.stderr)
+        ));
+    }
+    Ok(program)
 }
 
 /// Each way of this platform: a volume under a drive letter of its own.

@@ -174,9 +174,21 @@ mod unix {
         status.signal()
     }
 
+    /// Whether Git reaches a linked worktree's common Git directory through a symbolic link
+    /// above its Git directory, as the kernel reads the `..` of its `commondir` file.
+    pub fn commondir_read_through_a_link() -> bool {
+        true
+    }
+
     /// Whether a run can be started under a soft `RLIMIT_FSIZE`.
     pub fn file_size_limits() -> bool {
         true
+    }
+
+    /// Whether a Git reading `.git/info/exclude` can fail at the moment another command
+    /// replaces it: not here, where a rename gives a reader the old file or the new (S1).
+    pub fn a_replacement_can_fail_a_reader() -> bool {
+        false
     }
 
     /// `getconf ARG_MAX`: what one command line may carry here.
@@ -286,6 +298,39 @@ mod unix {
         let child = command.spawn()?;
         let group = Group { leader: child.id() };
         Ok((child, group))
+    }
+
+    /// A process whose number stays its own here for as long as anyone looks.
+    pub struct HeldProcess(String);
+
+    impl HeldProcess {
+        /// Whether the process has ended.
+        pub fn ended(&self) -> bool {
+            ended(&self.0)
+        }
+    }
+
+    /// `process`, which runs.
+    pub fn process_held(process: &str) -> HeldProcess {
+        HeldProcess(process.to_owned())
+    }
+
+    /// A command of the shell's printing the process its parameter `$<parameter>` names, as
+    /// `ended` reads it.
+    pub fn shell_process_number(parameter: &str) -> String {
+        format!(r#"echo "${parameter}""#)
+    }
+
+    /// A process that lives `seconds` and ends by itself.
+    pub fn sleeping(seconds: u32) -> Command {
+        let mut sleep = Command::new("sleep");
+        sleep.arg(seconds.to_string());
+        sleep
+    }
+
+    /// None: the stand-in `git` here is the script its caller writes.
+    pub fn stand_in_git_program() -> Option<&'static Path> {
+        None
     }
 
     /// Whether the process `process` has ended: gone, or a zombie.

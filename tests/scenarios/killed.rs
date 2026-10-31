@@ -80,6 +80,26 @@ fn attached_fixture(s: &Scenario, listed: &[u8], tracked: &[&str]) -> PathBuf {
     dir
 }
 
+/// A kill once settle's private listing has ended, the last Git run before the replacement,
+/// ends git-dupe before that replacement every time: the stand-in returns no sooner than its
+/// parent has ended, however the two fall.
+#[test]
+fn a_kill_after_the_run_before_the_replacement_always_leaves_the_old_exclude_file() {
+    under_each_release(|s| {
+        let fixture = attached_fixture(s, b"", &[]);
+        write(&fixture, "notes/one.md", b"one\n");
+        let sweep = Sweep::new(s, &fixture, &["add", "notes/"]);
+        let is_a_run = |point: &&Point| matches!(point, Point::BeforeRun(_));
+        let runs = sweep.points().iter().filter(is_a_run).count();
+        // Settle's public listing and `check-ignore` follow the replacement.
+        let point = Point::AfterRun(runs - 2);
+        for _ in 0..50 {
+            let killed = sweep.kill(point);
+            assert_eq!(killed.exclude, Version::Old, "{killed:?}");
+        }
+    });
+}
+
 #[test]
 fn a_killed_add_leaves_each_file_old_or_new_and_its_rerun_completes() {
     under_each_release(|s| {

@@ -366,6 +366,9 @@ fn linked_detach_refuses_info_link_only_when_its_own_region_stands_beyond_it() {
 #[test]
 fn linked_detach_failed_region_replacement_keeps_both_repositories_then_retries() {
     under_each_release(|s| {
+        if !s.writes_can_be_made_to_fail("worktree_detach") {
+            return;
+        }
         let fixture = attached(s, "failed-write");
         let wt = &fixture.linked;
         let private = Tree::of(&wt.private_directory());

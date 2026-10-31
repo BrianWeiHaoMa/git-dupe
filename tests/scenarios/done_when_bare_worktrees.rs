@@ -6,8 +6,9 @@ use std::ffi::OsStr;
 use std::fs;
 
 use crate::harness::{
-    End, Tree, Worktree, records, region_in, started_together, under_each_release, worktree_clone,
-    worktree_dupe, worktree_private_head, worktree_public_clean, write,
+    End, Tree, Worktree, records, region_in, started_together, under_each_release,
+    warnings_beside_another, worktree_clone, worktree_dupe, worktree_private_head,
+    worktree_public_clean, write,
 };
 
 fn regions(one: &Worktree, two: &Worktree, paths: &[Vec<String>; 2]) {
@@ -142,7 +143,10 @@ fn bare_linked_worktrees_keep_concurrent_regions_and_exchange_private_history() 
             );
             for output in [first, second] {
                 assert_eq!(output.end, End::Code(0), "{output:?}");
-                assert!(output.lines("warning").is_empty(), "{output:?}");
+                assert!(
+                    warnings_beside_another(s, &output).lines.is_empty(),
+                    "{output:?}"
+                );
             }
             for (paths, name) in paths.iter_mut().zip(names) {
                 paths.push(name);

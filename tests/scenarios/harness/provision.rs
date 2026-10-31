@@ -1,15 +1,20 @@
-//! Obtaining the Git releases: each is built from its official source release into
-//! `gits/git-<version>/` at the repository root when absent, and reused when present.
-//! Needs `curl`, `tar` with `xz`, `make`, a C compiler, and the zlib headers, and the
-//! network only while a release is absent.
+//! Obtaining the Git releases: each is put into `gits/git-<version>/` at the repository root
+//! when absent, and reused when present. Built from its official source release on Linux and
+//! macOS, which needs `curl`, `tar` with `xz`, `make`, a C compiler, and the zlib headers;
+//! unpacked from its pinned `MinGit` archive on Windows (`provision/mingit.rs`), which needs
+//! `curl.exe` and `tar.exe`. The network only while a release is absent.
 
 use std::ffi::OsString;
-use std::fs::{self, File};
+use std::fs::{self, OpenOptions};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use super::platform;
+use super::releases::{MINGIT, MinGit};
 use super::sha256;
+
+mod mingit;
 
 /// Where Git's source releases are published, their digests beside them.
 const OFFICIAL_SOURCE: &str = "https://mirrors.edge.kernel.org/pub/software/scm/git";
@@ -29,27 +34,37 @@ const KNOBS: [&str; 9] = [
     "NO_RUST=1",
 ];
 
-/// Written into a release's directory last, once `make … install` has succeeded, and
-/// holding the digest of the tarball it was built from. A directory without it is a
-/// build that did not finish: rebuilt, never used.
+/// Written into a release's directory last, once `make … install` or the unpacking has
+/// succeeded, and holding the digest of the tarball or zip it came from. A directory without
+/// it is a release that did not finish: obtained again, never used.
 const MARKER: &str = "complete";
 
-/// A directory of built releases and the place their sources come from.
+/// A directory of releases and the place they come from.
 pub struct Store {
     directory: PathBuf,
     source: String,
+    /// The archives a release is unpacked from, where none is built: Windows's (S21).
+    pinned: Option<&'static [MinGit]>,
 }
 
 impl Store {
-    /// `gits/` at the repository root, filled from the official source releases.
+    /// `gits/` at the repository root, filled by this platform's procedure (F4).
     pub fn of_the_repository() -> Store {
+        let unpacked = platform::word() == "windows";
         Store {
             directory: Path::new(env!("CARGO_MANIFEST_DIR")).join("gits"),
-            source: OFFICIAL_SOURCE.to_string(),
+            source: if unpacked {
+                mingit::OFFICIAL_RELEASES
+            } else {
+                OFFICIAL_SOURCE
+            }
+            .to_string(),
+            pinned: unpacked.then_some(&MINGIT),
         }
     }
 
-    /// The prefix a release is installed into; its `bin` holds `git`.
+    /// The directory a release is installed into, `platform::release_programs` naming what
+    /// in it a scenario runs.
     pub fn release_directory(&self, version: &str) -> PathBuf {
         self.directory.join(format!("git-{version}"))
     }
@@ -64,7 +79,7 @@ impl Store {
             .collect()
     }
 
-    /// Makes every release in `versions` present, building the absent ones one after
+    /// Makes every release in `versions` present, obtaining the absent ones one after
     /// another. A release that is present is not downloaded, rebuilt, or touched. Safe
     /// under parallel test threads and under check commands started together.
     pub fn provide(&self, versions: &[&str]) -> Result<(), String> {
@@ -73,25 +88,34 @@ impl Store {
         }
         fs::create_dir_all(&self.directory).map_err(because("create", &self.directory))?;
 
-        // One build at a time in this directory; held until this function returns.
+        // One at a time in this directory; held until this function returns. Never truncated,
+        // which a lock held through another handle refuses on Windows (S16).
         let lock_path = self.directory.join("lock");
-        let lock = File::create(&lock_path).map_err(because("create", &lock_path))?;
+        let lock = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(because("create", &lock_path))?;
         lock.lock().map_err(because("lock", &lock_path))?;
 
-        // Another run may have built some of them while this one waited for the lock.
+        // Another run may have obtained some of them while this one waited for the lock.
         let absent = self.absent(versions);
         if absent.is_empty() {
             return Ok(());
         }
 
-        // Downloads and extracted sources live here while building and are gone afterward.
-        // The lock is held, so whatever is here was left by a run that was killed.
+        // Downloads and extracted sources live here meanwhile and are gone afterward. The
+        // lock is held, so whatever is here was left by a run that was killed.
         let work = self.directory.join("work");
         remove_tree(&work)?;
         fs::create_dir(&work).map_err(because("create", &work))?;
-        let built = self.build(&absent, &work);
+        let obtained = match self.pinned {
+            Some(table) => self.unpack(table, &absent, &work),
+            None => self.build(&absent, &work),
+        };
         let cleared = remove_tree(&work);
-        built.and(cleared)
+        obtained.and(cleared)
     }
 
     fn build(&self, versions: &[&str], work: &Path) -> Result<(), String> {
@@ -202,203 +226,4 @@ fn because(act: &str, path: &Path) -> impl Fn(std::io::Error) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::harness::fresh::FreshDirectory;
-
-    /// The one release the stand-in source publishes. It is not a Git release.
-    const VERSION: &str = "0.0.0";
-
-    /// A stand-in for the official source, read through `file://`: one source tarball
-    /// whose `make install` writes a `bin/git` recording the knobs it was given and
-    /// adds a line to a tally of builds. The digest list is each check's to publish.
-    struct Published {
-        root: FreshDirectory,
-    }
-
-    impl Published {
-        fn new() -> Published {
-            let root = FreshDirectory::create();
-            let staged = root.path().join(format!("staged/git-{VERSION}"));
-            fs::create_dir_all(&staged).unwrap();
-            fs::create_dir(root.path().join("source")).unwrap();
-            let recorded: Vec<String> = KNOBS
-                .iter()
-                .map(|knob| format!("$({})", knob.split('=').next().unwrap()))
-                .collect();
-            let makefile = format!(
-                "install:\n\
-                 \tmkdir -p '$(prefix)/bin'\n\
-                 \techo '{}' >'$(prefix)/bin/git'\n\
-                 \techo built >>'{}'\n",
-                recorded.join(" "),
-                root.path().join("tally").display()
-            );
-            fs::write(staged.join("Makefile"), makefile).unwrap();
-            let published = Published { root };
-            run(Command::new("tar")
-                .arg("-cJf")
-                .arg(published.tarball())
-                .arg("-C")
-                .arg(published.root.path().join("staged"))
-                .arg(format!("git-{VERSION}")))
-            .unwrap();
-            published
-        }
-
-        fn tarball(&self) -> PathBuf {
-            self.root
-                .path()
-                .join(format!("source/git-{VERSION}.tar.xz"))
-        }
-
-        fn tarball_digest(&self) -> String {
-            sha256::hex_digest(&fs::read(self.tarball()).unwrap())
-        }
-
-        fn publish_list(&self, lines: &str) {
-            let list = format!(
-                "-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA256\n\n{lines}\
-                 -----BEGIN PGP SIGNATURE-----\n\nAAAA\n-----END PGP SIGNATURE-----\n"
-            );
-            fs::write(self.root.path().join("source").join(DIGEST_LIST), list).unwrap();
-        }
-
-        fn publish_the_tarballs_digest(&self) {
-            self.publish_list(&format!(
-                "{}  git-{VERSION}.tar.xz\n",
-                self.tarball_digest()
-            ));
-        }
-
-        fn store(&self) -> Store {
-            Store {
-                directory: self.root.path().join("gits"),
-                source: format!("file://{}/source", self.root.path().display()),
-            }
-        }
-
-        fn builds(&self) -> usize {
-            match fs::read_to_string(self.root.path().join("tally")) {
-                Ok(tally) => tally.lines().count(),
-                Err(cause) if cause.kind() == ErrorKind::NotFound => 0,
-                Err(cause) => panic!("the tally of builds: {cause}"),
-            }
-        }
-
-        fn nothing_was_built(&self) {
-            let store = self.store();
-            assert_eq!(self.builds(), 0);
-            assert!(!store.release_directory(VERSION).exists());
-            assert!(!store.directory.join("work").exists());
-        }
-    }
-
-    #[test]
-    fn a_release_is_built_with_the_knobs_once_and_then_left_alone() {
-        let published = Published::new();
-        published.publish_the_tarballs_digest();
-        let store = published.store();
-        assert_eq!(store.absent(&[VERSION]), [VERSION]);
-        store.provide(&[VERSION]).unwrap();
-
-        let git = store.release_directory(VERSION).join("bin/git");
-        let marker = store.release_directory(VERSION).join(MARKER);
-        assert_eq!(
-            fs::read_to_string(&git).unwrap(),
-            "YesPlease 1 1 1 1 1 1 1 1\n"
-        );
-        assert_eq!(
-            fs::read_to_string(&marker).unwrap(),
-            format!("{}\n", published.tarball_digest())
-        );
-        assert!(store.absent(&[VERSION]).is_empty());
-        assert!(!store.directory.join("work").exists());
-
-        // With its source gone, a present release still provides: nothing is downloaded.
-        let modified = |path: &Path| fs::metadata(path).unwrap().modified().unwrap();
-        let before = [modified(&git), modified(&marker)];
-        fs::remove_dir_all(published.root.path().join("source")).unwrap();
-        store.provide(&[VERSION]).unwrap();
-        assert_eq!([modified(&git), modified(&marker)], before);
-        assert_eq!(published.builds(), 1);
-    }
-
-    #[test]
-    fn a_directory_without_its_marker_is_rebuilt_not_used() {
-        let published = Published::new();
-        published.publish_the_tarballs_digest();
-        let store = published.store();
-        store.provide(&[VERSION]).unwrap();
-
-        let directory = store.release_directory(VERSION);
-        fs::remove_file(directory.join(MARKER)).unwrap();
-        fs::write(directory.join("half-installed"), "").unwrap();
-        assert_eq!(store.absent(&[VERSION]), [VERSION]);
-        store.provide(&[VERSION]).unwrap();
-
-        assert!(directory.join(MARKER).is_file());
-        assert!(!directory.join("half-installed").exists());
-        assert_eq!(published.builds(), 2);
-    }
-
-    #[test]
-    fn a_tarball_that_does_not_hash_to_its_listed_digest_builds_nothing() {
-        let published = Published::new();
-        let other = sha256::hex_digest(b"another tarball");
-        published.publish_list(&format!("{other}  git-{VERSION}.tar.xz\n"));
-
-        let cause = published.store().provide(&[VERSION]).unwrap_err();
-        assert!(cause.contains(&other), "{cause}");
-        assert!(cause.contains(&published.tarball_digest()), "{cause}");
-        published.nothing_was_built();
-    }
-
-    #[test]
-    fn a_release_the_digest_list_does_not_name_builds_nothing() {
-        let published = Published::new();
-        let digest = published.tarball_digest();
-        // Its digest is there, but only beside other names.
-        published.publish_list(&format!(
-            "{digest}  git-{VERSION}.tar.gz\n\
-             {digest}  git-manpages-{VERSION}.tar.xz\n\
-             {digest}  git-{VERSION}.tar.xz.sign\n"
-        ));
-
-        let cause = published.store().provide(&[VERSION]).unwrap_err();
-        assert!(
-            cause.contains(&format!("no SHA-256 entry for git-{VERSION}.tar.xz")),
-            "{cause}"
-        );
-        published.nothing_was_built();
-    }
-
-    #[test]
-    fn runs_started_together_build_a_release_once() {
-        let published = Published::new();
-        published.publish_the_tarballs_digest();
-        std::thread::scope(|runs| {
-            let started: Vec<_> = (0..4)
-                .map(|_| runs.spawn(|| published.store().provide(&[VERSION])))
-                .collect();
-            for run in started {
-                run.join().unwrap().unwrap();
-            }
-        });
-        assert_eq!(published.builds(), 1);
-    }
-
-    #[test]
-    fn a_listed_digest_is_the_one_on_the_line_of_exactly_that_name() {
-        let (first, second) = (sha256::hex_digest(b"1"), sha256::hex_digest(b"2"));
-        let list = format!(
-            "Hash: SHA256\n\n{first}  git-1.0.tar.gz\n{second}  git-1.0.tar.xz\nnot-a-digest  git-2.0.tar.xz\n"
-        );
-        assert_eq!(
-            listed_digest(list.as_bytes(), "git-1.0.tar.xz"),
-            Some(second)
-        );
-        assert_eq!(listed_digest(list.as_bytes(), "git-1.0.tar"), None);
-        assert_eq!(listed_digest(list.as_bytes(), "git-2.0.tar.xz"), None);
-    }
-}
+mod tests;

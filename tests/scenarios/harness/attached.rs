@@ -8,7 +8,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::files::name;
 use super::output::{End, Output, names};
+use super::platform::as_git_spells_bytes;
 use super::scenario::{Git, Scenario};
 
 impl Scenario {
@@ -42,7 +44,10 @@ impl Scenario {
     /// reading the private index in assertions. git-dupe itself is reached only as
     /// `git dupe …`. A linked worktree's is reached through `private_at`.
     pub fn private(&self, directory: &Path) -> Private<'_> {
-        self.private_at(directory, &directory.join(".git/dupe"))
+        // Spelled as git-dupe spells it, Git's root with `dupe` joined, so that what Git says
+        // of a path below it here reads as what it says under `git dupe` (S23).
+        let common = [as_git_spells_bytes(directory).as_slice(), b"/.git"].concat();
+        self.private_at(directory, &Path::new(&name(&common)).join("dupe"))
     }
 
     /// Git against the private repository whose Git directory is `private_directory`

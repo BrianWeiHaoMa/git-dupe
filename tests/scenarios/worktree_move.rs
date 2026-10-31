@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 
 use crate::harness::{
     End, Output, Point, Scenario, Tree, Worktree, as_git_spells, as_git_spells_bytes,
-    completed_hint, linked_on_branch, name, name_accepted, symlink, unchanged, under_each_release,
+    commondir_read_through_a_link, completed_hint, linked_on_branch, name, name_accepted, symlink,
+    unchanged, under_each_release,
 };
 
 fn git_directory(path: &Path) -> OsString {
@@ -282,8 +283,15 @@ fn linked_init_records_canonical_git_directory_and_non_utf8_root_bytes() {
         s.repository(&main);
         let wt = linked_on_branch(s, &main, &s.dir().join("agent"), "agent");
         let via = s.dir().join("via");
-        symlink(wt.common_directory.join("worktrees"), &via).unwrap();
-        let through_link = via.join(wt.name().unwrap());
+        // Where Git folds the `..` of `commondir` by its spelling, the link stands at the
+        // common Git directory, and that `..` stays above it.
+        let through_link = if commondir_read_through_a_link() {
+            symlink(wt.common_directory.join("worktrees"), &via).unwrap();
+            via.join(wt.name().unwrap())
+        } else {
+            symlink(&wt.common_directory, &via).unwrap();
+            via.join("worktrees").join(wt.name().unwrap())
+        };
         let before = wt.public_git();
         s.git([git_directory(&through_link), "dupe".into(), "init".into()])
             .from(&wt.root)

@@ -46,7 +46,7 @@ pub use attached::{
     region_in, region_rules, staged_gitdupe,
 };
 pub use clean::{EVERY_KIND_SPARED, Twin, hidden_path_of_every_kind};
-pub use concurrent::started_together;
+pub use concurrent::{started_together, warnings_beside_another};
 pub use detach::{
     after_git, daily_warnings, detached, now_visible, stale_file_timestamp, stale_timestamp,
     warnings,
@@ -71,7 +71,8 @@ pub use output::{
 };
 pub use platform::{
     MACHINES_WITHOUT_AN_ARCHIVE, architecture, as_git_spells, as_git_spells_bytes, canonical,
-    command_line_limit, identity, permissions, second_filesystems, symlink, word,
+    command_line_limit, commondir_read_through_a_link, identity, permissions, second_filesystems,
+    symlink, word,
 };
 pub use public::{
     EVERY_OBJECT, held_publicly, leaving_public_git, privately_tracked, public_git, public_status,

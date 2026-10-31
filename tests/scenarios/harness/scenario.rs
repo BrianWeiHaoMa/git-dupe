@@ -60,7 +60,7 @@ fn select_and_provide() -> Result<Vec<Release>, String> {
     let store = Store::of_the_repository();
     let absent = store.absent(&versions);
     if !absent.is_empty() {
-        report(&format!("obtaining and building Git {}", absent.join(", ")));
+        report(&format!("obtaining Git {}", absent.join(", ")));
     }
     store.provide(&versions)?;
     versions
@@ -82,6 +82,8 @@ pub fn report(text: &str) {
 
 pub struct Scenario {
     directory: FreshDirectory,
+    /// The word of the release it runs under.
+    version: &'static str,
     environment: Vec<(OsString, OsString)>,
     /// The release's own `git`, behind everything the scenario's `PATH` can put first.
     release_git: PathBuf,
@@ -106,26 +108,32 @@ impl Scenario {
 
         let built = Path::new(env!("CARGO_BIN_EXE_git-dupe"));
         let callers = std::env::var_os("PATH").unwrap_or_default();
-        let front = [
-            release.directory.join("bin"),
-            built
-                .parent()
-                .expect("the built git-dupe lies in a directory")
-                .to_path_buf(),
-        ];
+        let mut front = platform::release_programs(&release.directory);
+        front.extend(built.parent().map(Path::to_path_buf));
         let path = std::env::join_paths(front.into_iter().chain(std::env::split_paths(&callers)))
             .unwrap_or_else(|cause| panic!("PATH: {cause}"));
 
+        let mut environment: Vec<(OsString, OsString)> = vec![
+            ("PATH".into(), path),
+            ("HOME".into(), home.into()),
+            ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
+            ("GIT_SSH_COMMAND".into(), "false".into()),
+            ("GIT_CEILING_DIRECTORIES".into(), ceiling.into()),
+        ];
+        let passed_through = platform::environment_passed_through().iter();
+        environment.extend(
+            passed_through.filter_map(|name| {
+                std::env::var_os(name).map(|value| (OsString::from(name), value))
+            }),
+        );
+        let set = platform::environment_set().iter();
+        environment.extend(set.map(|(name, value)| ((*name).into(), (*value).into())));
+
         let scenario = Scenario {
-            environment: vec![
-                ("PATH".into(), path),
-                ("HOME".into(), home.into()),
-                ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
-                ("GIT_SSH_COMMAND".into(), "false".into()),
-                ("GIT_CEILING_DIRECTORIES".into(), ceiling.into()),
-            ],
+            environment,
             directory,
-            release_git: release.directory.join("bin/git"),
+            version: release.version,
+            release_git: platform::release_git(&release.directory),
             release: release.directory.clone(),
             unavailable: Mutex::new(BTreeSet::new()),
         };
@@ -139,7 +147,7 @@ impl Scenario {
         let version = self.git(["--version"]).run();
         assert!(
             version.end == End::Code(0)
-                && version.stdout == format!("git version {}\n", release.version).as_bytes(),
+                && version.stdout == platform::git_version_line(release.version).as_bytes(),
             "`git --version` is not Git {}: {version:?}",
             release.version
         );
@@ -165,6 +173,11 @@ impl Scenario {
     /// must still reach the release.
     pub fn release_git(&self) -> &Path {
         &self.release_git
+    }
+
+    /// The word of the release it runs under, for a line that reports what fell under it.
+    pub fn release_word(&self) -> &'static str {
+        self.version
     }
 
     /// The shell of this release's platform, the one way a scenario or a module runs a
@@ -270,13 +283,17 @@ impl Git<'_> {
     /// Its standard output a file that refuses every write, in place of capturing it: an
     /// empty regular file in the scenario's directory, under `file_size_limit` of no block
     /// with `SIGXFSZ` ignored, so that every write of the run to a file fails with `EFBIG`
-    /// and the writer goes on. A regular file, because the limit bounds files and not
+    /// and the writer goes on, or, where no such limit exists, opened for reading alone,
+    /// whose every write fails. A regular file, because the limit bounds files and not
     /// pipes; not `/dev/full`, which macOS lacks. `Output::stdout` is then empty.
     pub fn standard_output_refusing_writes(mut self) -> Self {
         let file = self.scenario.dir().join("standard-output-refusing-writes");
         fs::write(&file, b"").unwrap_or_else(|cause| panic!("{}: {cause}", file.display()));
         self.stdout_to = Some(file);
-        self.file_size_limit(0).file_size_signal_ignored()
+        if platform::file_size_limits() {
+            return self.file_size_limit(0).file_size_signal_ignored();
+        }
+        self
     }
 
     /// Bytes to feed on the run's standard input, in place of no input.
@@ -285,7 +302,7 @@ impl Git<'_> {
         self
     }
 
-    /// Starts it through `/bin/sh` under a soft limit of `blocks`, in the shell's blocks, on
+    /// Starts it through the shell under a soft limit of `blocks`, in the shell's blocks, on
     /// the size of any file a process of the run writes, and with no core file: a process
     /// that writes past the limit dies of `SIGXFSZ`. A process of the run may raise the
     /// soft limit again for itself and what it starts.
@@ -328,7 +345,7 @@ impl Git<'_> {
         let mut command = match self.file_size_limit {
             None => Command::new(&self.program),
             Some(blocks) => {
-                let mut shell = Command::new("/bin/sh");
+                let mut shell = Command::new(self.scenario.shell());
                 let ignoring = if self.file_size_signal_ignored {
                     "trap '' XFSZ && "
                 } else {
@@ -345,7 +362,11 @@ impl Git<'_> {
         };
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         if let Some(file) = &self.stdout_to {
-            let opened = fs::OpenOptions::new().write(true).open(file);
+            let writes = platform::file_size_limits();
+            let opened = fs::OpenOptions::new()
+                .read(!writes)
+                .write(writes)
+                .open(file);
             command.stdout(opened.unwrap_or_else(|cause| panic!("{}: {cause}", file.display())));
         }
         command
@@ -417,6 +438,8 @@ mod tests {
         let rerun = Command::new(std::env::current_exe().unwrap())
             .arg("isolation::")
             .env("TMPDIR", &temporary)
+            .env("TMP", &temporary)
+            .env("TEMP", &temporary)
             .env("GIT_DIR", above.join(".git"))
             .env("GIT_EXEC_PATH", scenario.dir())
             .env("GIT_CONFIG_GLOBAL", &global)

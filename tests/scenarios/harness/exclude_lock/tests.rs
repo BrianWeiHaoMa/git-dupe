@@ -2,6 +2,7 @@ use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::super::output::End;
+use super::super::running::ended;
 use super::super::tree::Tree;
 use super::*;
 

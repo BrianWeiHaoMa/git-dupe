@@ -233,6 +233,31 @@ fn process_names() -> io::Result<Vec<(u32, String)>> {
     Ok(names)
 }
 
+/// A process whose number stays its own: Windows gives a number that fell free to the next
+/// process at once, so that `ended` of a number can turn false again, and a handle keeps it.
+pub struct HeldProcess(Option<OwnedHandle>);
+
+impl HeldProcess {
+    /// Whether the process has ended.
+    pub fn ended(&self) -> bool {
+        self.0.as_ref().is_none_or(|handle| {
+            // SAFETY: the handle is open for the call, which waits for nothing.
+            unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) == WAIT_OBJECT_0 }
+        })
+    }
+}
+
+/// `process`, which runs, held for as long as the answer lives; a process already gone
+/// answers that it has ended.
+pub fn process_held(process: &str) -> HeldProcess {
+    let number = process
+        .parse()
+        .unwrap_or_else(|cause| panic!("process {process:?}: {cause}"));
+    // SAFETY: the call takes no pointer.
+    let handle = unsafe { OpenProcess(SYNCHRONIZE, 0, number) };
+    HeldProcess(owned(handle, ptr::null_mut()).ok())
+}
+
 /// Whether the process `process` has ended: gone, or signaled while a handle keeps it. The
 /// signaled state and never the exit code, because a process can exit with `STILL_ACTIVE`'s
 /// value.

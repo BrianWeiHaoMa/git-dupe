@@ -268,7 +268,8 @@ fn killed_in(part: Part) {
         };
         // Before and after each Git run, and inside the region's write under a limit of no
         // block and of one.
-        assert_eq!(sweep.points().len(), 2 * commands.len() + 2, "{commands:?}");
+        let points = Sweep::points_of(commands.len());
+        assert_eq!(sweep.points().len(), points, "{commands:?}");
         let points: Vec<Point> = sweep
             .points()
             .iter()

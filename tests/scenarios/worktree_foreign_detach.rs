@@ -387,6 +387,9 @@ fn foreign_detach_killed_after_region_deletion_still_attributes_on_retry() {
 #[test]
 fn foreign_detach_failed_write_preserves_stale_and_live_regions_then_retry_drops_stale() {
     under_each_release(|s| {
+        if !s.writes_can_be_made_to_fail("worktree_foreign_detach") {
+            return;
+        }
         let fixture = attached(s, "write-failure");
         let wt = &fixture.linked;
         wt.private(s)

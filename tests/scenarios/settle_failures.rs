@@ -273,6 +273,9 @@ fn failed_or_truncated_ignore_answer_does_not_name_foreign_paths() {
 #[test]
 fn failed_region_write_keeps_the_whole_file_and_retry_prunes_stale_regions() {
     under_each_release(|s| {
+        if !s.writes_can_be_made_to_fail("settle_failures") {
+            return;
+        }
         let pending = pending(s, "write-failure");
         let pair = &pending.pair;
         // G6 still asks exposure on a failed replacement. Keep every own and released
@@ -306,6 +309,9 @@ fn failed_region_write_keeps_the_whole_file_and_retry_prunes_stale_regions() {
 #[test]
 fn killed_region_write_leaves_a_whole_file_and_the_peer_can_proceed() {
     under_each_release(|s| {
+        if !s.kills_inside_writes("settle_failures") {
+            return;
+        }
         let pending = pending(s, "killed-write");
         let pair = &pending.pair;
         let main_region = pair.main.region_bytes();

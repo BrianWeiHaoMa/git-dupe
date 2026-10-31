@@ -106,12 +106,14 @@ pub static MINGIT: [MinGit; 14] = [
     },
 ];
 
+/// The row of `table` for `word`, which `MINGIT` holds for every listed word.
+pub fn row<'t>(table: &'t [MinGit], word: &str) -> Option<&'t MinGit> {
+    table.iter().find(|row| row.word == word)
+}
+
 /// The row of the listed release `word`.
 pub fn mingit(word: &str) -> &'static MinGit {
-    MINGIT
-        .iter()
-        .find(|row| row.word == word)
-        .unwrap_or_else(|| panic!("{word} is not a release the repository checks"))
+    row(&MINGIT, word).unwrap_or_else(|| panic!("{word} is not a release the repository checks"))
 }
 
 /// The oldest release git-dupe supports, for a scenario that must see it named.

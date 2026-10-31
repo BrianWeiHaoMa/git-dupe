@@ -9,7 +9,8 @@
 //!
 //! The points are found, not written down: an uninterrupted run gives the reference and
 //! the number of git-dupe's Git runs, and the command is then killed in a fresh copy of the
-//! fixture before and after each run and inside a write of its own. A hard link made to
+//! fixture before and after each run and, where a run can be killed there, inside a write
+//! of its own. A hard link made to
 //! each old file beforehand still holds the old bytes afterwards, so the old version was
 //! never written into: with the inside-write kill, that tells a rename from a write in
 //! place, a truncate-and-write, and a copy over the destination.
@@ -23,7 +24,7 @@ use super::exclude_lock::lock_is_free;
 use super::files::copy;
 use super::kill::{Killing, Point};
 use super::output::{End, Output};
-use super::platform::permissions;
+use super::platform::{file_size_limits, permissions};
 use super::scenario::Scenario;
 use super::tree::Tree;
 
@@ -219,15 +220,20 @@ impl<'s> Sweep<'s> {
             .iter()
             .filter(|point| matches!(point, Point::BeforeRun(_)))
             .count();
-        for unreached in [
-            Point::BeforeRun(runs + 1),
-            Point::InsideWrite { blocks: 1 << 20 },
-        ] {
+        let inside_write = Point::InsideWrite { blocks: 1 << 20 };
+        let inside_write = file_size_limits().then_some(inside_write);
+        for unreached in [Point::BeforeRun(runs + 1)].into_iter().chain(inside_write) {
             let work = copied(s, &sweep.fixture, "work");
             let counted = catch_unwind(AssertUnwindSafe(|| sweep.killing.killed(&work, unreached)));
             assert!(counted.is_err(), "{unreached:?} was counted as a kill");
         }
         sweep
+    }
+
+    /// How many points a command of `runs` Git runs has here: two at each run, and two inside
+    /// a write where a run can be killed there.
+    pub fn points_of(runs: usize) -> usize {
+        2 * runs + if file_size_limits() { 2 } else { 0 }
     }
 
     /// Every point at which the command can be killed, in the order its run reaches them:

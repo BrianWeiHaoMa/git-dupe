@@ -6,8 +6,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, daily_state, dupe_succeeds, holds, names, private_add, private_commit,
-    public_status, under_each_release, write,
+    End, Output, Scenario, daily_state, dupe_succeeds, holds, name_accepted, names, private_add,
+    private_commit, public_status, under_each_release, write,
 };
 
 const CHANGES: &[&str] = &[
@@ -356,35 +356,57 @@ fn a_staged_deletion_below_a_publicly_tracked_file_is_shown_without_that_file() 
                 .git(["--literal-pathspecs", "add", "-f", "--", path])
                 .succeeds();
         };
+        let gone_with_its_directory = below(spelled_directory, "gone");
+        let odd_y = below(odd, "y");
+        let held = name_accepted(
+            s.dir(),
+            b"w*[?]\\xz",
+            "status: names holding each byte a glob reads",
+        );
         private_literal_add(".gitdupe");
-        for path in [
-            "notes/a",
-            "notes/sub/y",
-            "h/x",
-            &below(odd, "y"),
-            beside,
-            spelled_file,
-            &below(spelled_directory, "gone"),
-        ] {
+        let mut tracked = vec!["notes/a", "notes/sub/y", "h/x"];
+        let mut below_a_public_file = vec![("notes/sub", "y"), ("h", "x")];
+        let mut shown = vec!["D  notes/sub/y".to_owned(), "D  h/x".to_owned()];
+        if held {
+            tracked.extend([
+                odd_y.as_str(),
+                beside,
+                spelled_file,
+                &gone_with_its_directory,
+            ]);
+            below_a_public_file.push((odd, "y"));
+            shown.extend([
+                format!("D  {odd}/y"),
+                format!(" M {beside}"),
+                format!(" M {spelled_file}"),
+                format!("D  {spelled_directory}/gone"),
+                // Collapsed as Git collapses an untracked directory: the deletion's own path,
+                // below `notes`, is no pathspec of the run to take Git inside it.
+                format!("?? {spelled_directory}/"),
+            ]);
+        }
+        for path in tracked {
             write(&dir, path, b"private\n");
             private_literal_add(path);
         }
         private_commit(s, &dir);
-        s.private(&dir)
-            .git([
-                "--literal-pathspecs",
-                "rm",
-                "--cached",
-                "-q",
-                "--",
-                &below(spelled_directory, "gone"),
-            ])
-            .succeeds();
-        write(&dir, &below(spelled_directory, "new"), b"untracked\n");
-        write(&dir, spelled_file, b"changed\n");
+        if held {
+            s.private(&dir)
+                .git([
+                    "--literal-pathspecs",
+                    "rm",
+                    "--cached",
+                    "-q",
+                    "--",
+                    &gone_with_its_directory,
+                ])
+                .succeeds();
+            write(&dir, &below(spelled_directory, "new"), b"untracked\n");
+            write(&dir, spelled_file, b"changed\n");
+        }
         // Each deletion staged, and a teammate's file now standing at its parent: below a
         // hidden directory, at a hidden path itself, and at the odd name.
-        for (parent, file) in [("notes/sub", "y"), ("h", "x"), (odd, "y")] {
+        for (parent, file) in below_a_public_file {
             s.private(&dir)
                 .git([
                     "--literal-pathspecs",
@@ -401,21 +423,10 @@ fn a_staged_deletion_below_a_publicly_tracked_file_is_shown_without_that_file() 
                 .from(&dir)
                 .succeeds();
         }
-        write(&dir, beside, b"changed\n");
-        let expected: BTreeSet<Vec<u8>> = [
-            "D  notes/sub/y".to_owned(),
-            "D  h/x".to_owned(),
-            format!("D  {odd}/y"),
-            format!(" M {beside}"),
-            format!(" M {spelled_file}"),
-            format!("D  {spelled_directory}/gone"),
-            // Collapsed as Git collapses an untracked directory: the deletion's own path,
-            // below `notes`, is no pathspec of the run to take Git inside it.
-            format!("?? {spelled_directory}/"),
-        ]
-        .into_iter()
-        .map(String::into_bytes)
-        .collect();
+        if held {
+            write(&dir, beside, b"changed\n");
+        }
+        let expected: BTreeSet<Vec<u8>> = shown.into_iter().map(String::into_bytes).collect();
         for from in [dir.clone(), dir.join("notes")] {
             let output = s
                 .git(["dupe", "status", "--porcelain", "-z"])

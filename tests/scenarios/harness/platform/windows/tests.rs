@@ -47,7 +47,10 @@ fn a_job_names_its_child_until_it_is_killed() {
     while !group.running().unwrap().is_empty() {
         assert!(Instant::now() < deadline, "the child still runs");
     }
-    assert!(ended(&process));
+    // A job lets a process go a moment before the process itself ends.
+    while !ended(&process) {
+        assert!(Instant::now() < deadline, "the child has not ended");
+    }
 }
 
 /// Each name Windows cannot hold is refused before anything is made, and a name it holds

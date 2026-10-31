@@ -262,11 +262,13 @@ pub(super) use parent_name;
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
     use std::fs;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::path::Path;
     use std::sync::mpsc;
 
+    use super::super::platform::{shell_process_number, sleeping};
     use super::super::scenario::Scenario;
     use super::*;
 
@@ -289,7 +291,7 @@ mod tests {
             let check = scope.spawn(|| {
                 let running = s
                     .program(
-                        "/bin/sh",
+                        s.shell(),
                         [
                             "-c",
                             r#"echo $$ > "$0" && exec cat"#,
@@ -313,7 +315,7 @@ mod tests {
                 },
             };
             if stalled.is_some() {
-                kill_recorded(&recorded);
+                kill_recorded(&s, &recorded);
             }
             // Whatever the killed run's thread then makes of it, the stall is the failure.
             let _ = check.join();
@@ -332,10 +334,14 @@ mod tests {
         let s = Scenario::of_the_first_release();
         for (holding, bounded) in [("", true), (" >/dev/null 2>&1", false)] {
             let left = s.dir().join("left");
-            let script = format!(r#"sleep 120{holding} & echo $! > "$0"; exit 0"#);
-            let running = s
-                .program("/bin/sh", ["-c", &script, left.to_str().unwrap()])
-                .start();
+            let number = shell_process_number("!");
+            let script = format!(r#""$@"{holding} & {number} > "$0"; exit 0"#);
+            let sleep = sleeping(120);
+            let words = [OsStr::new("-c"), OsStr::new(&script), left.as_os_str()]
+                .into_iter()
+                .chain([sleep.get_program()])
+                .chain(sleep.get_args());
+            let running = s.program(s.shell(), words).start();
             let began = Instant::now();
             let waited = catch_unwind(AssertUnwindSafe(|| match bounded {
                 true => running.wait_within(Duration::from_millis(500)),
@@ -365,12 +371,10 @@ mod tests {
 
     /// Kills the process whose ID the stalled run recorded in `file`: it is still at work,
     /// so the ID names it and nothing else.
-    fn kill_recorded(file: &Path) {
+    fn kill_recorded(s: &Scenario, file: &Path) {
         if let Ok(process) = fs::read_to_string(file) {
-            let _ = Command::new("/bin/sh")
-                .args(["-c", r#"kill -s KILL "$0""#])
-                .arg(process.trim_end())
-                .status();
+            let words = ["-c", r#"kill -s KILL "$0""#, process.trim_end()];
+            let _ = s.program(s.shell(), words).run();
         }
     }
 }

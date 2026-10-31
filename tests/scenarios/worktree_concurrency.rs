@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 use crate::harness::{
     End, Output, Point, Scenario, Tree, Worktree, entry_names, lock_is_free, now_visible,
-    started_together, under_each_release, write,
+    started_together, under_each_release, warnings_beside_another, write,
 };
 
 /// The user's text before the main worktree's region, between the two regions, and after
@@ -179,6 +179,16 @@ fn ended_cleanly(output: &Output) {
     );
 }
 
+/// `ended_cleanly` for a command run at once with another worktree's.
+fn ended_cleanly_beside_another(s: &Scenario, output: &Output) {
+    assert_eq!(output.end, End::Code(0), "{output:?}");
+    let said = warnings_beside_another(s, output);
+    assert!(
+        said.lines.is_empty() && said.fatals.is_empty(),
+        "{output:?}"
+    );
+}
+
 /// What a command hiding a path in either worktree leaves as it was: the common Git
 /// directory, the linked worktree's Git directory and each private history within it
 /// included, but the two private Git directories and the exclude file; and each working
@@ -221,8 +231,8 @@ fn both_worktrees_replace_and_delete_their_regions_under_the_one_lock() {
         // The third worktree's region as its own `hide notes` leaves it under the lock.
         let notes = third_region(&["/.gitdupe", "/notes"]);
         let [main_hid, agent_hid] = waiting.let_go(Some(OsStr::new(THIRD)), &notes);
-        ended_cleanly(&main_hid);
-        ended_cleanly(&agent_hid);
+        ended_cleanly_beside_another(s, &main_hid);
+        ended_cleanly_beside_another(s, &agent_hid);
         let (in_main, in_agent) = (["main-notes".to_owned()], ["agent-notes".to_owned()]);
         hides_exactly(s, &p.main, &in_main);
         hides_exactly(s, &p.agent, &in_agent);
@@ -294,8 +304,8 @@ fn fifty_pairs_of_hides_started_together_keep_every_path_in_its_own_region() {
                         .start()
                 },
             );
-            ended_cleanly(&main_hid);
-            ended_cleanly(&agent_hid);
+            ended_cleanly_beside_another(s, &main_hid);
+            ended_cleanly_beside_another(s, &agent_hid);
             in_main.push(main_path);
             in_agent.push(agent_path);
             hides_exactly(s, &p.main, &in_main);
@@ -332,16 +342,16 @@ fn fifty_pairs_of_hides_started_together_keep_every_path_in_its_own_region() {
                     .start()
             },
         );
-        ended_cleanly(&main_hid);
+        ended_cleanly_beside_another(s, &main_hid);
         assert_eq!(detached.end, End::Code(0), "{detached:?}");
-        let warnings = detached.lines("warning");
+        let said = warnings_beside_another(s, &detached);
         assert!(
-            warnings.contains(&&now_visible("agent-00")[..]),
+            said.unasked || said.lines.contains(&&now_visible("agent-00")[..]),
             "{detached:?}"
         );
         // The main worktree's region still hides `.gitdupe` there.
         assert!(
-            !warnings.contains(&&now_visible(".gitdupe")[..]),
+            !said.lines.contains(&&now_visible(".gitdupe")[..]),
             "{detached:?}"
         );
         in_main.push("main-50".to_owned());
@@ -409,40 +419,63 @@ fn killed_beside_another_hide(s: &Scenario, name: &str, main_killed: bool) {
     let listing_length: usize = in_target.iter().map(|path| path.len() + 1).sum();
     assert!(listing_length < 512);
     let private = target.private_directory();
+
+    let inside_write = s.kills_inside_writes("worktree_concurrency: the partial fresh file");
+    let point = if inside_write {
+        Point::InsideWrite { blocks: 1 }
+    } else {
+        // A hide of a path already listed runs Git as one that lists it does, and the last
+        // run before the replacement is settle's private listing, two before the end: the
+        // public listing and `check-ignore` follow it.
+        let counting = s.killing(
+            &format!("{name}-counting"),
+            &["hide", in_target[0].as_str()],
+        );
+        let (counted, points) = counting.uninterrupted(&target.root);
+        ended_cleanly(&counted);
+        Point::AfterRun(points.len() / 2 - 2)
+    };
     let private_before = entry_names(&private);
 
     let killing = s.killing(&format!("{name}-control"), &["hide", target_path.as_str()]);
     let (_killed, peer_hid) = started_together(
-        || killing.start_killed(&target.root, Point::InsideWrite { blocks: 1 }),
+        || killing.start_killed(&target.root, point),
         || {
             s.git(["dupe", "hide", peer_path.as_str()])
                 .from(&peer.root)
                 .start()
         },
     );
-    ended_cleanly(&peer_hid);
-    // The killed command wrote and staged `.gitdupe` whole, and was killed writing the
-    // fresh exclude file in its own private Git directory, before the rename: its region
-    // stands as it was, and the other worktree's holds that worktree's new path.
+    ended_cleanly_beside_another(s, &peer_hid);
+    // The killed command wrote and staged `.gitdupe` whole, and was killed before the rename,
+    // writing the fresh exclude file in its own private Git directory where it can be: its
+    // region stands as it was, and the other worktree's holds that worktree's new path.
     lists(s, target, in_target);
     let left: Vec<OsString> = entry_names(&private)
         .difference(&private_before)
         .cloned()
         .collect();
-    let [fresh] = &left[..] else {
-        panic!("{left:?} were left in {}", private.display());
-    };
-    let fresh_name = fresh.as_encoded_bytes();
-    assert!(
-        fresh_name.starts_with(b"git-dupe-") && fresh_name.ends_with(b".new"),
-        "{fresh:?}"
-    );
-    let partial = fs::read(private.join(fresh)).unwrap();
-    assert!(
-        partial.len() >= 512 && top.starts_with(&partial),
-        "{fresh:?} is no exclude file cut short: \"{}\"",
-        partial.escape_ascii()
-    );
+    let partial_fresh_file = inside_write.then(|| {
+        let [fresh] = &left[..] else {
+            panic!("{left:?} were left in {}", private.display());
+        };
+        let fresh_name = fresh.as_encoded_bytes();
+        assert!(
+            fresh_name.starts_with(b"git-dupe-") && fresh_name.ends_with(b".new"),
+            "{fresh:?}"
+        );
+        let partial = fs::read(private.join(fresh)).unwrap();
+        assert!(
+            partial.len() >= 512 && top.starts_with(&partial),
+            "{fresh:?} is no exclude file cut short: \"{}\"",
+            partial.escape_ascii()
+        );
+        (fresh, partial)
+    });
+    if !inside_write {
+        let left = left.len();
+        assert_eq!(left, 0, "{} holds what a kill left", private.display());
+    }
     hides_exactly(s, peer, in_peer);
     // The killed worktree's region is its old one, whole.
     let (main_then, agent_then) = match main_killed {
@@ -472,7 +505,9 @@ fn killed_beside_another_hide(s: &Scenario, name: &str, main_killed: bool) {
     }
     exclude_holds(&p, &both);
     // What the killed command left in its private Git directory is its own to leave.
-    assert!(fs::read(private.join(fresh)).unwrap() == partial);
+    if let Some((fresh, partial)) = partial_fresh_file {
+        assert!(fs::read(private.join(fresh)).unwrap() == partial);
+    }
 }
 
 #[test]

@@ -7,13 +7,20 @@
 //! git-dupe. The script appends each run's start to the directory's log, waits for the
 //! harness's answer to it, and becomes the release's own `git`, so that how Git's run ends,
 //! an exit status or a signal, reaches git-dupe as it would without the script; a run's
-//! end is read from `ps`. A thread of the harness reads the log and answers each run
+//! end is read from `ended`. A thread of the harness reads the log and answers each run
 //! started: first one `try_lock` on the lock file from a handle of its own,
 //! let go at once (S16), then the file the run waits for. git-dupe waits for the script, so
 //! the request finds the lock as git-dupe held it when it started the run; one it took and
 //! let go between starting the run and the script's first step is not seen. A lock found
 //! taken is git-dupe's only where nothing else can hold it (`Holders`); elsewhere the run
 //! is answered without a verdict.
+//!
+//! On Windows the stand-in is `platform/forwarder.rs` (`kill.rs`), which takes the script's
+//! steps and then runs Git as a child, recording its own process and forwarding the status, so
+//! that this process ends exactly when Git's run has ended.
+//!
+//! The thread holds each run's process (`platform::process_held`) before it answers, while
+//! that process waits and so stands, so that `run_ended` never reads another's number.
 //!
 //! A run's words go to a file of their own, never into the log, so that no word, one
 //! holding a newline included, can read as a record there.
@@ -27,7 +34,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use super::exclude_lock::lock_file;
-use super::executable::write_executable;
+use super::executable::write_stand_in_git;
+use super::platform::{HeldProcess, ended, process_held};
 use super::running::parent_name;
 use super::scenario::Scenario;
 
@@ -42,6 +50,8 @@ const READING: Duration = Duration::from_millis(2);
 /// process, which Git's becomes, `private` or `public` as `GIT_DIR` names the private
 /// repository or not, and its parent's name; `unanswered <n>` where the run gave up; and
 /// `answer-<n>`, the harness's answer to run `n`, which the run waits for before Git runs.
+/// `platform/forwarder.rs` follows this script step by step: a change to one is a change to
+/// the other.
 const WATCHING: &str = concat!(
     r#"#!/bin/sh
 control=${0%/*}
@@ -152,6 +162,8 @@ impl Drop for Counted {
 pub(super) struct WatchedRuns {
     control: PathBuf,
     answering: Option<Answering>,
+    /// Each run's process, held by the thread as it answers, in the order of the runs.
+    processes: Arc<Mutex<Vec<HeldProcess>>>,
     _counted: Counted,
 }
 
@@ -169,15 +181,17 @@ impl WatchedRuns {
         looks: u32,
     ) -> WatchedRuns {
         fs::create_dir(&control).unwrap_or_else(|cause| panic!("{}: {cause}", control.display()));
-        write_executable(s, &control.join("git"), WATCHING.as_bytes());
+        write_stand_in_git(s, &control, WATCHING.as_bytes());
         let release = s.release_git().as_os_str().as_encoded_bytes();
         fs::write(control.join("release"), [release, b"\n"].concat()).unwrap();
         fs::write(control.join("looks"), format!("{looks}\n")).unwrap();
         let counted = Counted::of(holders);
-        let answering = answered.then(|| Answering::start(&control, common, holders));
+        let processes = Arc::default();
+        let answering = answered.then(|| Answering::start(&control, common, holders, &processes));
         WatchedRuns {
             control,
             answering,
+            processes,
             _counted: counted,
         }
     }
@@ -185,6 +199,14 @@ impl WatchedRuns {
     /// The directory for `GIT_EXEC_PATH`.
     pub(super) fn control(&self) -> &Path {
         &self.control
+    }
+
+    /// Whether run `run`, whose process is `process`, has ended.
+    pub(super) fn run_ended(&self, run: usize, process: &str) -> bool {
+        let processes = self.processes.lock().unwrap();
+        processes
+            .get(run - 1)
+            .map_or_else(|| ended(process), HeldProcess::ended)
     }
 
     /// The events the log holds so far.
@@ -339,12 +361,18 @@ struct Answering {
 }
 
 impl Answering {
-    fn start(control: &Path, common: &Path, holders: &Arc<Holders>) -> Answering {
+    fn start(
+        control: &Path,
+        common: &Path,
+        holders: &Arc<Holders>,
+        processes: &Arc<Mutex<Vec<HeldProcess>>>,
+    ) -> Answering {
         let stop = Arc::new(AtomicBool::new(false));
         let thread = {
             let (control, common) = (control.to_path_buf(), common.to_path_buf());
             let (holders, stop) = (Arc::clone(holders), Arc::clone(&stop));
-            thread::spawn(move || answer(&control, &common, &holders, &stop))
+            let processes = Arc::clone(processes);
+            thread::spawn(move || answer(&control, &common, &holders, &processes, &stop))
         };
         Answering {
             stop,
@@ -371,14 +399,21 @@ impl Drop for Answering {
 
 /// Until `stop`, answers each run that the log in `control` records as started, in order:
 /// its verdict, then the file it waits for.
-fn answer(control: &Path, common: &Path, holders: &Holders, stop: &AtomicBool) -> Vec<Verdict> {
+fn answer(
+    control: &Path,
+    common: &Path,
+    holders: &Holders,
+    processes: &Mutex<Vec<HeldProcess>>,
+    stop: &AtomicBool,
+) -> Vec<Verdict> {
     let mut verdicts = Vec::new();
     while !stop.load(Ordering::SeqCst) {
         for event in events(control) {
-            if let Event::Started { run, .. } = event
+            if let Event::Started { run, process, .. } = event
                 && run == verdicts.len() + 1
             {
                 verdicts.push(holders.asked(common));
+                processes.lock().unwrap().push(process_held(&process));
                 let answer = control.join(format!("answer-{run}"));
                 fs::write(&answer, b"")
                     .unwrap_or_else(|cause| panic!("{}: {cause}", answer.display()));

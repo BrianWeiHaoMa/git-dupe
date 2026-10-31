@@ -126,7 +126,12 @@ fn a_killed_detach_is_completed_by_detach_force_or_settled_back_by_status() {
         leaves_the_users_text(&sweep);
         warnings(&sweep.uninterrupted, daily_warnings());
         // Before and after each of its nine Git runs, and inside the region's deletion.
-        assert_eq!(sweep.points().len(), 2 * 9 + 2, "{:?}", sweep.points());
+        assert_eq!(
+            sweep.points().len(),
+            Sweep::points_of(9),
+            "{:?}",
+            sweep.points()
+        );
         let whole = Tree::relative(&fixture.join(".git/dupe"));
         let mut reached = Vec::new();
         for &point in sweep.points() {
@@ -149,7 +154,12 @@ fn a_killed_detach_force_is_completed_by_detach_force() {
         leaves_the_users_text(&sweep);
         warnings(&sweep.uninterrupted, daily_warnings());
         // Before and after each of its four Git runs, and inside the region's deletion.
-        assert_eq!(sweep.points().len(), 2 * 4 + 2, "{:?}", sweep.points());
+        assert_eq!(
+            sweep.points().len(),
+            Sweep::points_of(4),
+            "{:?}",
+            sweep.points()
+        );
         let whole = Tree::relative(&fixture.join(".git/dupe"));
         let mut reached = Vec::new();
         for &point in sweep.points() {

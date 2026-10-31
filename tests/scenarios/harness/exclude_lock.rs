@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 
 use super::attached::region_in;
 use super::output::Output;
-use super::running::{Running, ended};
+use super::running::Running;
 use super::scenario::Scenario;
 use super::watched_runs::{Event, Holders, Verdict, WatchedRuns};
 
@@ -233,7 +233,9 @@ impl Watched {
         );
         let events = self.runs.events();
         match events.last() {
-            Some(last @ Event::Started { process, .. }) if last.listing(true) && ended(process) => {
+            Some(last @ Event::Started { run, process, .. })
+                if last.listing(true) && self.runs.run_ended(*run, process) =>
+            {
                 Some(events.len())
             }
             _ => None,

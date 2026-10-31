@@ -15,8 +15,20 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
-use super::platform::permissions;
+use super::platform::{permissions, stand_in_git_program};
 use super::scenario::Scenario;
+
+/// The `git` of the control directory `control`, which `GIT_EXEC_PATH` names: `script`, or the
+/// compiled program that follows it where a script is no `git` for git-dupe to find.
+pub fn write_stand_in_git(s: &Scenario, control: &Path, script: &[u8]) {
+    match stand_in_git_program() {
+        Some(program) => {
+            let copy = control.join("git.exe");
+            fs::copy(program, &copy).unwrap_or_else(|cause| panic!("{}: {cause}", copy.display()));
+        }
+        None => write_executable(s, &control.join("git"), script),
+    }
+}
 
 /// Writes `bytes` at `path`, below the scenario's directory, as a file of mode 0755 where
 /// there are modes, making the directories above it first, and returns once it can be run.

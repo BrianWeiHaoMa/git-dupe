@@ -11,14 +11,21 @@
 //! runs or once Git has run to its end: git-dupe's own writes fall between one run's end
 //! and the next run's start, and the two kills stand on either side of each.
 //!
+//! On Windows the control directory holds `git.exe` instead, `platform/forwarder.rs`, which
+//! takes the same steps on the same files, the script being its protocol: `Command` finds no
+//! script there and `sh` cannot name its native parent (S20, S21). It ends its parent by
+//! `TerminateProcess` and waits for that end, so that git-dupe takes no step after the kill.
+//!
 //! A kill inside a write: the run starts under a soft file size limit, which the script
 //! raises again before Git runs, so that only git-dupe's own writes meet it, and git-dupe
 //! dies of `SIGXFSZ` in the first write of its own that passes the limit, what it wrote up
-//! to the limit left in the file.
+//! to the limit left in the file. Where there is no such limit the part reports itself
+//! (`Scenario::kills_inside_writes`), and a sweep keeps its points at the Git runs.
 //!
 //! Git reports a dashed command killed by a signal with the status a shell gives it, 128
-//! plus the signal's number; that status and the script's record of whom it killed tell a
-//! delivered kill from a run that ended by itself.
+//! plus the signal's number, and hands on the 137 a `TerminateProcess` gives (S21); that
+//! status and the script's record of whom it killed tell a delivered kill from a run that
+//! ended by itself.
 //!
 //! A run is started, and waited for later, through one control directory at a time: its
 //! records are that run's. The same limit with `SIGXFSZ` ignored makes git-dupe's own
@@ -36,8 +43,9 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use super::executable::write_executable;
+use super::executable::write_stand_in_git;
 use super::output::{End, Output};
+use super::platform::file_size_limits;
 use super::running::{Running, parent_name};
 use super::scenario::Scenario;
 
@@ -47,7 +55,8 @@ const SIGXFSZ: i32 = 25;
 /// The `git` that git-dupe finds. Its files beside it: `release`, the path of the
 /// release's `git`; `kill`, the point to kill at, `before <n>` or `after <n>`, absent for
 /// none; `count`, the runs so far; `parents`, the name of each run's parent; `killed`, the
-/// point at which it killed and whom.
+/// point at which it killed and whom. `platform/forwarder.rs` follows this script step by step:
+/// a change to one is a change to the other.
 const SCRIPT: &str = concat!(
     r#"#!/bin/sh
 ulimit -S -f "$(ulimit -H -f)" || exit 125
@@ -156,7 +165,7 @@ impl Scenario {
     pub fn killing(&self, name: &str, words: &[&str]) -> Killing<'_> {
         let control = self.dir().join(name);
         fs::create_dir(&control).unwrap_or_else(|cause| panic!("{}: {cause}", control.display()));
-        write_executable(self, &control.join("git"), SCRIPT.as_bytes());
+        write_stand_in_git(self, &control, SCRIPT.as_bytes());
         fs::write(
             control.join("release"),
             [self.release_git().as_os_str().as_encoded_bytes(), b"\n"].concat(),
@@ -169,13 +178,39 @@ impl Scenario {
             started: Cell::new(false),
         }
     }
+
+    /// Whether a run can be killed inside a write of its own. Where it cannot, `part` of the
+    /// scenario, which turns on one, reports itself; the rest of the scenario runs.
+    pub fn kills_inside_writes(&self, part: &str) -> bool {
+        let limits = file_size_limits();
+        if !limits {
+            self.unavailable(
+                &format!("{part}: a kill inside a write"),
+                "Windows has no RLIMIT_FSIZE, so a sweep keeps its points at each Git run",
+            );
+        }
+        limits
+    }
+
+    /// Whether every write of a run's own can be made to fail. Where not, `part` of the
+    /// scenario, which turns on one, reports itself; the rest of the scenario runs.
+    pub fn writes_can_be_made_to_fail(&self, part: &str) -> bool {
+        let limits = file_size_limits();
+        if !limits {
+            self.unavailable(
+                &format!("{part}: a write made to fail"),
+                "Windows has no RLIMIT_FSIZE",
+            );
+        }
+        limits
+    }
 }
 
 impl Killing<'_> {
     /// Runs the command uninterrupted in the workspace `dir`, through the script, and
     /// returns what it printed and every point at which it can be killed, in the order it
-    /// reaches them: before and after each of its Git runs, then inside a write under a
-    /// limit of no block and of one.
+    /// reaches them: before and after each of its Git runs, then, where a run can be killed
+    /// there, inside a write under a limit of no block and of one.
     pub fn uninterrupted(&self, dir: &Path) -> (Output, Vec<Point>) {
         self.prepare(None);
         let output = self.git(dir).run();
@@ -185,9 +220,16 @@ impl Killing<'_> {
             runs > 0 && parents.lines().all(|parent| parent == "git-dupe"),
             "git-dupe's Git runs did not all come through the script: {parents:?}; {output:?}"
         );
+        let part = format!("git dupe {}", self.words[1].to_string_lossy());
+        let inside_write = self.scenario.kills_inside_writes(&part);
         let points = (1..=runs)
             .flat_map(|n| [Point::BeforeRun(n), Point::AfterRun(n)])
-            .chain([0, 1].map(|blocks| Point::InsideWrite { blocks }))
+            .chain(
+                [0, 1]
+                    .into_iter()
+                    .filter(|_| inside_write)
+                    .map(|blocks| Point::InsideWrite { blocks }),
+            )
             .collect();
         (output, points)
     }
@@ -205,7 +247,10 @@ impl Killing<'_> {
         let expected = match point {
             Point::BeforeRun(n) => Some(format!("before {n}")),
             Point::AfterRun(n) => Some(format!("after {n}")),
-            Point::InsideWrite { .. } => None,
+            Point::InsideWrite { .. } => {
+                assert!(file_size_limits(), "no run can be killed inside a write");
+                None
+            }
         };
         self.prepare(expected.as_deref());
         let git = match point {
@@ -225,8 +270,10 @@ impl Killing<'_> {
     /// Runs the command uninterrupted in the workspace `dir`, through the script, with
     /// every write of git-dupe's own failing: under a file size limit of no block with
     /// `SIGXFSZ` ignored, so that its first write of a byte fails with `EFBIG` and it goes
-    /// on. Fails if the script killed anything or git-dupe died of the limit.
+    /// on. Fails if the script killed anything or git-dupe died of the limit, and where
+    /// `Scenario::writes_can_be_made_to_fail` says no.
     pub fn writes_failing(&self, dir: &Path) -> Output {
+        assert!(file_size_limits(), "no write can be made to fail");
         self.prepare(None);
         let output = self
             .git(dir)
@@ -366,7 +413,7 @@ pub struct Forwarded<'s> {
 }
 
 impl Scenario {
-    /// Selects an argument prefix in either the private (`GIT_DIR` ending in `/dupe`)
+    /// Selects an argument prefix in either the private (`GIT_DIR` ending in `dupe`)
     /// or public environment. The prefix ends at a word boundary.
     pub fn forwarded(
         &self,

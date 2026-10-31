@@ -4,8 +4,8 @@
 use std::fs;
 
 use crate::harness::{
-    End, Output, Runs, Scenario, Tree, Worktree, names, private_add, private_commit, run_traced,
-    stash_untracked_line, symlink, under_each_release, write,
+    End, Output, Runs, Scenario, Tree, Worktree, name_accepted, names, private_add, private_commit,
+    run_traced, stash_untracked_line, symlink, under_each_release, write,
 };
 
 fn workspace(s: &Scenario) -> Worktree {
@@ -224,7 +224,15 @@ fn standing_foreign_paths_add_no_git_run_or_handler_pathspec_to_settling_command
 fn many_literal_foreign_paths_are_listed_once_and_name_both_worktrees_without_more_runs() {
     under_each_release(|s| {
         let main = workspace(s);
-        let marks = ["*", "?", "[", "\\", " ", "#", "!", "-"];
+        // Each path comes to stand here, so each holds a mark a name can hold here.
+        let marks: Vec<&str> = ["*", "?", "[", "\\", " ", "#", "!", "-"]
+            .into_iter()
+            .filter(|mark| {
+                let held = format!("{mark}name");
+                let case = "worktree_foreign_runs: a foreign path that stands";
+                name_accepted(s.dir(), held.as_bytes(), case)
+            })
+            .collect();
         let paths: Vec<String> = (0..128)
             .map(|index| {
                 format!(
@@ -238,7 +246,7 @@ fn many_literal_foreign_paths_are_listed_once_and_name_both_worktrees_without_mo
         let unhideable: Vec<_> = paths
             .iter()
             .enumerate()
-            .filter(|(index, _)| index % marks.len() < 3)
+            .filter(|(index, _)| ["*", "?", "["].contains(&marks[index % marks.len()]))
             .map(|(_, path)| path.clone())
             .collect();
         let beyond = String::from("bridge/leaf");
