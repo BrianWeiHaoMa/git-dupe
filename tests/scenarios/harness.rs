@@ -72,13 +72,16 @@ pub use output::{
 pub use platform::{
     MACHINES_WITHOUT_AN_ARCHIVE, architecture, as_git_spells, as_git_spells_bytes,
     backslash_separates, canonical, command_line_limit, commondir_read_through_a_link,
-    held_from_deletion, identity, permissions, second_filesystems, symlink, word,
+    held_from_deletion, identity, permissions, second_filesystems, sleeping, symlink, word,
 };
 pub use public::{
     EVERY_OBJECT, held_publicly, leaving_public_git, privately_tracked, public_git, public_status,
     publicly_tracked, watched_dupe, watched_dupe_succeeds,
 };
-pub use release_archive::{install_note, note_commands, path_for_an_install, release_archive};
+pub use release_archive::{
+    archive_extension, install_note, note_commands, path_for_an_install, release_archive,
+    windows_install_note, windows_powershell, zip_members,
+};
 pub use release_site::ReleaseSite;
 pub use releases::oldest_supported;
 pub use remotes::{

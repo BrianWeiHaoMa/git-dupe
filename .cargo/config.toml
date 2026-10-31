@@ -1,0 +1,5 @@
+# The C runtime linked into every Windows build, so that the executable a release ships,
+# one built from source, and the one the checks run need none on the machine (S25). A
+# `RUSTFLAGS` of the caller's replaces this, which `release_archive` catches on Windows.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

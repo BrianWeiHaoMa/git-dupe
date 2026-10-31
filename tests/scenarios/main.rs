@@ -88,6 +88,7 @@ mod init_template;
 mod init_worktree_config;
 mod install;
 mod install_lines;
+mod install_powershell;
 mod isolation;
 mod killed;
 mod manual_page;

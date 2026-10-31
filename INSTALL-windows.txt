@@ -1,0 +1,13 @@
+Installing git-dupe on Windows
+
+Git runs git-dupe for `git dupe ...` when the executable git-dupe.exe stands in
+a directory on PATH. Installing is that one copy, into a directory the first
+line makes where it is missing. In PowerShell, from the directory that holds
+this note, with ~\.local\bin on PATH, run:
+
+    PS> New-Item -ItemType Directory -Force ~\.local\bin
+    PS> Copy-Item git-dupe.exe ~\.local\bin\
+
+Any other directory on PATH serves the same. `git dupe help` needs the
+executable alone. Windows has no `man`, and this archive holds no manual page:
+`git dupe help` and `-h` are the documentation.

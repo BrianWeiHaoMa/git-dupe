@@ -1,11 +1,14 @@
-//! A stand-in for GitHub's releases pages, so that a check of `install.sh` asks nothing of
-//! another machine (`Composition/The checks`): an HTTP/1.1 server on `127.0.0.1`, on a
-//! port the system chose, answering what the script asks of the base `base()` names, its
-//! `GIT_DUPE_RELEASES_URL`, as GitHub answers it for a repository's releases:
+//! A stand-in for GitHub's releases pages, so that a check of an install script asks
+//! nothing of another machine (`Composition/The checks`): an HTTP/1.1 server on
+//! `127.0.0.1`, on a port the system chose, answering what the script asks of the base
+//! `base()` names, its `GIT_DUPE_RELEASES_URL`, as GitHub answers it for a repository's
+//! releases, and serving the script itself where a run fetches it first:
 //!
 //! - `<base>/latest`: a 302 to `<base>/tag/<tag>`, the latest release's page;
 //! - `<base>/tag/<tag>`: 200;
 //! - `<base>/download/<tag>/<name>`: 200 with the bytes of the file `name` it serves;
+//! - `/install.ps1`, once `with_script` gave it, with or without a release: 200 with its
+//!   bytes;
 //! - every other path, and every path where it serves no release: 404.
 //!
 //! It answers `GET` and `HEAD` alike, without a body for `HEAD`, every answer with its
@@ -24,6 +27,9 @@ use std::time::Duration;
 /// The path of the releases pages on the site.
 const BASE: &str = "/releases";
 
+/// The path of the script on the site.
+const SCRIPT: &str = "/install.ps1";
+
 /// How long the site waits for a request's head before it drops the connection.
 const PATIENCE: Duration = Duration::from_secs(30);
 
@@ -36,6 +42,7 @@ struct Release {
 pub struct ReleaseSite {
     address: SocketAddr,
     asked: Arc<Mutex<Vec<String>>>,
+    script: Arc<Mutex<Option<Vec<u8>>>>,
     stopping: Arc<AtomicBool>,
     answering: Option<JoinHandle<()>>,
 }
@@ -59,16 +66,18 @@ impl ReleaseSite {
             .unwrap_or_else(|cause| panic!("cannot listen on 127.0.0.1: {cause}"));
         let address = listener.local_addr().unwrap();
         let asked = Arc::new(Mutex::new(Vec::new()));
+        let script = Arc::new(Mutex::new(None));
         let stopping = Arc::new(AtomicBool::new(false));
         let answering = {
-            let (asked, stopping) = (Arc::clone(&asked), Arc::clone(&stopping));
+            let (asked, script) = (Arc::clone(&asked), Arc::clone(&script));
+            let stopping = Arc::clone(&stopping);
             std::thread::spawn(move || {
                 for connection in listener.incoming() {
                     if stopping.load(Ordering::SeqCst) {
                         break;
                     }
                     if let Ok(connection) = connection {
-                        answer(connection, address, release.as_ref(), &asked);
+                        answer(connection, address, release.as_ref(), &script, &asked);
                     }
                 }
             })
@@ -76,14 +85,26 @@ impl ReleaseSite {
         ReleaseSite {
             address,
             asked,
+            script,
             stopping,
             answering: Some(answering),
         }
     }
 
-    /// The base of the releases pages, as `install.sh` takes it.
+    /// The site serving `bytes` at `script_url`, whether or not it has a release.
+    pub fn with_script(self, bytes: Vec<u8>) -> ReleaseSite {
+        *self.script.lock().unwrap() = Some(bytes);
+        self
+    }
+
+    /// The base of the releases pages, as the install scripts take it.
     pub fn base(&self) -> String {
         format!("http://{}{BASE}", self.address)
+    }
+
+    /// The address of the script, for the line pasted in the place of GitHub's.
+    pub fn script_url(&self) -> String {
+        format!("http://{}{SCRIPT}", self.address)
     }
 
     /// Every request line the site was asked, in order, as `GET /releases/latest
@@ -112,6 +133,7 @@ fn answer(
     mut connection: TcpStream,
     address: SocketAddr,
     release: Option<&Release>,
+    script: &Mutex<Option<Vec<u8>>>,
     asked: &Mutex<Vec<String>>,
 ) {
     let _ = connection.set_read_timeout(Some(PATIENCE));
@@ -121,8 +143,10 @@ fn answer(
     asked.lock().unwrap().push(request.clone());
     let mut words = request.split(' ');
     let (method, target) = (words.next().unwrap_or(""), words.next().unwrap_or(""));
-    let (status, location, body) = match (method, release) {
-        ("GET" | "HEAD", Some(release)) => route(target, address, release),
+    let served_script = script.lock().unwrap().clone().filter(|_| target == SCRIPT);
+    let (status, location, body) = match (method, served_script, release) {
+        ("GET" | "HEAD", Some(script), _) => ("200 OK", None, script),
+        ("GET" | "HEAD", None, Some(release)) => route(target, address, release),
         _ => not_found(),
     };
     let mut head = format!(

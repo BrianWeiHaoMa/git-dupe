@@ -16,6 +16,8 @@ use super::sha256;
 
 mod mingit;
 
+pub(super) use mingit::windows_tar;
+
 /// Where Git's source releases are published, their digests beside them.
 const OFFICIAL_SOURCE: &str = "https://mirrors.edge.kernel.org/pub/software/scm/git";
 const DIGEST_LIST: &str = "sha256sums.asc";

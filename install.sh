@@ -19,7 +19,7 @@
 # https://github.com/BrianWeiHaoMa/git-dupe/releases, for the repository's checks, which
 # point it at a stand-in on the loopback interface, and for a mirror serving the same
 # paths: <base>/latest redirecting to <base>/tag/<tag>, and each file of a release under
-# <base>/download/<tag>/. Only this script reads it.
+# <base>/download/<tag>/. Only this script and install.ps1 read it.
 #
 # Every command stands in a function and the last line calls the first, because sh runs
 # a piped script as it arrives: a download cut short defines functions and runs nothing.

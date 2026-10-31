@@ -64,7 +64,7 @@ impl Store {
 
 /// Windows's own `tar.exe` by its full path, because a GNU `tar` on `PATH` reads `C:\…` as a
 /// host (`Composition/The checks`).
-pub(super) fn windows_tar() -> Result<PathBuf, String> {
+pub(in crate::harness) fn windows_tar() -> Result<PathBuf, String> {
     let root = std::env::var_os("SystemRoot").ok_or("SystemRoot is not set")?;
     Ok(Path::new(&root).join("System32").join("tar.exe"))
 }

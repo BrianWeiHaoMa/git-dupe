@@ -7,7 +7,8 @@
 //! git-dupe and `man` finds its page in the two directories `INSTALL` names, and nowhere
 //! else (P2, P3, S19, G24); a run that fails before the copies installs nothing, and a
 //! machine no archive is built for is refused before anything is asked (F1, N10).
-//! What the documents show of it is pinned in `install_lines`.
+//! What the documents show of it is pinned in `install_lines`; on Windows, where this file
+//! reports itself unavailable, `install_powershell` runs `install.ps1` the same way.
 
 use std::ffi::OsStr;
 use std::fs;
