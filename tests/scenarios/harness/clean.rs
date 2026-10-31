@@ -176,7 +176,8 @@ impl<'t> Comparison<'t, '_> {
     }
 
     /// The case named above: given `-C` naming a directory plain Git removes whole, plain
-    /// Git fails on `./`, and the command, which keeps it, exits 0.
+    /// Git fails on `./` where it cannot remove the directory it runs in, and the command,
+    /// which keeps it, exits 0.
     pub fn plain_fails(mut self) -> Self {
         self.plain_fails = true;
         self
@@ -290,8 +291,9 @@ impl<'t> Comparison<'t, '_> {
             assert_eq!(output.stdout, plain.stdout, "standard output; {context}");
         }
         if self.plain_fails {
-            // Plain Git's status here is its own: Git for Windows exits 0 from `./` too.
             assert_eq!(output.end, End::Code(0), "{context}");
+            let removed = platform::git_removes_the_directory_it_runs_in();
+            assert_eq!(plain.end == End::Code(0), removed, "{context}");
         } else {
             assert_eq!(output.end, plain.end, "{context}");
         }

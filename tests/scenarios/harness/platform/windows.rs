@@ -164,6 +164,12 @@ pub fn commondir_read_through_a_link() -> bool {
     false
 }
 
+/// Whether Git removes the directory it runs in once that is empty: yes, Git for Windows steps
+/// out of it first.
+pub fn git_removes_the_directory_it_runs_in() -> bool {
+    true
+}
+
 /// Whether a run can be started under a soft `RLIMIT_FSIZE`: Windows has none.
 pub fn file_size_limits() -> bool {
     false

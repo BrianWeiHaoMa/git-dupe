@@ -122,8 +122,8 @@ fn from_a_directory_below_the_root_every_hidden_path_is_spared() {
             ("vendor", &["-ffdx"]),
         ] {
             twin.clean(words).below(below).run();
-            // The same directory named by `-C`: plain Git empties it and fails on `./`,
-            // while the command keeps it and exits 0.
+            // The same directory named by `-C`: plain Git empties it and fails on `./`, where
+            // it cannot remove the directory it runs in, while the command keeps it and exits 0.
             twin.clean(words).named_by_c(below).plain_fails().run();
         }
     });

@@ -301,11 +301,14 @@ fn command_line_remote_url_is_guarded() {
             .run();
         let fatal = refusal(&output, &[b"git dupe remote remove"]);
         names(fatal, b"private remote 'extra'");
-        // The word is a URL of the public configuration too, and a path where its host is one
-        // letter: the refusal names the root, or that URL.
+        // The word is a URL of the public configuration too, and where its host is one letter
+        // it is read as that URL as well as the path: the refusal then names either.
+        let one_letter_host = text(&t.root)
+            .split_once(':')
+            .is_some_and(|(host, _)| host.len() == 1);
         assert!(
             holds(fatal, as_git_spells(&t.root).as_bytes())
-                || holds(fatal, b"the project's remote 'extra'"),
+                || (one_letter_host && holds(fatal, b"the project's remote 'extra'")),
             "{output:?}"
         );
         before.unchanged();

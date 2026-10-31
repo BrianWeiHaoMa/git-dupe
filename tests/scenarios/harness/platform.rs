@@ -186,6 +186,11 @@ mod unix {
         true
     }
 
+    /// Whether Git removes the directory it runs in once that is empty: no, it fails on `./`.
+    pub fn git_removes_the_directory_it_runs_in() -> bool {
+        false
+    }
+
     /// Whether a run can be started under a soft `RLIMIT_FSIZE`.
     pub fn file_size_limits() -> bool {
         true

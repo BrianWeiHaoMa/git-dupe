@@ -279,6 +279,8 @@ fn an_exclude_directory_warns_and_changes_nothing_under_git() {
                 .from(&dir)
                 .run();
             assert_eq!(unasked == 1, asked.end == End::Code(128), "{output:?}");
+            let gits_own = asked.lines("warning").len();
+            assert_eq!(warnings.len(), 1 + unasked + gits_own, "{output:?}");
             let after = Tree::of(&git).without_the_lock_file(&git);
             assert!(before.changed_in(&after).is_empty());
             assert!(

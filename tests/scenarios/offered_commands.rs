@@ -41,7 +41,7 @@ fn git_under(s: &Scenario, words: &[&str], root: &Path, setting: Option<&str>) -
     }
 }
 
-/// Runs `command`, as a line offers it, through `/bin/sh` from `root`.
+/// Runs `command`, as a line offers it, through the scenario's shell from `root`.
 fn run_as_offered(s: &Scenario, root: &Path, command: &[u8]) -> Output {
     run_as_offered_under(s, root, command, None)
 }
