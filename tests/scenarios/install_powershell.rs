@@ -539,7 +539,8 @@ fn a_running_executable_goes_aside_and_a_later_run_removes_it() {
         let aside = install.bin().join("git-dupe.exe.old");
         fs::create_dir_all(install.bin()).unwrap();
 
-        let sleeper = sleeping(60);
+        // Far longer than the runs below on any machine, a loaded runner most: `Running` ends it.
+        let sleeper = sleeping(600);
         let earlier = fs::read(sleeper.get_program()).unwrap();
         fs::write(&target, &earlier).unwrap();
         let running = Command::new(&target)
@@ -548,11 +549,12 @@ fn a_running_executable_goes_aside_and_a_later_run_removes_it() {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let running = Running(running);
+        let mut running = Running(running);
 
         let output = install.pasted(&site, &path);
         assert_eq!(output.end, End::Code(0), "{output:?}");
         install.holds_the_release(&output);
+        assert_eq!(running.0.try_wait().unwrap(), None, "{output:?}");
         assert!(said(&output.stdout).contains(text(&aside)), "{output:?}");
         assert!(fs::read(&aside).unwrap() == earlier, "{output:?}");
 
