@@ -8,6 +8,8 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-01
+
 ### Added
 
 - A release now ships `git-dupe-<version>-windows-x86_64.zip`, holding `git-dupe.exe`,
