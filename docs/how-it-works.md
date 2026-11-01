@@ -84,7 +84,9 @@ project/
   against the dupe unchanged.
 - **What it writes.** Of its own accord, git-dupe writes the worktree's dupe, its own
   marked region of `.git/info/exclude` (and `.git/info` when it is missing, and the
-  removal of a region whose worktree's dupe is gone), and `.gitdupe`; `git dupe clone`
+  removal of a region whose worktree's dupe is gone), the empty lock file
+  `.git/git-dupe.lock`, which it never removes and under which the worktrees of a
+  project take turns at that file, and `.gitdupe`; `git dupe clone`
   also writes the files it checks out, and `git dupe clean` runs your `git clean`,
   never deleting a hidden path, or refuses the few forms that could take one. Beyond
   that, a Git command writes where your words tell Git to. No hook, no daemon, no edit
@@ -157,6 +159,10 @@ these, where keeping Linux's and macOS's behavior is impossible or out of propor
   more, 2 more when it holds a space, and 1 more for each `"` in it and each character
   its exclude rule escapes, which is 17,000 units of paths at 1,000 paths that hold no
   space and no such character.
+- `.gitdupe` is read as UTF-8, its byte order mark and CRLF line endings dropped. What
+  Windows PowerShell 5.1's `>` writes is UTF-16: that file lists nothing, every command
+  says so in a warning, and `git dupe hide` and `unhide` refuse it until it is saved as
+  UTF-8.
 - A name stored in an index or in `.gitdupe` that is not valid UTF-8 cannot stand on a
   command line: a command that would need one there is refused, naming the path, and
   otherwise it is named in a warning.

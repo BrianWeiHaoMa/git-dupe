@@ -90,7 +90,7 @@ The minor Git releases published, oldest first, and the newest one the checks li
 
 ```console
 $ curl -s https://mirrors.edge.kernel.org/pub/software/scm/git/ | grep -oE 'git-2\.[0-9]+\.0\.tar\.xz' | grep -oE '2\.[0-9]+\.0' | sort -uV
-$ grep -oE '"2\.[0-9]+\.0"' tests/scenarios/harness/releases.rs | tr -d '"' | tail -n 1
+$ sed -n '/pub const LISTED/,/^];/p' tests/scenarios/harness/releases.rs | grep -oE '2\.[0-9]+\.0' | tail -n 1
 ```
 
 Call the second's answer `<old>`. When it is the last line of the first, go to step 3.

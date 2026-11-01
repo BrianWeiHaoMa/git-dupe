@@ -489,9 +489,9 @@ fn the_help_text_names_the_refusal() {
             let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(
                 text.contains(
-                    "a pathspec holding *, ?, [, or \\, or beginning with : and not :/ \
-                     alone, while one lies in a directory not hidden that holds nothing the \
-                     project tracks"
+                    "a pathspec holding *, ?, [, \\ off Windows, or beginning with : and not \
+                     :/ alone, while one lies in an unhidden directory the project tracks \
+                     nothing in"
                 ),
                 "{text}"
             );
