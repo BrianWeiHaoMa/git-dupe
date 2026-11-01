@@ -137,7 +137,8 @@ jobs:
           - runner: windows-2025
             suffix: windows-x86_64
             extension: zip
-            timeout: 120
+            # The first run on this runner passed 120 minutes in the scenarios and was cancelled.
+            timeout: 240
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     env:

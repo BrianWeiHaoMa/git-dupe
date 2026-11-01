@@ -34,7 +34,8 @@ jobs:
           # The label, never windows-latest, which moves to whatever image GitHub promotes;
           # four processors, and a MinGit unpacked rather than built on a cache miss.
           - runner: windows-2025
-            timeout: 120
+            # The first run on this runner passed 120 minutes in the scenarios and was cancelled.
+            timeout: 240
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     steps:
