@@ -30,6 +30,7 @@ config pull.rebase false, after each of the following; Git's output and exit
 status are unchanged:
 
   a rebase or am that ends with one stopped
+  a pull whose rebase stops with nothing unmerged, at an edit for one
   a merge, rebase, or pull whose autostash comes back with conflicts
   a cherry-pick or revert without -n that fails, leaving one stopped
   a commit that exits 1 while a cherry-pick is stopped

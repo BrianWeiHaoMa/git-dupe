@@ -63,8 +63,12 @@
 //!   that exited 1 on a detached `HEAD`, given no repository, or any repository word and no
 //!   refspec, naming `git dupe pull <remote> <branch>`; after one that exited 128 where
 //!   `--ff-only` is typed, or `pull.ff` is `only` and none of the six is, naming `git dupe
-//!   merge --no-ff` and `git dupe rebase` of `FETCH_HEAD`; and after one that exited 0
-//!   whose autostash came back with conflicts, `advice`'s line for it. Of the `pull` hints,
+//!   merge --no-ff` and `git dupe rebase` of `FETCH_HEAD`; after one whose rebase stands
+//!   stopped with nothing unmerged, at an `edit` or a `break`, which exit 0, or at a reword
+//!   whose editor failed or a todo list Git cannot read, which exit 1, the line of a stopped
+//!   rebase, Git's advice there naming plain `git commit --amend`, where at a conflict it
+//!   names only commands that fail in the project's repository; and after one that exited
+//!   0 whose autostash came back with conflicts, `advice`'s line for it. Of the `pull` hints,
 //!   the first that holds in that order follows, and the exits keep them apart: Git's
 //!   advice for no branch to merge comes with exit 1, and a pull given a URL or a path has
 //!   the remote's `HEAD` to merge, Git's advice where it cannot being the divergent-branches
@@ -78,8 +82,10 @@
 //!   question, an answer of neither giving no hint: the private `rev-parse -q --verify
 //!   HEAD` after a `push` that exited 128 owed the no-upstream hint, whose answer alone
 //!   tells a branch with no commit, exit 1, from one with commits, exit 0 (S12); and
-//!   whether the private index holds an unmerged entry, after a `pull` that exited 0,
-//!   which leaves one only where its autostash came back with conflicts (S12). For a `pull` given a
+//!   whether the private index holds an unmerged entry, after a `pull` that exited 0 with
+//!   no rebase stopped, which leaves one only where its autostash came back with conflicts
+//!   (S12), or that exited 1 with one stopped, where the entry tells a conflict from the
+//!   other stops. Whether a rebase stands stopped is read by `lstat`. For a `pull` given a
 //!   repository, the `branch.<name>.rebase` that keeps the divergent-branches hint away is
 //!   any branch's, whether or not `HEAD` was read for the tracking hint.
 //!   None follows a run among whose words is `-h` or `--help`, so that a help request's
@@ -136,8 +142,10 @@ pub enum Then {
     /// where `unnamed` holds that; after one that exited 128, the hint for divergent
     /// branches, where `diverging` holds how Git was told to meet them; in the order of a
     /// branch with no upstream, an unchosen way, a detached `HEAD`, and fast-forward only;
-    /// after a run that exited 0, the hint after an autostash that came back with
-    /// conflicts, where the index then holds an unmerged entry.
+    /// after a run that exited 0 or 1, the hint after a rebase stopped with nothing
+    /// unmerged, where one stands stopped; after one that exited 0, the hint after an
+    /// autostash that came back with conflicts, where the index then holds an unmerged
+    /// entry.
     Pull {
         unnamed: Option<Unnamed>,
         diverging: Option<Diverging>,
@@ -354,13 +362,15 @@ fn reconciling(word: &[u8]) -> bool {
 }
 
 /// A question of the private repository's state that a hint puts after the run, at most
-/// one per run (G22).
+/// one Git run for each run (G22).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Question {
     /// Whether `HEAD` names a commit.
     HeadVerifies,
     /// Whether the index holds an unmerged entry.
     Unmerged,
+    /// Whether a rebase stands stopped, read by `lstat`.
+    RebaseStopped,
 }
 
 /// Writes what follows a run that ended as `ended` against the repository `against`
@@ -369,6 +379,7 @@ pub fn after(then: Then, ended: &Outcome, against: Against) {
     let ask = |question| match question {
         Question::HeadVerifies => advice::verifies("HEAD", against),
         Question::Unmerged => advice::unmerged(against),
+        Question::RebaseStopped => advice::rebase_stopped(against),
     };
     if let Some(hint) = hint(&then, ended, ask) {
         lines::write(Level::Hint, &hint);
@@ -379,9 +390,9 @@ pub fn after(then: Then, ended: &Outcome, against: Against) {
 /// decided `then`: "did not exit 0" is any end but exit 0, a signal included, and an end
 /// named by its number is never a signal's. A run that did not start is no run. `ask`
 /// is put a question only where the hint it decides is due: whether `HEAD` names a commit
-/// after a `push` that exited 128 owed the no-upstream hint, and whether the index holds
-/// an unmerged entry after a `pull` that exited 0 (G22).
-fn hint(then: &Then, ended: &Outcome, ask: impl FnOnce(Question) -> Answer) -> Option<Vec<u8>> {
+/// after a `push` that exited 128 owed the no-upstream hint, and after a `pull` that exited
+/// 0 or 1 owed no other, what `after_the_pull` asks (G22).
+fn hint(then: &Then, ended: &Outcome, mut ask: impl FnMut(Question) -> Answer) -> Option<Vec<u8>> {
     let Outcome::Git(end) = ended else {
         return None;
     };
@@ -411,11 +422,26 @@ fn hint(then: &Then, ended: &Outcome, ask: impl FnOnce(Question) -> Answer) -> O
             diverging: Some(Diverging::FastForwardOnly),
             ..
         } if *end == End::Code(128) => Some(FAST_FORWARD_ONLY.to_vec()),
-        Then::Pull { .. } if *end == End::Code(0) => {
-            (ask(Question::Unmerged) == Answer::Yes).then(|| advice::AUTOSTASH.to_vec())
+        Then::Pull { .. } if matches!(*end, End::Code(0 | 1)) => {
+            after_the_pull(*end == End::Code(0), ask)
         }
         _ => None,
     }
+}
+
+/// The hint after a `pull` that exited 0, or 1 where `exited_0` is false, and owed no other.
+/// A rebase stopped with nothing unmerged, where Git's advice names plain `git commit
+/// --amend`, draws its line; a conflict, which also exits 1, leaves an unmerged entry and
+/// draws none, Git's advice there naming only commands that fail in the project's repository
+/// (`Holds/G19`). An `edit` or a `break` exits 0, which no conflict does, so the index is
+/// not asked there. With no rebase stopped, a `pull` that exited 0 and left an unmerged entry
+/// has an autostash that came back with conflicts (S12).
+fn after_the_pull(exited_0: bool, mut ask: impl FnMut(Question) -> Answer) -> Option<Vec<u8>> {
+    if ask(Question::RebaseStopped) == Answer::Yes {
+        let unmerged = !exited_0 && ask(Question::Unmerged) != Answer::No;
+        return (!unmerged).then(|| advice::REBASE.to_vec());
+    }
+    (exited_0 && ask(Question::Unmerged) == Answer::Yes).then(|| advice::AUTOSTASH.to_vec())
 }
 
 /// The hint after a `push` that Git refused, exit 128, for `refused`. A branch with no

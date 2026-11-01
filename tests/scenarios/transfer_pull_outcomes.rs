@@ -7,15 +7,20 @@
 //! detached hint follows exit 1 alone, with which Git's advice for it comes: a pull given a
 //! path on a detached `HEAD` has the remote's `HEAD` to merge, and where it cannot, Git
 //! exits 128 with the divergent-branches or fast-forward-only advice, whose hint follows.
+//! A rebase a pull began that stops with nothing unmerged, at an `edit` or a `break`, a
+//! reword whose editor failed, or a todo list Git cannot read, draws the line of a stopped
+//! rebase, because Git's advice there names plain `git commit --amend`, where its advice at
+//! a conflict names only commands that fail in the project's repository (`Holds/G19`).
 //! The hints `transfer_advice` pins, and the autostash's (`autostash_hint`), stay as they
 //! are.
 
 use std::fs;
 
 use crate::harness::{
-    End, Scenario, Transfer, commit_here, committing, diverged, dupe_succeeds, gits_then_one_hint,
-    hinted, holds, private_add, private_commit, remote_moves_on, succeeded_without_a_hint, text,
-    transfer_asked_after, under_each_release, unhinted, without_maintenance, write,
+    End, STOPPED_REBASE_HINT as STOPPED_REBASE, Scenario, Transfer, commit_here, committing,
+    diverged, dupe_succeeds, gits_then_one_hint, hinted, holds, private_add, private_commit,
+    remote_moves_on, sequence_editor, succeeded_without_a_hint, text, transfer_asked_after,
+    under_each_release, unhinted, without_maintenance, write,
 };
 
 const DETACHED: &[u8] = b"'git dupe pull <remote> <branch>'";
@@ -280,5 +285,62 @@ fn the_fast_forward_only_hint_follows_a_128_that_got_no_other_hint() {
         dupe_succeeds(s, root, &["config", "pull.rebase", "false"]);
         let ours = unhinted(s, root, &["pull"]);
         assert_eq!(ours.end, End::Code(128), "{ours:?}");
+    });
+}
+
+#[test]
+fn a_pull_whose_rebase_stops_with_nothing_unmerged_names_the_private_rebase() {
+    under_each_release(|s| {
+        without_maintenance(s);
+        let t = s.pushed_workspace("workspace");
+        let root = &t.root;
+        committing(s, root);
+        diverged(s, &t, "notes");
+        let abort = || dupe_succeeds(s, root, &["rebase", "--abort"]);
+
+        // An `edit` and a `break` exit 0, through the words and through an alias.
+        sequence_editor(s, root, "edit", "sed '1s/^pick /edit /'");
+        dupe_succeeds(
+            s,
+            root,
+            &["config", "alias.rebasing", "pull --rebase=interactive"],
+        );
+        for words in [&["pull", "--rebase=interactive"][..], &["rebasing"]] {
+            let edit = hinted(s, root, words, &STOPPED_REBASE);
+            assert_eq!(edit.end, End::Code(0), "{edit:?}");
+            abort();
+        }
+        // The stop is read by `lstat`: an `edit` adds no Git run (G22).
+        let words = &["pull", "--rebase=interactive"];
+        transfer_asked_after(s, root, words, End::Code(0), true, &[]);
+        abort();
+        sequence_editor(
+            s,
+            root,
+            "break",
+            "awk '{ print } NR == 1 { print \"break\" }'",
+        );
+        let stopped = hinted(s, root, words, &STOPPED_REBASE);
+        assert_eq!(stopped.end, End::Code(0), "{stopped:?}");
+        abort();
+
+        // A reword whose editor failed, and a todo list Git cannot read, exit 1, as a
+        // conflict does: the index tells them apart, one run fixed for that end (G22).
+        sequence_editor(s, root, "reword", "sed '1s/^pick /reword /'");
+        dupe_succeeds(s, root, &["config", "core.editor", "false"]);
+        let reword = hinted(s, root, words, &STOPPED_REBASE);
+        assert_eq!(reword.end, End::Code(1), "{reword:?}");
+        abort();
+        let unmerged: &[&[&str]] = &[&["ls-files", "-u", "-z"]];
+        transfer_asked_after(s, root, words, End::Code(1), true, unmerged);
+        abort();
+        dupe_succeeds(s, root, &["config", "core.editor", "true"]);
+        sequence_editor(s, root, "unreadable", "sed '1s/^pick /pickk /'");
+        let unreadable = hinted(s, root, words, &STOPPED_REBASE);
+        assert_eq!(unreadable.end, End::Code(1), "{unreadable:?}");
+        abort();
+
+        // A help request: Git's output alone.
+        unhinted(s, root, &["pull", "--rebase=interactive", "-h"]);
     });
 }

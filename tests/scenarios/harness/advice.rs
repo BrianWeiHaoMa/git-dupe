@@ -8,9 +8,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::executable::write_executable;
 use super::files::copy;
 use super::fresh::FreshDirectory;
 use super::output::{End, Output, holds, names};
+use super::platform::as_git_spells;
 use super::scenario::{Git, Scenario};
 use super::trace::{run_traced, run_words};
 use super::tree::Tree;
@@ -31,6 +33,17 @@ pub const STOPPED_REBASE_HINT: [&[u8]; 6] = [
     b"'git dupe rebase --skip'",
     b"'git dupe rebase --abort'",
 ];
+
+/// Makes the private sequence editor of the workspace at `root` the script `name`, which
+/// rewrites the todo list it is given through `program`, a `sed` or `awk` program.
+pub fn sequence_editor(s: &Scenario, root: &Path, name: &str, program: &str) {
+    let script = s.dir().join(name);
+    let body = format!("#!/bin/sh\n{program} \"$1\" > \"$1.new\" && mv \"$1.new\" \"$1\"\n");
+    write_executable(s, &script, body.as_bytes());
+    s.private(root)
+        .git(["config", "sequence.editor", &as_git_spells(&script)])
+        .succeeds();
+}
 
 /// The workspace at `root` copied aside, to be put back at the same path, so that the
 /// paths Git's output names are the same in every execution.

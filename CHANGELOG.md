@@ -51,6 +51,12 @@ Every change a user of git-dupe would notice, newest first, in the form of
   refusal, status 128, the workspace attached, where it fetched into no tracking ref and
   reported a remote with no branch.
 
+### Fixed
+
+- `git dupe pull --rebase=interactive` that stops with nothing unmerged, at an `edit` for
+  one, where Git's own advice names plain `git commit --amend`, now ends with the same
+  `hint:` as `git dupe rebase` stopped there, naming the `git dupe` commands.
+
 ## [0.3.3] - 2026-10-30
 
 ### Added

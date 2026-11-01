@@ -85,7 +85,8 @@ use crate::runner::{Against, End, Run};
 
 // `--skip` is described by the commit it leaves out: at an `edit`, `break`, or reword
 // stop the commit stopped at is already made, and `--skip` keeps it.
-const REBASE: &[u8] = b"a private rebase that stopped goes on with 'git dupe rebase --continue' \
+pub(super) const REBASE: &[u8] =
+    b"a private rebase that stopped goes on with 'git dupe rebase --continue' \
     once 'git dupe add <path>' has marked each conflict resolved, \
     'git dupe commit --amend' has amended the commit an edit or a reword stopped at, or \
     'git dupe rebase --edit-todo' has mended a todo list Git could not read, as the stop \
@@ -460,6 +461,12 @@ pub(super) fn verifies(name: &'static str, against: Against) -> Answer {
         return Answer::Unanswered;
     }
     asked(Question::Verifies(name), against)
+}
+
+/// Whether a rebase stands stopped in the private repository `against` names, read by
+/// `lstat`, no Git run.
+pub(super) fn rebase_stopped(against: Against) -> Answer {
+    stopped(against, A_REBASE_STOPPED)
 }
 
 /// Whether the index of the private repository `against` names holds an unmerged entry:

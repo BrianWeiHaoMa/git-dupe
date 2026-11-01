@@ -166,24 +166,62 @@ fn a_pull_hints_in_the_tables_order_the_first_that_holds() {
     ] {
         let then = pull(None, Some(diverging));
         assert_eq!(unasked(&then, &git(128)).as_deref(), Some(line));
-        // Exit 1, a signal numbered 128, or no run: none.
-        for ended in [
-            git(1),
-            git(129),
-            Outcome::Git(End::Signal(128)),
-            Outcome::Refused,
-        ] {
+        // Exit 1 with no rebase stopped, a signal numbered 128, or no run: none.
+        let not_stopped = [(Question::RebaseStopped, Answer::No)];
+        assert_eq!(answering(&then, &git(1), &not_stopped), None);
+        for ended in [git(129), Outcome::Git(End::Signal(128)), Outcome::Refused] {
             assert_eq!(unasked(&then, &ended), None, "{then:?}");
         }
     }
-    for ended in [git(1), git(128), git(2), Outcome::Git(End::Signal(2))] {
+    for ended in [git(128), git(2), Outcome::Git(End::Signal(2))] {
         assert_eq!(unasked(&pull(None, None), &ended), None);
     }
 }
 
-/// After a `pull` that exited 0, whatever else the guard decided, the index is asked once,
-/// and an unmerged entry, which only an autostash that came back with conflicts leaves
-/// there, draws the autostash's line; nothing is asked after any other end.
+/// The hint, where every question put is one of `answers`, in their order, each once.
+fn answering(then: &Then, ended: &Outcome, answers: &[(Question, Answer)]) -> Option<Vec<u8>> {
+    let mut put = answers.iter();
+    let hint = hint(then, ended, |question| {
+        let (expected, answer) = put.next().expect("asked more than `answers`");
+        assert_eq!(question, *expected, "{then:?}");
+        *answer
+    });
+    assert!(put.next().is_none(), "{then:?}: left unasked");
+    hint
+}
+
+/// A rebase a `pull` left stopped draws its line where nothing is unmerged: after exit 0 an
+/// `edit` or a `break`, no conflict, and the index is not asked; after exit 1 the index
+/// tells a conflict, which draws none, from a failed reword or an unreadable todo list.
+#[test]
+fn a_pull_left_stopped_with_nothing_unmerged_draws_the_rebases_line() {
+    let then = pull(None, None);
+    let stopped = (Question::RebaseStopped, Answer::Yes);
+    let unmerged = |answer| (Question::Unmerged, answer);
+    assert_eq!(
+        answering(&then, &git(0), &[stopped]).as_deref(),
+        Some(advice::REBASE)
+    );
+    assert_eq!(
+        answering(&then, &git(1), &[stopped, unmerged(Answer::No)]).as_deref(),
+        Some(advice::REBASE)
+    );
+    for answer in [Answer::Yes, Answer::Unanswered] {
+        assert_eq!(
+            answering(&then, &git(1), &[stopped, unmerged(answer)]),
+            None
+        );
+    }
+    // No rebase stopped, after exit 1: nothing more is asked, and no hint.
+    let none = (Question::RebaseStopped, Answer::No);
+    assert_eq!(answering(&then, &git(1), &[none]), None);
+    let unanswered = (Question::RebaseStopped, Answer::Unanswered);
+    assert_eq!(answering(&then, &git(1), &[unanswered]), None);
+}
+
+/// After a `pull` that exited 0 with no rebase stopped, whatever else the guard decided, the
+/// index is asked once, and an unmerged entry, which only an autostash that came back with
+/// conflicts leaves there, draws the autostash's line; nothing is asked after any other end.
 #[test]
 fn a_pull_that_exited_0_asks_about_unmerged_entries_once() {
     for then in [
@@ -191,17 +229,15 @@ fn a_pull_that_exited_0_asks_about_unmerged_entries_once() {
         pull(Some(Unnamed::NoUpstream), Some(Diverging::Unchosen)),
         pull(Some(Unnamed::Detached), Some(Diverging::FastForwardOnly)),
     ] {
-        let unmerged = |answer| answered(&then, &git(0), Question::Unmerged, answer);
+        let unmerged = |answer| {
+            let not_stopped = (Question::RebaseStopped, Answer::No);
+            answering(&then, &git(0), &[not_stopped, (Question::Unmerged, answer)])
+        };
         assert_eq!(unmerged(Answer::Yes).as_deref(), Some(advice::AUTOSTASH));
         assert_eq!(unmerged(Answer::No), None);
         assert_eq!(unmerged(Answer::Unanswered), None);
     }
-    for ended in [
-        git(1),
-        git(128),
-        Outcome::Git(End::Signal(9)),
-        Outcome::Refused,
-    ] {
+    for ended in [git(128), Outcome::Git(End::Signal(9)), Outcome::Refused] {
         assert_eq!(unasked(&pull(None, None), &ended), None);
     }
     // Neither `push` nor any other command asks it.

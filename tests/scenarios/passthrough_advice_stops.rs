@@ -8,11 +8,11 @@
 //! `lstat`, so the hint adds no Git run (G22).
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::harness::{
-    End, STOPPED_REBASE_HINT as REBASE, Scenario, as_git_spells, hinted, private_add,
-    private_commit, run_traced, text, under_each_release, unhinted, write, write_executable,
+    End, STOPPED_REBASE_HINT as REBASE, Scenario, hinted, private_add, private_commit, run_traced,
+    sequence_editor, text, under_each_release, unhinted, write,
 };
 
 /// An attached workspace whose private `main`, checked out, holds three commits of
@@ -37,17 +37,6 @@ fn three_commits(s: &Scenario) -> PathBuf {
         private_commit(s, &root);
     }
     root
-}
-
-/// Makes the private sequence editor of the workspace at `root` the script `name`, which
-/// rewrites the todo list it is given through `program`, a `sed` or `awk` program.
-fn sequence_editor(s: &Scenario, root: &Path, name: &str, program: &str) {
-    let script = s.dir().join(name);
-    let body = format!("#!/bin/sh\n{program} \"$1\" > \"$1.new\" && mv \"$1.new\" \"$1\"\n");
-    write_executable(s, &script, body.as_bytes());
-    s.private(root)
-        .git(["config", "sequence.editor", &as_git_spells(&script)])
-        .succeeds();
 }
 
 #[test]
