@@ -40,9 +40,15 @@ fn a_job_names_its_child_until_it_is_killed() {
     };
     let process = row.split_whitespace().next().unwrap().to_owned();
     assert!(!ended(&process), "{row}");
-    // Its parent has exited, and this process still holds a handle on it.
-    let rows = group.running().unwrap();
-    assert!(!rows.iter().any(|row| row.starts_with(&exited)), "{rows:?}");
+    // Its parent has exited, and this process still holds a handle on it: the job lets it go
+    // a moment after `wait` returns, which a loaded machine stretches.
+    loop {
+        let rows = group.running().unwrap();
+        if !rows.iter().any(|row| row.starts_with(&exited)) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{rows:?}");
+    }
     group.kill();
     while !group.running().unwrap().is_empty() {
         assert!(Instant::now() < deadline, "the child still runs");

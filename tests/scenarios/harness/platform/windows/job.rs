@@ -95,9 +95,10 @@ pub struct Group {
 
 impl Group {
     /// The processes of the job that have not ended, each its identifier and its name from
-    /// the system's process list. The job's one listing decides who runs: the job lists no
-    /// process that has exited, and a process the later snapshot does not hold is still one
-    /// that ran when the job was asked, so that a child outliving its parent is never missed.
+    /// the system's process list. The job's one listing decides who runs: the job lets a
+    /// process that has exited go a moment after it ends, so that a caller polls, and a
+    /// process the later snapshot does not hold is still one that ran when the job was asked,
+    /// so that a child outliving its parent is never missed.
     pub fn running(&self) -> Result<Vec<String>, String> {
         let listed = self
             .listed()
