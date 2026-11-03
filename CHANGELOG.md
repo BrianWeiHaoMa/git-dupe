@@ -8,6 +8,8 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-03
+
 ### Fixed
 
 - `git dupe detach` counts a private remote configured with `pushurl` and no `url` as
