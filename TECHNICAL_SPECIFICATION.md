@@ -91,7 +91,7 @@ Operations:
   - for settle, the region paths, the released paths, and the foreign paths, both defined under **Settle**;
   - for `Remove`, the region paths and the released paths among the paths `Remove` asks about;
   - for `status` and `add`, the scope (`Holds/G12`, `Holds/G13, G14`); for `hide`, the operands;
-  - for `clean`, read from the index `clean` reads, the ancestors of the region paths that hold a `.git` entry and, under `-X` without `-d` or a pathspec, the region paths at which a directory or a symbolic link stands.
+  - for `clean`, read from the index `clean` reads, the ancestors of the region paths that hold a `.git` entry and, under `-X` without `-d` or a pathspec, the region paths at which a directory or a symbolic link stands, and, given a non-literal pathspec, the outermost ancestor below the root of each region path.
 - **Start** reads the region as the command begins, its rules read back into paths, a rule that does not parse ignored, and returns them for the front to hold.
 - **Settle** takes that starting region, recomputes the hidden paths, replaces the region with one rule per region path, takes the public listing under the region paths, the released paths, and the foreign paths, and asks one public `git check-ignore --no-index -v -n -z --stdin` from the root, each path written `./<path>`, about:
   - every hidden path;
@@ -108,7 +108,7 @@ Operations:
   - `check-ignore` exiting 1 means no path matched and is not a failure; any other failure of it is one `warning:` that exposure could not be checked, the command's status unchanged.
   - A listing that settle needs before the replacement and cannot take — the private one, as a killed `init` leaves the repository until it is run again (G6, G21), or a run that cannot start — leaves the region as it is and is one `warning:`, the private listing's naming `git dupe init`, the command's status unchanged. So does a `.gitdupe` set aside as unreadable, whose `warning:` is F5's naming the file.
   - The public listing is taken after the replacement, because its query holds the foreign paths of the file as replaced; one that cannot be taken is one `warning:` that exposure could not be checked, as a failed `check-ignore` is, the region as replaced and the command's status unchanged.
-  - A spawn that fails with `E2BIG` is G23's refusal instead (`Holds/G23`); the same failure inside a handler ends the command with Git's message and status.
+  - A spawn that fails with `E2BIG` is G23's refusal instead (`Holds/G23`); the same failure inside a handler is G23's refusal too, and a listing a handler needs that Git runs and fails ends the command with Git's message and status.
 - **Remove** takes the hidden paths as they stood and deletes the region with its markers by the same replacement. It asks the same `check-ignore` about those still present and about each path of the deleted region that is neither among them nor below one and is present by `lstat`, released as settle releases a path of the starting region (G9), and takes the public listing under the region paths among them and the released paths, which names every publicly tracked path at or below any of them. It returns, for `detach`, the warnings naming:
   - the ones public Git does not ignore;
   - among the ones the run reports ignored and the public listing does not name, those equal to or below a path of another worktree's region as the file stood, each naming that worktree (G3);
@@ -285,7 +285,7 @@ Limits:
 
 - a private repository configured for sparse checkout, as a template can configure it, has `reset -q` mark the paths outside its sparse set skip-worktree; they stay unwritten, and neither `ls-files --deleted` nor `diff` names them (S7);
 - on Windows a private commit holding a name Windows cannot hold fails at `reset -q` with Git's message and status, leaving the index empty and no file written, the workspace attached (E4, S23);
-- where `core.symlinks` is false `checkout-index` writes a private symbolic link as a file holding its target, as Git does for any repository (`Product`, the seventh accepted limit).
+- on Windows, where `core.symlinks` is false, `checkout-index` writes a private symbolic link as a file holding its target, as Git does for any repository (`Product`, the seventh accepted limit).
 
 ### G3. `detach`
 
@@ -444,7 +444,7 @@ So the listing names what the index holds under the query paths in every spellin
 
 **Non-literal pathspecs.** A word among the user's pathspecs — the non-option words before `--` and every word after it — that holds `*`, `?`, `[`, or, on Linux and macOS, `\`, or begins with `:` and is not the word `:/` alone, read by its bytes alone, is a **non-literal pathspec**. This is G11's and G13's test of a word for `*`, `?`, and `[` (`Guards`), with `\` added on Linux and macOS, because Git there reads it as an escape in a pathspec it does not take literally, where on Windows it is a separator to Git (S23) and to this test (G29); and every `:`-word but `:/` itself is refused, where `status` and `add` take `:/<path>` as a root-relative path they write themselves, because `clean`'s word reaches Git as typed and Git reads short magic after `:/`, `:/!<path>` being an exclusion. So under `--literal-pathspecs`, where Git reads such a word as a literal path, and for `top`, `literal`, and `icase` magic on a word holding none of the four characters, which leave no file of a matched directory out, the refusal below is over-inclusive.
 
-Every proper ancestor below the root of a region path under which that listing names no path is a **loose directory**, one that Git's `clean` reads whole (S4). Given a non-literal pathspec and a loose directory, the command is refused, 128, before the `clean` run, naming the pathspec, the outermost loose directory, and a hidden path below it (G16). Given no non-literal pathspec, the listing is not asked under the ancestors and no loose directory is looked for.
+Every proper ancestor below the root of a region path under which that listing names no path is a **loose directory**, one that Git's `clean` reads whole (S4). Given a non-literal pathspec and a loose directory, the command is refused, 128, before the `clean` run, naming the pathspec, the outermost loose directory, and a hidden path below it (G16). Given no non-literal pathspec, the listing is not asked under the outermost ancestors and no loose directory is looked for.
 
 **The run** is `git clean` in a public run from the user's directory with every stream inherited and the user's words, with `-e` options inserted before the user's `--` when there is one and appended otherwise, after the user's own `-e` options, so that git-dupe's are the later and deciding patterns; except that when the user's last word is an `-e` or `--exclude` that lacks its value the run is the user's words alone, which Git refuses as a usage error before it deletes anything (S4). git-dupe adds no pathspec (S4).
 
@@ -543,6 +543,7 @@ Limits, each a comparison of names as the product's G18 admits:
 - On Windows a path reached through a UNC name, `\\localhost\C$\proj` or `file://localhost/C$/proj`, which Git opens and whose real path is no local one (S13, S24), is not seen through either.
 - Nor is a `/<path>` that Git for Windows's shell reads below Git's own top directory (S13), for a project inside Git's installation.
 - Nor is a public URL `/proc/<number>/cwd/<path>` (S13), where that process stands being nothing git-dupe can ask.
+- Nor is an `ssh://` word whose user part holds an encoded `/`: Git decodes the word before it splits the host (S13), where the form here bounds the authority first, so the host and path Git connects to are not compared.
 
 ### G19. Everything else
 
