@@ -146,7 +146,13 @@ fn decide(workspace: &Workspace) -> Result<(), NotDetached> {
     if head.end == End::Code(0) {
         commits.extend(head.stdout);
     }
-    let remotes = run(&["config", "-z", "--get-regexp", r"^remote\..*\.url$"]);
+    // A remote with a `pushurl` and no `url` is one Git lists, and so is configured (G3).
+    let remotes = run(&[
+        "config",
+        "-z",
+        "--get-regexp",
+        r"^remote\..*\.(url|pushurl)$",
+    ]);
     let remote_configured = step(remotes, &[0, 1]).map_err(unreadable)?.end == End::Code(0);
     let mut words = vec!["rev-list", "-n", "1", "--branches", "--tags", "--stdin"];
     // With no remote configured every commit counts, whatever stale remote-tracking refs

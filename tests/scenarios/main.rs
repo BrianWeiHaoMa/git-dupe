@@ -70,6 +70,7 @@ mod clone_refusals;
 mod clone_runs;
 mod detach;
 mod detach_killed;
+mod detach_push_url_remote;
 mod detach_refusals;
 mod docs;
 mod done_when;

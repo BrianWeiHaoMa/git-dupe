@@ -129,10 +129,11 @@ or a commit of a branch, a tag, a stash entry, or `HEAD` is on no remote.
   are refused when a word names the project's repository, one of its remotes, or one of
   its worktrees, and `push`, `pull`, and `fetch` also when a remote of the dupe's
   configuration does. A URL Git rewrites through `url.<base>.insteadOf`, a path
-  beginning with `~` and a user's name, and a remote defined by a file in a `remotes` or
-  `branches` directory are not seen through; nor, on Windows, are a UNC path to a local
-  drive, a `/<path>` that Git for Windows's shell reads below Git's own installation, and
-  a public remote reached through that shell's `/proc`.
+  beginning with `~` and a user's name, a remote defined by a file in a `remotes` or
+  `branches` directory, and an `ssh://` URL whose user part holds an encoded `/`, which
+  Git decodes before it finds the host, are not seen through; nor, on Windows, are a UNC
+  path to a local drive, a `/<path>` that Git for Windows's shell reads below Git's own
+  installation, and a public remote reached through that shell's `/proc`.
 - **One command at a time in a worktree.** git-dupe commands in one worktree must not
   overlap each other or a public Git command that writes to that worktree, and one
   person or agent works in a worktree at a time; nothing is promised when they do.

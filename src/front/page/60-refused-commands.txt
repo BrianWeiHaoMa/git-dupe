@@ -25,8 +25,10 @@ for pull and fetch, branch.<name>.remote.
 The refusal names the place, and git dupe git for a destination you mean:
 git dupe git push runs Git's push unguarded. This is a comparison of names,
 not a proof that a destination is private: a URL Git rewrites through
-url.<base>.insteadOf, a path beginning with ~ and a user's name, and a remote
-defined by a file in a remotes or branches directory are not seen through.
+url.<base>.insteadOf, a path beginning with ~ and a user's name, a remote
+defined by a file in a remotes or branches directory, and an ssh:// URL whose
+user part holds an encoded /, which Git decodes before it finds the host, are
+not seen through.
 
 git dupe clean is refused, deleting nothing, given a pathspec that is not a
 literal path, one holding *, ?, [, or \, or beginning with : other than :/

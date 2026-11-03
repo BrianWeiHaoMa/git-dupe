@@ -10,6 +10,8 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ### Fixed
 
+- `git dupe detach` counts a private remote configured with `pushurl` and no `url` as
+  configured, so that commits pushed there no longer refuse it as if no remote were set.
 - `git dupe clean -X` without `-d` no longer deletes untracked files under a hidden
   directory spelled in another case than `.gitdupe` spells it, on macOS and on Windows,
   while the project tracks a file there, nor through a Windows junction standing at a
