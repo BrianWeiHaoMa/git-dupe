@@ -60,8 +60,14 @@ impl Scenario {
             private_remote: at("-private.git"),
         };
         daily_state(self, &transfer.root);
-        self.bare_repository(&transfer.public_remote);
-        self.bare_repository(&transfer.private_remote);
+        for remote in [&transfer.public_remote, &transfer.private_remote] {
+            self.bare_repository(remote);
+            // From 2.47.0 a push starts maintenance detached here, which can still be
+            // writing when a scenario compares the remote's tree.
+            self.git(["config", "maintenance.auto", "false"])
+                .from(remote)
+                .succeeds();
+        }
         self.linked_worktree(&transfer.root, &transfer.linked);
         let public_remote = transfer.public_remote.to_str().expect("a UTF-8 path");
         for words in [
