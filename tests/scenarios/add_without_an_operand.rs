@@ -123,6 +123,31 @@ fn a_last_option_lacking_its_value_is_gits_usage_error_and_hides_nothing() {
 }
 
 #[test]
+fn a_directory_to_hide_is_refused_over_an_unreadable_list_though_its_last_option_lacks_a_value() {
+    under_each_release(|s| {
+        let dir = workspace(s);
+        write(&dir, "tools/run.sh", b"private\n");
+        write(&dir, ".gitdupe", b"\xff\xfen\0o\0t\0e\0s\0\n\0");
+        let gitdupe = fs::read(dir.join(".gitdupe")).unwrap();
+        let rules = region_rules(&dir);
+
+        // As `hide` would refuse it, the value given or not (F5, G13).
+        for words in [&["add", "tools/"][..], &["add", "tools/", "--chmod"]] {
+            let refused = s.git(["dupe"].iter().chain(words)).from(&dir).run();
+            assert_eq!(refused.end, End::Code(128), "{words:?}: {refused:?}");
+            let fatal = refused.lines("fatal");
+            assert_eq!(fatal.len(), 1, "{words:?}: {refused:?}");
+            names(fatal[0], b".gitdupe");
+        }
+        assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), gitdupe);
+        assert_eq!(region_rules(&dir), rules);
+
+        // With nothing to hide, nothing is refused, and the words are Git's to refuse.
+        refused_by_git(s, &dir, &["add", "notes/a.md", "--chmod"]);
+    });
+}
+
+#[test]
 fn a_form_finding_nothing_hidden_names_both_ways_on() {
     under_each_release(|s| {
         let dir = s.dir().join("project");

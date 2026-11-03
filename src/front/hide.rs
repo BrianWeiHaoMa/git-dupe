@@ -160,7 +160,8 @@ pub enum Hiding {
     Add,
     /// `add -n`: nothing is written, and each path that would be hidden is named.
     DryRun,
-    /// `add` whose words Git will refuse: nothing is written, and nothing is named.
+    /// `add` whose words Git will refuse: nothing is written, and nothing is named, but
+    /// the refusals stand, as `hide` would refuse the path (F5, G13).
     RefusalsAlone,
 }
 
@@ -182,7 +183,10 @@ pub fn hide_paths(
         return Err(refuse(refusal, publicly_tracked));
     }
     if let Hiding::RefusalsAlone = hiding {
-        return Ok(());
+        return hidden
+            .gitdupe
+            .unreadable()
+            .map_or(Ok(()), |cause| Err(unreadable(cause)));
     }
     if let Hiding::DryRun = hiding {
         for path in keeper::hiding(&hidden, paths) {
@@ -405,6 +409,13 @@ fn unhidden_line(path: &[u8], removed: bool, stays: &Stays) -> Vec<u8> {
     [path, head, &tail].concat()
 }
 
+/// The refusal while `.gitdupe` cannot be read, naming `cause` (F5).
+fn unreadable(cause: &io::Error) -> Outcome {
+    outcome::refuse(
+        format!(".gitdupe cannot be read as a file ({cause}); nothing was changed").as_bytes(),
+    )
+}
+
 /// The lines of an edit: the `hint:` lines `hints` words from the changed paths, a
 /// `warning:` when a symbolic link became a regular file, and the end of a staging run
 /// that failed, the file written.
@@ -414,12 +425,7 @@ fn edited(
 ) -> Result<(), Outcome> {
     let edited = match edit {
         Ok(edited) => edited,
-        Err(NotEdited::Unreadable(cause)) => {
-            return Err(outcome::refuse(
-                format!(".gitdupe cannot be read as a file ({cause}); nothing was changed")
-                    .as_bytes(),
-            ));
-        }
+        Err(NotEdited::Unreadable(cause)) => return Err(unreadable(&cause)),
         Err(NotEdited::NotWritten(cause)) => {
             return Err(outcome::refuse(
                 format!("cannot write .gitdupe ({cause}); nothing was changed").as_bytes(),

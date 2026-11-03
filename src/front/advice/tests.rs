@@ -494,6 +494,8 @@ fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick_and_the_stop_besi
     for typed in [
         &["commit", "--amend", "--allow-empty"][..],
         &["commit", "--allow-empty", "-m", "x", "--amend"],
+        &["commit", "--amend", "--dry-run"],
+        &["commit", "--dry-run", "--am"],
     ] {
         assert_eq!(
             decision(typed, &End::Code(1), &[]),

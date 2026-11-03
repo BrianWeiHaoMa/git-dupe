@@ -18,7 +18,8 @@
 //!   `checkout` and `switch` hint away are matched exactly: a bundle or an abbreviation of
 //!   `--detach` or `-q` is not read, so a hint may follow where Git printed no advice,
 //!   never one the state makes false. So are `commit`'s `--allow-empty`, of which
-//!   `--allow-empty-message` is no spelling, and the `--quit` of `merge` and `rebase`.
+//!   `--allow-empty-message` is no spelling, and `--dry-run`, under which the named command
+//!   would amend nothing, and the `--quit` of `merge` and `rebase`.
 //!   `commit`'s `--amend` is read in every prefix Git reads as it (`reads_as_amend`), and
 //!   the `-m` of `checkout` and `switch` in a bundle too (`reads_as_merge`). `cherry-pick`'s and `revert`'s `-n` is read in a bundle too
 //!   (`reads_as_no_commit`), because the line's `--continue` would commit what it was
@@ -199,7 +200,7 @@ const FAMILIES: [Family; 13] = [
     },
     Family {
         word: b"commit",
-        excluding: Some(|word| word == b"--allow-empty"),
+        excluding: Some(|word| matches!(word, b"--allow-empty" | b"--dry-run")),
         requiring: Some(reads_as_amend),
         trigger: Trigger::ExitedOne,
         line: EMPTY_AMEND,

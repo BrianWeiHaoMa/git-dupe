@@ -25,8 +25,9 @@ pub const NO_REMOTE_CHOSEN: &[u8] = b"to push private history, 'git dupe remote 
 /// line true; given a repository, `rejected` names it.
 pub const REJECTED: &[u8] = b"where a private push is rejected because the branch's upstream \
     holds commits the branch lacks, 'git dupe pull', or 'git dupe fetch' and then a merge or \
-    rebase, brings them here before the next push; plain 'git pull' and 'git fetch' act on \
-    the project's repository";
+    rebase, brings them here before the next push, a pull of branches that have diverged \
+    only once it is told how to reconcile them; plain 'git pull' and 'git fetch' act on the \
+    project's repository";
 
 /// The hint after a `pull` that exited 1 on a branch with no upstream.
 pub const NOT_TRACKING: &[u8] = b"the current private branch has no upstream to pull from: \
@@ -136,7 +137,9 @@ pub fn detached(remote: &[u8]) -> Vec<u8> {
 /// path, it fetches the remote's `HEAD` alone. `pull` merges into the branch checked out,
 /// so that its line says on which branch to run it, or it would bring the commits into
 /// another branch and leave the one pushed behind; the local branch has a placeholder of
-/// its own, because a refspec can send it to a branch of another name.
+/// its own, because a refspec can send it to a branch of another name. A pull of branches
+/// that have diverged stops, exit 128, until something says how to reconcile them (S13),
+/// where the `pull` hint names the settings, so that its line says that too.
 pub fn rejected(given: Option<&[u8]>) -> Vec<u8> {
     let Some(given) = given else {
         return REJECTED.to_vec();
@@ -152,7 +155,8 @@ pub fn rejected(given: Option<&[u8]>) -> Vec<u8> {
         &remote,
         b" <branch>', run on the local branch the push sent ('git dupe switch \
             <local-branch>' first where HEAD is on another), brings them here before the next \
-            push, and, where that fetch updates ",
+            push, a pull of branches that have diverged only once it is told how to reconcile \
+            them, and, where that fetch updates ",
         &remote,
         b"/<branch>, so does it followed by a merge or rebase of ",
         &remote,

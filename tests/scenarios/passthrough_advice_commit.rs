@@ -162,6 +162,12 @@ fn an_amend_that_refuses_ends_with_one_hint() {
         let ambiguous = unhinted(s, &root, &["commit", "--a", "--no-edit"]);
         assert_eq!(ambiguous.end, End::Code(129), "{ambiguous:?}");
 
+        // Under `--dry-run` the named command would amend nothing.
+        for word in ["--amend", "--amen"] {
+            let dry = unhinted(s, &root, &["commit", word, "--dry-run", "--no-edit"]);
+            assert_eq!(dry.end, End::Code(1), "{word}: {dry:?}");
+        }
+
         // A hook's refusal exits 1 too: the line is conditioned, and `--allow-empty` keeps
         // it away.
         s.private(&root)

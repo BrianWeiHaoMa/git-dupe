@@ -40,11 +40,12 @@ Every change a user of git-dupe would notice, newest first, in the form of
   private `add`, `stash drop`, `reset --hard`, and `stash pop`, where Git from 2.55.0 keeps
   the local change as a stash entry and names plain commands.
 - The hint after an amend that would leave the commit empty names `--allow-empty` added to
-  the command as typed, so that `--only <path>` stands, and it follows `--am`, `--ame`, and
-  `--amen`, which Git reads as `--amend`.
+  the command as typed, so that `--only <path>` stands, it follows `--am`, `--ame`, and
+  `--amen`, which Git reads as `--amend`, and it no longer follows `--dry-run`.
 - The hint after a rejected `git dupe push <remote> <branch>` says the pull runs on the
   local branch pushed, switching to it first, where it used to bring the commits into
-  whichever branch was checked out.
+  whichever branch was checked out, and the hint after any rejected push says a pull of
+  branches that have diverged brings the commits in only once told how to reconcile them.
 - The hint after a `push` from a detached `HEAD` writes `HEAD:refs/heads/<branch>`, which a
   tag of the branch's name on the remote does not make ambiguous.
 - The hint at a stopped rebase names `git dupe commit --allow-empty` for a commit the replay

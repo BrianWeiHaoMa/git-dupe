@@ -18,7 +18,11 @@ use crate::harness::{
 
 const UPSTREAM: &[u8] = b"'git dupe push -u origin HEAD'";
 const DETACHED: &[u8] = b"'git dupe push origin HEAD:refs/heads/<branch>'";
-const REJECTED: [&[u8]; 2] = [b"'git dupe pull'", b"'git dupe fetch'"];
+const REJECTED: [&[u8]; 3] = [
+    b"'git dupe pull'",
+    b"'git dupe fetch'",
+    b"only once it is told how to reconcile them",
+];
 const NOT_TRACKING: [&[u8]; 2] = [
     b"'git dupe pull <remote> <branch>'",
     b"'git dupe branch --set-upstream-to=<remote>/<branch>'",
@@ -288,9 +292,14 @@ fn a_rejected_push_names_pull_and_fetch() {
             b"run on the local branch the push sent",
             b"'git dupe switch <local-branch>' first where HEAD is on another",
             b"'git dupe fetch origin'",
+            b"only once it is told how to reconcile them",
         ];
         let ours = hinted(s, root, &["push", "origin", "main"], &named);
         assert_eq!(ours.end, End::Code(1), "{ours:?}");
+        // The state the words are conditioned for: the branches have diverged, nothing says
+        // how to reconcile them, and the pull the hint names stops.
+        let unchosen = s.git(["dupe", "pull", "origin", "main"]).from(root).run();
+        assert_eq!(unchosen.end, End::Code(128), "{unchosen:?}");
         // A help request, or a `--help` Git takes as the value of `-o`.
         for words in [&["push", "-h"][..], &["push", "-o", "--help"]] {
             unhinted(s, root, words);
