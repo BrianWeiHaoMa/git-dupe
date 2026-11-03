@@ -86,6 +86,8 @@ fn clone_git_run_sequences_do_not_follow_private_file_counts() {
                     "config",
                     "config",
                     "config",
+                    "config",
+                    "config",
                     "remote",
                     "fetch",
                     "for-each-ref",

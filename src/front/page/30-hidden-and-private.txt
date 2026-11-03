@@ -12,8 +12,9 @@ ignores only with -f. git dupe add docs/notes.md hides that file alone, by
 tracking it, and .gitdupe does not list it. .gitdupe can also be edited by
 hand, one literal path per line, in UTF-8: a byte order mark and a carriage
 return at the end of a line are dropped, and a file that begins with a UTF-16
-byte order mark lists no path, is named in a warning, and refuses git dupe
-hide and unhide until it is saved again.
+byte order mark cannot be read: it is named in a warning, what the managed
+region hid stays hidden, and git dupe hide, unhide, and clean refuse until it
+is saved again.
 
 git dupe unhide notes takes notes off .gitdupe; the files under it that the
 private repository tracks stay hidden. git dupe rm --cached docs/notes.md

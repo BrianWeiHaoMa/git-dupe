@@ -15,6 +15,14 @@ pub fn top_literal_exclude(path: &[u8]) -> Vec<u8> {
     [&b":(top,literal,exclude)"[..], path].concat()
 }
 
+/// `:(top,literal,icase)<path>`, for the one listing `clean` asks alone: the index entries
+/// at or below the path in every spelling of its ASCII case (S4), as Git's `clean` reads an
+/// ignore rule under `core.ignoreCase` (S18). Whatever the listing names, git-dupe goes on
+/// comparing by bytes.
+pub fn top_literal_icase(path: &[u8]) -> Vec<u8> {
+    [&b":(top,literal,icase)"[..], path].concat()
+}
+
 /// `:(top,glob,exclude)<exact>`, for `status` alone: the non-empty `path` kept out, and
 /// nothing below it. `<exact>` is the path with `\` before each byte a glob reads, and its
 /// last ASCII byte other than `/`, or its last byte where it has none, as the bracket
@@ -124,6 +132,10 @@ mod tests {
             b":(top,literal)a b/*[x]\xe9\r"
         );
         assert_eq!(top_literal(b":x"), b":(top,literal):x");
+        assert_eq!(
+            top_literal_icase(b"a b/*\xe9"),
+            b":(top,literal,icase)a b/*\xe9"
+        );
         assert_eq!(
             top_literal_exclude(b"notes/a b\xe9"),
             b":(top,literal,exclude)notes/a b\xe9"

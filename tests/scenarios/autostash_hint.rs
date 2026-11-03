@@ -4,8 +4,8 @@
 //! under `--quit`, which `pull` lacks. One `hint:` follows Git's output, naming
 //! `git dupe add`, `git dupe stash drop`, `git dupe reset --hard`, and `git dupe stash pop`,
 //! whether `--autostash` or the configuration asked for the autostash. A merge stopped by
-//! its own conflicts exits 1 and gets none, as does a pull stopped by its merge's or its
-//! rebase's conflicts; a stopped rebase gets its own line; a `--quit`, which exits 0
+//! its own conflicts exits 1 and gets none, as does a pull stopped by its merge's
+//! conflicts; a stopped rebase, a pull's included, gets its own line; a `--quit`, which exits 0
 //! leaving its conflicts unmerged and any autostash unapplied in the stash, gets none. The
 //! question is one `ls-files -u -z` after a run that exited 0 and left no stop, and none
 //! after any other end (G22).
@@ -326,9 +326,8 @@ fn a_pull_whose_autostash_comes_back_with_conflicts_ends_with_the_same_hint() {
             &["pull", "--autostash", "--no-rebase", "--no-edit"],
         );
         assert_eq!(clean.end, End::Code(0), "{clean:?}");
-        // A pull stopped by its merge's conflicts, or its rebase's, exits 1: none, Git's
-        // advice there naming a bare commit or a rebase that fails in the project's
-        // repository.
+        // A pull stopped by its merge's conflicts exits 1: none, Git's advice there naming
+        // a bare commit. Stopped by its rebase's, it gets the stop's line (`Holds/G18`).
         s.private(&root)
             .git(["reset", "-q", "--hard", "start"])
             .succeeds();
@@ -339,7 +338,7 @@ fn a_pull_whose_autostash_comes_back_with_conflicts_ends_with_the_same_hint() {
         assert_eq!(conflicted.end, End::Code(1), "{conflicted:?}");
         assert!(unmerged(s, &root));
         s.git(["dupe", "merge", "--abort"]).from(&root).succeeds();
-        let stopped = unhinted(s, &root, &["pull", "--rebase"]);
+        let stopped = hinted(s, &root, &["pull", "--rebase"], &STOPPED_REBASE_HINT);
         assert_eq!(stopped.end, End::Code(1), "{stopped:?}");
         s.git(["dupe", "rebase", "--abort"]).from(&root).succeeds();
     });

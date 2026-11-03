@@ -49,8 +49,7 @@ pub enum Kept {
     Differs,
     /// A directory stands where the checked-out version has a file.
     Directory,
-    /// It lies beyond this symbolic link, the outermost among its ancestors, where Git
-    /// does not look.
+    /// It lies beyond this symbolic link, the outermost among its ancestors.
     BeyondALink(Vec<u8>),
 }
 

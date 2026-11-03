@@ -10,12 +10,12 @@
 //! one warning. A foreign path is named only where public Git ignores it and the listing
 //! does not name it, and never where the region is left as it is (G27). A released or
 //! foreign path's warning names `git dupe hide` when `hide` would take it, which the
-//! guards decide over the same two listings, `.gitdupe` being a region path always, and
-//! only while `.gitdupe` can be read as a file, which `hide` rewrites: no further Git run
-//! asks (G9, G11, G22, G25, G27).
+//! guards decide over the same two listings, `.gitdupe` being a region path always: no
+//! further Git run asks (G9, G11, G22, G25, G27).
 //!
-//! The private listing that settle cannot take leaves the region as it is, because
-//! without it the hidden paths are not known and a rule would be dropped. The public
+//! A `.gitdupe` that cannot be read, and a private listing that settle cannot take, leave
+//! the region as it is, because without either the hidden paths are not known and a rule
+//! would be dropped, what it hid then reaching public Git (F5, G6). The public
 //! listing comes after the replacement, because its query holds the foreign paths of the
 //! file as replaced; one that cannot be taken is one warning that exposure was not
 //! checked, the region as replaced (`Composition/Keeper`). The command keeps its status
@@ -27,7 +27,7 @@ use std::io;
 
 use super::exposure::{self, Asked};
 use super::foreign::Foreign;
-use super::gitdupe::{self, SetAside, Source};
+use super::gitdupe::{self, SetAside};
 use super::hidden::{self, HiddenPaths};
 use super::region::{self, StartingRegion};
 use super::{Failed, listing};
@@ -50,10 +50,13 @@ enum Listing {
 
 pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
     let listed = gitdupe::read(workspace);
-    let mut warnings: Vec<Vec<u8>> = listed.set_aside.iter().map(set_aside_line).collect();
-    if let Source::Unreadable(cause) = &listed.source {
-        warnings.push(unreadable_line(cause));
+    if let Some(cause) = listed.unreadable() {
+        return Settled {
+            warnings: vec![unreadable_line(cause)],
+            refused: None,
+        };
     }
+    let mut warnings: Vec<Vec<u8>> = listed.set_aside.iter().map(set_aside_line).collect();
     let privately_tracked = match listing::private(workspace) {
         Ok(tracked) => tracked,
         Err(failed) => return stopped(warnings, failed, Listing::Private),
@@ -92,7 +95,6 @@ pub fn settle(workspace: &Workspace, starting: &StartingRegion) -> Settled {
     let listings = Listings {
         hidden: &hidden,
         publicly_tracked: &publicly_tracked,
-        gitdupe: &listed.source,
     };
     let asked = listings.asked(&released, &standing, &foreign);
     // A question that failed, a signal included, is its warning alone: the command keeps
@@ -123,12 +125,10 @@ fn query(hidden: &HiddenPaths, released: &[&[u8]], standing: &[&[u8]]) -> Vec<Ve
         .collect()
 }
 
-/// What settle's two listings and `.gitdupe` said, which each path it asks about is read
-/// against.
+/// What settle's two listings said, which each path it asks about is read against.
 struct Listings<'l> {
     hidden: &'l HiddenPaths,
     publicly_tracked: &'l BTreeSet<Vec<u8>>,
-    gitdupe: &'l Source,
 }
 
 impl<'l> Listings<'l> {
@@ -176,12 +176,10 @@ impl<'l> Listings<'l> {
 
     /// Whether `git dupe hide -- <path>`, run from the root, would hide the released `path`
     /// again: a path whose offered operand `hide` reads as that literal path
-    /// (`operand::offered`), a `.gitdupe` the keeper can rewrite,
-    /// which one that cannot be read as a file is not (`edit`), and none of `hide`'s
-    /// refusals over the listings settle took, which hold the path and `.gitdupe` (F5, G11).
+    /// (`operand::offered`), and none of `hide`'s refusals over the listings settle took,
+    /// which hold the path and `.gitdupe` (F5, G11).
     fn hideable(&self, path: &[u8]) -> bool {
         operand::literal(&operand::offered(path)).is_ok()
-            && !matches!(self.gitdupe, Source::Unreadable(_))
             && decision::refusal(
                 &[path.to_vec()],
                 gitdupe::NAME,
@@ -227,7 +225,7 @@ fn unreadable_line(cause: &io::Error) -> Vec<u8> {
     [
         b".gitdupe cannot be read as a file (",
         cause.to_string().as_bytes(),
-        b") and hides nothing",
+        b"); the managed region is left as it is and exposure was not checked",
     ]
     .concat()
 }
@@ -274,11 +272,9 @@ mod tests {
         let standing: [&[u8]; 1] = [b"theirs"];
         let query = query(&hidden, &released, &standing);
         let tracked = BTreeSet::new();
-        let source = Source::Absent;
         let listings = Listings {
             hidden: &hidden,
             publicly_tracked: &tracked,
-            gitdupe: &source,
         };
         let others = Vec::new();
         let foreign = Foreign::of(&others);

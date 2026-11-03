@@ -16,7 +16,7 @@ fetch are also refused when a URL that the private repository's configuration
 gives any of its remotes names such a place, the refusal naming that remote
 and git dupe remote remove; when a member of a remote group, a word of the
 value of any remotes.<group> key, names one, whatever the command's own words
-name, the refusal naming the key and git dupe config --unset remotes.<group>;
+name, the refusal naming the key and git dupe config --unset-all remotes.<group>;
 and, given no repository, when the default remote Git takes in its place is a
 URL or path that names one: for push, the first set of
 branch.<name>.pushRemote, remote.pushDefault, and branch.<name>.remote, and

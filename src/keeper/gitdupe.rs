@@ -47,6 +47,16 @@ pub struct Listed {
     pub source: Source,
 }
 
+impl Listed {
+    /// Why the file is unreadable, where it is (F5).
+    pub fn unreadable(&self) -> Option<&io::Error> {
+        match &self.source {
+            Source::Unreadable(cause) => Some(cause),
+            _ => None,
+        }
+    }
+}
+
 /// Where the bytes of `.gitdupe` came from.
 pub enum Source {
     /// A regular file at the root, with its permissions.

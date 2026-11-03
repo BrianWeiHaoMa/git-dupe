@@ -138,7 +138,7 @@ fn listed_path_beyond_a_link_warns_without_losing_other_exposure_answers() {
         let output = s.git(["dupe", "detach"]).from(&t.root).run();
         succeeded(&output);
         let mut expected = daily_warnings();
-        expected.push(b"linked/x lies beyond a symbolic link, where public Git does not look; whether it is ignored was not asked".to_vec());
+        expected.push(b"linked/x lies beyond the symbolic link linked; public Git was not asked whether it ignores the path".to_vec());
         warnings(&output, expected);
         before.after_detach(&t);
         unchanged(&target, &s.dir().join("target"));

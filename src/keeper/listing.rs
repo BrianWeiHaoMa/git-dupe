@@ -50,7 +50,7 @@ pub fn staged_deletions(workspace: &Workspace) -> Result<BTreeSet<Vec<u8>>, Fail
 /// index and not a hook's. A list that does not fit on the command line is `TooLong`
 /// naming how many paths it carried.
 pub fn public(workspace: &Workspace, query: &[Vec<u8>]) -> Result<BTreeSet<Vec<u8>>, Failed> {
-    let run = public_listing(query).from(workspace.root());
+    let run = public_listing(query, pathspec::top_literal).from(workspace.root());
     listed(run, Some(query.len()))
 }
 
@@ -59,25 +59,22 @@ pub fn public(workspace: &Workspace, query: &[Vec<u8>]) -> Result<BTreeSet<Vec<u
 /// The same listing as `public`, run from the user's directory with that variable kept,
 /// as the user's command runs, so that a relative value names the same index for both:
 /// `clean` decides by it its nested repositories and which directory at a hidden path
-/// Git enters (`Holds/G16`).
+/// Git enters (`Holds/G16`). Each query path is written `:(top,literal,icase)<path>`, so
+/// that the listing also names what Git's `clean` enters under `core.ignoreCase` (S18).
 pub fn users_index(query: &[Vec<u8>]) -> Result<BTreeSet<Vec<u8>>, Failed> {
     listed(
-        public_listing(query).in_the_users_index(),
+        public_listing(query, pathspec::top_literal_icase).in_the_users_index(),
         Some(query.len()),
     )
 }
 
-/// One public `ls-files` of the paths at or below `query`, each written
-/// `:(top,literal)<path>`, which name the same paths from any directory (S4).
-fn public_listing<'r>(query: &[Vec<u8>]) -> Run<'r> {
+/// One public `ls-files` of the paths at or below `query`, each written by `pathspec`,
+/// whose `top` magic names the same paths from any directory (S4).
+fn public_listing<'r>(query: &[Vec<u8>], pathspec: fn(&[u8]) -> Vec<u8>) -> Run<'r> {
     let words = ["ls-files", "-z", "--full-name", "--"]
         .map(Word::from)
         .into_iter()
-        .chain(
-            query
-                .iter()
-                .map(|path| Word::naming(pathspec::top_literal(path), path)),
-        );
+        .chain(query.iter().map(|path| Word::naming(pathspec(path), path)));
     Run::public(words).own_paths().capture_output()
 }
 

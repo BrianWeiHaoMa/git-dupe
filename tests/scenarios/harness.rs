@@ -55,7 +55,8 @@ pub use documents::{is_git_dupe, shown_command_lines, shown_powershell_lines};
 pub use exclude_lock::{lock_is_free, lock_path};
 pub use executable::write_executable;
 pub use files::{
-    copy, entry_names, junction, mode, mode_is, name, name_accepted, set_mode, text, word_of, write,
+    copy, entry_names, equates_spellings, junction, mode, mode_is, name, name_accepted, set_mode,
+    text, word_of, write,
 };
 pub use fresh::FreshDirectory;
 pub use front::{general_text, usage_line};

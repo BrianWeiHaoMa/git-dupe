@@ -106,7 +106,7 @@ fn words_of(runs: &Runs, command: &str) -> Vec<Vec<Vec<u8>>> {
 }
 
 fn listed_under(path: &str) -> Vec<u8> {
-    format!(":(top,literal){path}").into_bytes()
+    format!(":(top,literal,icase){path}").into_bytes()
 }
 
 #[test]

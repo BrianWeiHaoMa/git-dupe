@@ -225,19 +225,22 @@ fn a_hand_edited_release_warns_once_with_a_working_hide_command() {
 }
 
 #[test]
-fn an_unreadable_gitdupe_blocks_the_released_directorys_hide_command() {
+fn an_unreadable_gitdupe_releases_nothing_and_refuses_the_hide_command() {
     under_each_release(|s| {
         let dir = workspace(s);
         write(&dir, "scratch/todo.txt", b"private\n");
         s.git(["dupe", "hide", "scratch"]).from(&dir).succeeds();
         private_commit(s, &dir);
         assert!(region_rules(&dir).iter().any(|rule| rule == b"/scratch"));
-        // A symbolic link whose target is gone stands where the file stood: it lists
-        // nothing, and `hide` cannot rewrite it.
+        // A symbolic link whose target is gone stands where the file stood: it cannot be
+        // read, so the region stands, and `hide` cannot rewrite it.
         fs::remove_file(dir.join(".gitdupe")).unwrap();
         symlink("gone", dir.join(".gitdupe")).unwrap();
         let output = s.git(["dupe", "status"]).from(&dir).succeeds();
-        released_warning(&output, "scratch", false);
+        let warnings = output.lines("warning");
+        assert_eq!(warnings.len(), 1, "{output:?}");
+        assert!(warnings[0].starts_with(b".gitdupe "), "{output:?}");
+        assert!(region_rules(&dir).iter().any(|rule| rule == b"/scratch"));
         let refused = s.git(["dupe", "hide", "--", "scratch"]).from(&dir).run();
         assert_eq!(refused.end, End::Code(128), "{refused:?}");
         let fatal = refused.lines("fatal");

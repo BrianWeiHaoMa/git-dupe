@@ -33,8 +33,8 @@ alone, and [What it is for](use-cases.md) the uses it was made for.
   not read it. Nothing is lost, but until then a public `git add -A` would stage it, so
   move the path or change the rule.
 - **What if the project later adds a file at my path?** A public pull or checkout
-  overwrites yours. Commit first; `git dupe restore` brings it back; then one repository
-  has to give the path up.
+  overwrites yours. Commit first; `git dupe restore <path>` brings it back; then one
+  repository has to give the path up.
 - **How do I get out?** `git dupe detach` removes the worktree's dupe and its own region
   of `.git/info/exclude`, leaving the rest of that file but the region of a worktree
   whose dupe is gone, leaves every file on disk, `.gitdupe` included, and warns which

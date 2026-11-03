@@ -333,16 +333,13 @@ fn directory_at_gitdupe_warns_and_does_not_use_the_staged_list() {
         let dir = fixture_attached(s, "workspace");
         write(&dir, ".gitdupe", b"notes\n");
         private_add(s, &dir, ".gitdupe");
+        s.git(["dupe", "status"]).from(&dir).succeeds();
         fs::remove_file(dir.join(".gitdupe")).unwrap();
         fs::create_dir(dir.join(".gitdupe")).unwrap();
         write(&dir, "conf/local.ini", b"private\n");
         private_add(s, &dir, "conf/local.ini");
-        steady(
-            s,
-            &dir,
-            &[b"/.gitdupe", b"/conf/local.ini"],
-            &[&[b".gitdupe"]],
-        );
+        // What cannot be read lists nothing: the region stands as it stood (F5, G6).
+        steady(s, &dir, &[b"/.gitdupe", b"/notes"], &[&[b".gitdupe"]]);
     });
 }
 
@@ -396,6 +393,45 @@ fn caller_pathspec_index_and_relative_repository_variables_preserve_settle() {
             fs::read(dir.join(".git/dupe/index")).unwrap(),
             private_index
         );
+    });
+}
+
+/// F5, G6: while `.gitdupe` cannot be read the hidden paths are not known, so what the
+/// region hid stays hidden and one warning names the file, whatever else would be said.
+#[test]
+fn an_unreadable_gitdupe_keeps_the_region_and_says_nothing_else() {
+    under_each_release(|s| {
+        let dir = fixture_attached(s, "workspace");
+        write(&dir, ".gitdupe", b"notes\n");
+        write(&dir, "notes/saved.md", b"saved\n");
+        write(&dir, "notes/unsaved.md", b"unsaved\n");
+        private_add(s, &dir, ".gitdupe");
+        private_add(s, &dir, "notes/saved.md");
+        steady(s, &dir, &[b"/.gitdupe", b"/notes"], &[]);
+        let exclude = fs::read(dir.join(".git/info/exclude")).unwrap();
+        write(&dir, ".gitdupe", b"\xff\xfen\0o\0t\0e\0s\0\r\0\n\0");
+        write(&dir, "sub/kept.txt", b"unrelated\n");
+
+        for from in [&dir, &dir.join("sub")] {
+            let status = s.git(["dupe", "status"]).from(from).succeeds();
+            let warnings = status.lines("warning");
+            assert_eq!(warnings.len(), 1, "{status:?}");
+            assert!(warnings[0].starts_with(b".gitdupe "), "{status:?}");
+            assert_eq!(fs::read(dir.join(".git/info/exclude")).unwrap(), exclude);
+            let public = s.git(["status", "--porcelain"]).from(&dir).succeeds();
+            assert!(!holds(&public.stdout, b"notes"), "{public:?}");
+        }
+
+        // A refusal of another command settles the same way (R3).
+        let refused = s.git(["dupe", "stash", "-u"]).from(&dir).run();
+        refused_stash_untracked(s, &refused);
+        assert_eq!(refused.lines("warning").len(), 1, "{refused:?}");
+
+        // Saved again, it hides what it hid, and the warning goes.
+        write(&dir, ".gitdupe", b"notes\n");
+        let status = s.git(["dupe", "status"]).from(&dir).succeeds();
+        assert!(status.lines("warning").is_empty(), "{status:?}");
+        assert_eq!(fs::read(dir.join(".git/info/exclude")).unwrap(), exclude);
     });
 }
 

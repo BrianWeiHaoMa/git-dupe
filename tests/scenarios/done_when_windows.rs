@@ -95,7 +95,8 @@ fn the_spellings_of_windows_mean_what_they_name() {
         let lower = in_lower_case_drive(&root);
         destination_refused(s, &root, &["dupe", "push", &lower, "main:leak"]);
 
-        // What PowerShell 5.1's `>` writes begins with a UTF-16 mark and lists nothing.
+        // What PowerShell 5.1's `>` writes begins with a UTF-16 mark and cannot be read:
+        // the region holds what it held, and `clean` is refused naming the file.
         let utf_16: Vec<u8> = "scratch\r\n"
             .encode_utf16()
             .flat_map(u16::to_le_bytes)
@@ -108,13 +109,15 @@ fn the_spellings_of_windows_mean_what_they_name() {
             .filter(|line| holds(line, b".gitdupe"))
             .collect();
         assert_eq!(warned.len(), 1, "{status:?}");
-        let visible = |s: &Scenario| s.git(["status", "--porcelain"]).from(&root).succeeds();
-        assert!(
-            !holds(&visible(s).stdout, b"scratch/"),
-            "nothing stands in it yet"
-        );
-        write(&root, r"scratch\x", b"seen\n");
-        assert!(holds(&visible(s).stdout, b"scratch/"), "{:?}", visible(s));
+        assert!(region_rules(&root).contains(&b"/scratch".to_vec()));
+        write(&root, r"scratch\x", b"private\n");
+        let visible = s.git(["status", "--porcelain"]).from(&root).succeeds();
+        assert!(!holds(&visible.stdout, b"scratch/"), "{visible:?}");
+        let refused = s.git(["dupe", "clean", "-n"]).from(&root).run();
+        assert_eq!(refused.end, End::Code(128), "{refused:?}");
+        let fatal = refused.lines("fatal");
+        assert_eq!(fatal.len(), 1, "{refused:?}");
+        names(fatal[0], b".gitdupe");
 
         // A hidden path below a directory that is not hidden: the developer rewrites the
         // file, as `hide` refuses to while it is unreadable, and one command settles it, so

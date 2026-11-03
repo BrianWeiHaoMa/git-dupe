@@ -30,12 +30,13 @@ config pull.rebase false, after each of the following; Git's output and exit
 status are unchanged:
 
   a rebase or am that ends with one stopped
-  a pull whose rebase stops with nothing unmerged, at an edit for one
+  a pull whose rebase stops, at a conflict or at an edit
   a merge, rebase, or pull whose autostash comes back with conflicts
   a cherry-pick or revert without -n that fails, leaving one stopped
   a commit that exits 1 while a cherry-pick is stopped
   a commit --amend without --allow-empty that exits 1, as empty ones do
   a checkout or switch without --detach or -q that detaches HEAD
+  a checkout -m or switch -m whose local changes come back with conflicts
   a branch -d, in any spelling, that exits 1
   a failed push that names no remote while the configuration chooses none
   a push or pull on a branch with no upstream, even one with no commit
@@ -45,6 +46,7 @@ status are unchanged:
   a pull that cannot reconcile divergent branches
   a pull told to fast-forward only that refuses
   an add of a path the private repository ignores
+  an add given no path that does nothing, as Git's does
 
 A push or pull on such a branch, or a push to an upstream of another name,
 gets its hint where Git refuses it given no refspec and either no remote or

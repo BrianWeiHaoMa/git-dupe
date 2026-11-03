@@ -17,7 +17,7 @@ use crate::harness::{
 };
 
 const UPSTREAM: &[u8] = b"'git dupe push -u origin HEAD'";
-const DETACHED: &[u8] = b"'git dupe push origin HEAD:<branch>'";
+const DETACHED: &[u8] = b"'git dupe push origin HEAD:refs/heads/<branch>'";
 const REJECTED: [&[u8]; 2] = [b"'git dupe pull'", b"'git dupe fetch'"];
 const NOT_TRACKING: [&[u8]; 2] = [
     b"'git dupe pull <remote> <branch>'",
@@ -285,6 +285,8 @@ fn a_rejected_push_names_pull_and_fetch() {
         // Given a repository, the hint names it, the destination that rejected the push.
         let named = [
             &b"'git dupe pull origin <branch>'"[..],
+            b"run on the local branch the push sent",
+            b"'git dupe switch <local-branch>' first where HEAD is on another",
             b"'git dupe fetch origin'",
         ];
         let ours = hinted(s, root, &["push", "origin", "main"], &named);

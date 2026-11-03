@@ -10,7 +10,7 @@ It writes every private file missing from the working tree, .gitdupe among
 them, so that the hidden paths are hidden here too. A file or directory
 already present is kept as it is: a warning names each one that differs,
 and "git dupe status" shows it modified; "git dupe commit -a" keeps it, and
-"git dupe restore" replaces it. Below a file or symbolic link that stands
+"git dupe restore <path>" replaces it. Below a file or symbolic link that stands
 where the private repository has a directory, nothing is written.
 
 Unlike "git clone", it makes no new directory, takes no option but -b, and

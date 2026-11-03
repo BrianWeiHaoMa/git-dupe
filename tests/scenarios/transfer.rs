@@ -254,7 +254,7 @@ fn a_remote_groups_members_are_compared_whatever_the_words_name() {
             s.git(["dupe", "git", "config", key, &value])
                 .from(&t.root)
                 .succeeds();
-            let unset = format!("git dupe config --unset {key}");
+            let unset = format!("git dupe config --unset-all {key}");
             for words in [
                 &["push", "g", "main:leak"][..],
                 &["push", "origin", "main"],
@@ -274,7 +274,7 @@ fn a_remote_groups_members_are_compared_whatever_the_words_name() {
             }
             let listed = s.git(["dupe", "remote", "-v"]).from(&t.root).run();
             assert_eq!(listed.end, End::Code(0), "{listed:?}");
-            s.git(["dupe", "config", "--unset", key])
+            s.git(["dupe", "config", "--unset-all", key])
                 .from(&t.root)
                 .succeeds();
         }

@@ -135,9 +135,8 @@ fn warn(written: &Written) {
 fn obstructed(path: &[u8], standing: Standing) -> Vec<u8> {
     let what: &[u8] = match standing {
         Standing::SymbolicLink => {
-            b" was kept: it is a symbolic link, which Git does not \
-            write through, so the private files below it were not written; move it aside, \
-            then '"
+            b" was kept: it is a symbolic link, so the private files below it were not \
+            written; move it aside, then '"
         }
         Standing::File => {
             b" was kept: it is a file, not a directory, so the private files \
@@ -176,7 +175,7 @@ fn kept(path: &[u8], why: &Kept) -> Vec<u8> {
             path,
             b" was kept: it lies beyond the symbolic link ",
             link,
-            b", where Git does not look; move the link aside, then '",
+            b"; move the link aside, then '",
             &restore_command(link),
             b"' run from the root writes the private files below it",
         ]

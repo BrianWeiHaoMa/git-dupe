@@ -25,9 +25,10 @@ pub const IGNORED_HINT: [&[u8]; 2] = [
 
 /// The commands the hint after a private rebase that stopped names, at a conflict, an
 /// `edit` or `break` stop, a reword whose editor failed, or a todo list Git could not read.
-pub const STOPPED_REBASE_HINT: [&[u8]; 6] = [
+pub const STOPPED_REBASE_HINT: [&[u8]; 7] = [
     b"'git dupe add <path>'",
     b"'git dupe commit --amend'",
+    b"'git dupe commit --allow-empty'",
     b"'git dupe rebase --edit-todo'",
     b"'git dupe rebase --continue'",
     b"'git dupe rebase --skip'",

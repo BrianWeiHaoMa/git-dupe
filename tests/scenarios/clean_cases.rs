@@ -70,7 +70,7 @@ fn a_line_added_to_gitdupe_since_the_last_command_is_spared_before_the_region_ho
 /// workspace being an entry of its own. The link is the hidden path's only way to what stands at
 /// it, so while a hidden path has a link among its ancestors, every form is refused,
 /// deleting nothing, naming the path and the outermost such link, and saying that Git
-/// does not follow the link and can delete it (G16). The link leads inside the
+/// can delete the link, and the refusal says what git-dupe cannot do (G16). The link leads inside the
 /// workspace or outside it, to a directory or to a repository, is ignored or not, stands
 /// where a privately tracked file's directory stood, or leads to a directory holding
 /// another link.
@@ -155,7 +155,8 @@ fn a_hidden_path_beyond_a_symbolic_link_refuses_every_form_deleting_nothing() {
                 let rest = without(refusal[0], beyond);
                 names(&rest, link);
                 assert!(!holds(&rest, &[link, b"/"].concat()), "{context}");
-                names(&rest, b"does not follow the link and can delete it,");
+                assert!(!holds(&rest, b"Git's clean"), "{context}");
+                assert!(!holds(&rest, b"does not"), "{context}");
                 assert!(!holds(&rest, b"leads to"), "{context}");
                 assert!(changed_since(&before, &built).is_empty(), "{context}");
             }
@@ -278,7 +279,10 @@ fn a_directory_holding_a_git_entry_and_tracked_files_is_entered_as_git_enters_it
             "{runs:?}"
         );
         let listing = &own.words()[2];
-        let asked = [&b":(top,literal)nested"[..], b":(top,literal)nested/inner"];
+        let asked = [
+            &b":(top,literal,icase)nested"[..],
+            b":(top,literal,icase)nested/inner",
+        ];
         assert!(listing.ends_with(&asked.map(<[u8]>::to_vec)), "{runs:?}");
     });
 }

@@ -14,12 +14,12 @@ use std::path::Path;
 use crate::harness::{
     End, Scenario, as_git_spells, commit_here, committing, diverged, dupe_succeeds,
     gits_then_one_hint, hinted, holds, succeeded_without_a_hint, text, transfer_asked_after,
-    under_each_release, unhinted, without_maintenance,
+    under_each_release, unhinted, without_maintenance, write,
 };
 
 const UPSTREAM: &[u8] = b"'git dupe push -u origin HEAD'";
 const COMMIT: &[u8] = b"'git dupe commit'";
-const DETACHED: &[u8] = b"'git dupe push origin HEAD:<branch>'";
+const DETACHED: &[u8] = b"'git dupe push origin HEAD:refs/heads/<branch>'";
 const OTHER_NAME: [&[u8]; 2] = [
     b"'git dupe push origin HEAD:refs/heads/main'",
     b"'git dupe push origin HEAD'",
@@ -252,7 +252,7 @@ fn a_push_from_a_detached_head_names_the_push_of_head_to_a_branch() {
             assert_eq!(ours.end, End::Code(128), "{words:?}: {ours:?}");
         }
         // The word typed is the remote named.
-        let named = b"'git dupe push backup HEAD:<branch>'";
+        let named = b"'git dupe push backup HEAD:refs/heads/<branch>'";
         assert_eq!(
             hinted(s, root, &["push", "backup"], &[named]).end,
             End::Code(128)
@@ -293,6 +293,101 @@ fn a_push_from_a_detached_head_names_the_push_of_head_to_a_branch() {
     });
 }
 
+/// The destination is written in full: a remote holding a tag of the branch's name refuses
+/// the short one as matching more than one, and takes this (S13).
+#[test]
+fn the_detached_hints_destination_is_a_branch_whatever_tag_shares_its_name() {
+    under_each_release(|s| {
+        without_maintenance(s);
+        let t = s.pushed_workspace("workspace");
+        let root = &t.root;
+        dupe_succeeds(s, root, &["push", "origin", "main:release"]);
+        dupe_succeeds(s, root, &["tag", "release"]);
+        dupe_succeeds(s, root, &["push", "origin", "tag", "release"]);
+        dupe_succeeds(s, root, &["checkout", "-q", "--detach"]);
+        write(root, "notes/more", b"more\n");
+        dupe_succeeds(s, root, &["add", "notes/more"]);
+        committing(s, root);
+        dupe_succeeds(s, root, &["commit", "-m", "more"]);
+        assert_eq!(
+            hinted(s, root, &["push", "origin"], &[DETACHED]).end,
+            End::Code(128)
+        );
+        let short = s.git(["dupe", "push", "origin", "HEAD:release"]);
+        assert_eq!(short.from(root).run().end, End::Code(1));
+        let full = ["push", "origin", "HEAD:refs/heads/release"];
+        dupe_succeeds(s, root, &full);
+        let head = s.private(root).git(["rev-parse", "HEAD"]).succeeds();
+        let arrived = s.git(["rev-parse", "refs/heads/release"]);
+        assert_eq!(
+            arrived.from(&t.private_remote).succeeds().stdout,
+            head.stdout
+        );
+    });
+}
+
+/// `pull` merges into the branch checked out: the hint's words put the developer on the
+/// branch pushed first, where the commands bring the remote's commits to that branch and
+/// leave the one they stood on alone (`Holds/G18`).
+#[test]
+fn a_rejected_push_of_another_branch_is_pulled_on_that_branch() {
+    under_each_release(|s| {
+        without_maintenance(s);
+        let t = s.pushed_workspace("workspace");
+        let root = &t.root;
+        committing(s, root);
+        dupe_succeeds(s, root, &["switch", "-q", "-c", "topic"]);
+        dupe_succeeds(s, root, &["push", "origin", "topic"]);
+        let on_the_remote = s.dir().join("elsewhere");
+        s.git([
+            "clone",
+            "-q",
+            "-b",
+            "topic",
+            text(&t.private_remote),
+            text(&on_the_remote),
+        ])
+        .succeeds();
+        write(&on_the_remote, "theirs", b"theirs\n");
+        s.git(["add", "theirs"]).from(&on_the_remote).succeeds();
+        s.commit_public(&on_the_remote);
+        s.git(["push", "-q", "origin", "topic"])
+            .from(&on_the_remote)
+            .succeeds();
+        write(root, "notes/mine", b"mine\n");
+        dupe_succeeds(s, root, &["add", "notes/mine"]);
+        dupe_succeeds(s, root, &["commit", "-m", "mine"]);
+        dupe_succeeds(s, root, &["switch", "-q", "main"]);
+
+        let ours = hinted(
+            s,
+            root,
+            &["push", "origin", "topic"],
+            &[
+                b"'git dupe pull origin <branch>'",
+                b"run on the local branch the push sent",
+                b"'git dupe switch <local-branch>' first where HEAD is on another",
+                b"'git dupe fetch origin'",
+            ],
+        );
+        assert_eq!(ours.end, End::Code(1), "{ours:?}");
+
+        // The hint followed, with `topic` for both placeholders.
+        let main = s.private(root).git(["rev-parse", "main"]).succeeds();
+        dupe_succeeds(s, root, &["switch", "-q", "topic"]);
+        dupe_succeeds(
+            s,
+            root,
+            &["pull", "--no-rebase", "--no-edit", "origin", "topic"],
+        );
+        dupe_succeeds(s, root, &["push", "origin", "topic"]);
+        assert_eq!(
+            s.private(root).git(["rev-parse", "main"]).succeeds().stdout,
+            main.stdout
+        );
+    });
+}
+
 #[test]
 fn a_rejected_push_given_a_repository_names_its_pull_and_fetch() {
     under_each_release(|s| {
@@ -310,6 +405,7 @@ fn a_rejected_push_given_a_repository_names_its_pull_and_fetch() {
             .succeeds();
         let origin = [
             &b"'git dupe pull origin <branch>'"[..],
+            b"run on the local branch the push sent",
             b"'git dupe fetch origin'",
         ];
         for words in [

@@ -2,17 +2,17 @@ usage: git dupe clean [<options>] [--] [<pathspec>...]
 
 Runs Git's own clean of the project, in the project's repository, from the
 current directory, with your words, and never deletes a hidden path, what lies
-below one, or an untracked nested repository that holds one; the rest is as
-Git's clean does it, with its exit status. Under -X, a directory that holds a
-hidden path and that Git would take as ignored as a whole is opened to Git, its
-hidden paths excluded, each nested repository in it and each ignored directory
-there holding no hidden path taken whole: with -d, from the top and without a
-pathspec, its other ignored files are deleted; otherwise those Git reaches from
-the current directory and pathspecs are, and, without -d or a pathspec, a
-directory holding only these, hidden directories, and ignored files is kept
-whole. Refused: -X with -e; any form while a hidden path lies beyond a symbolic
-link; a pathspec holding *, ?, [, \ off Windows, or beginning with : and not :/
-alone, while one lies in an unhidden directory the project tracks nothing in.
+below one, or an untracked nested repository that holds one; the rest as Git's
+clean does it. Under -X, a directory that holds a hidden path and that Git would
+take as ignored whole is opened, its hidden paths excluded, nested repositories
+and ignored directories holding none taken whole: with -d, at the top without a
+pathspec, its other ignored files are deleted; otherwise those your directory
+and pathspecs reach are, and, without -d or a pathspec, a directory holding only
+these, hidden directories, and ignored files is kept whole, unless a tracked
+path reaches a hidden one by its case. Refused: -X with -e; any form while
+.gitdupe is unreadable or a hidden path is beyond a symbolic link; a pathspec
+holding *, ?, [, \ off Windows, or beginning with : and not :/ alone, while one
+lies in an unhidden directory the project tracks nothing in.
 
 Options, each meaning what it means to Git:
   -n, --dry-run  -f, --force  -i, --interactive  -q, --quiet  -d  -x  -X

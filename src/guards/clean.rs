@@ -2,10 +2,10 @@
 //! paths (G16, `Holds/G16`), decided over what the caller found: the symbolic links
 //! `lstat` found among the hidden paths' ancestors, the region paths, the
 //! ancestor directories `lstat` found holding a `.git` entry and, under `-X` without `-d`
-//! or a pathspec, the region paths it found to be directories, the tracked paths at or
-//! below either, and, given a non-literal pathspec, below the outermost ancestor of each
-//! region path, in the index `clean` reads, and, under `-X`, the ancestors public Git
-//! ignores. This part runs nothing and reads no file; the rule of a path is the keeper's
+//! or a pathspec, the region paths at which it found a directory or a symbolic link, the
+//! tracked paths at or below either, in every spelling of their ASCII case, and, given a
+//! non-literal pathspec, below the outermost ancestor of each region path, in the index
+//! `clean` reads, and, under `-X`, the ancestors public Git ignores. This part runs nothing and reads no file; the rule of a path is the keeper's
 //! one rule form, handed in by the caller, so that nothing here escapes a path a second
 //! way.
 //!
@@ -107,7 +107,8 @@ pub enum Arrangement<'a> {
     /// path at or below it.
     Unignored {
         ignored_ancestors: &'a BTreeSet<Vec<u8>>,
-        /// The words hold neither `-d` nor a pathspec.
+        /// The words hold neither `-d` nor a pathspec, and the caller's listing named no
+        /// entry through its case alone (`case_reached`).
         keep_directories_whole: bool,
         /// The paths the caller's listing found in the index the `clean` run reads. Git
         /// enters a directory under which that index holds a path whatever the patterns
@@ -115,6 +116,21 @@ pub enum Arrangement<'a> {
         /// directory at a spared path is never kept out: what lies in it would be taken.
         publicly_tracked: &'a BTreeSet<Vec<u8>>,
     },
+}
+
+/// Whether `publicly_tracked`, the caller's listing, names an entry at or below none of
+/// `entered`, the region paths at which `lstat` found a directory or a symbolic link, by
+/// its bytes: one that may lie under one of them through the ASCII case of its letters
+/// alone. Git enters a directory under which the index holds a path, in any spelling, and
+/// everything below a directory kept out is ignored (S4, S18). Which spared path such an
+/// entry lies under cannot be told without folding case, which is Git's alone (R9), so
+/// the caller keeps no directory out at all while one stands (`Holds/G16`). An ancestor
+/// holding a `.git` entry covers nothing here, though the listing is asked about it: what
+/// the index holds under it can reach a directory below it in another spelling.
+pub fn case_reached(entered: &BTreeSet<Vec<u8>>, publicly_tracked: &BTreeSet<Vec<u8>>) -> bool {
+    publicly_tracked.iter().any(|entry| {
+        !entered.contains(entry) && !operand::ancestors(entry).any(|above| entered.contains(above))
+    })
 }
 
 /// The nested repositories as G16 counts them: each directory of `holding_git`, the

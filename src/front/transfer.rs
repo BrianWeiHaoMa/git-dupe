@@ -15,7 +15,7 @@
 //!   dupe remote remove`; then every member of every remote group, each as a typed word
 //!   is compared, whatever the words name, because `fetch` and `pull` run against each
 //!   member of a group of two or more and `push` from 2.55.0 against each of any group
-//!   (S13), its refusal naming the key and `git dupe config --unset`; then the words;
+//!   (S13), its refusal naming the key and `git dupe config --unset-all`; then the words;
 //!   then, given no repository, the default remote.
 //!   `remote` is not, so that `git dupe remote remove` can always repair such a remote.
 //! - The guard stands wherever such a command's run could follow (`passthrough`): in an
@@ -50,11 +50,11 @@
 //!   naming `git dupe push <remote> HEAD:<upstream>` and `git dupe push <remote> HEAD`,
 //!   the remote the branch's own, whose upstream the first pushes to; after a `push` given
 //!   no repository, or a repository word and no refspec, that exited 128 on a detached
-//!   `HEAD`, naming `git dupe push <remote> HEAD:<branch>` with the remote Git takes or
-//!   the word typed; after any other `push` that exited 1, a rejected update or a hook's
-//!   refusal alike, naming `git dupe pull` and `git dupe fetch`, given with the repository
-//!   word typed, where one is, so that they name the destination that refused it and not
-//!   the branch's upstream; after a `pull` that exited 1 on a branch with no upstream,
+//!   `HEAD`, naming `git dupe push <remote> HEAD:refs/heads/<branch>` with the remote Git
+//!   takes or the word typed; after any other `push` that exited 1, a rejected update or a
+//!   hook's refusal alike, naming `git dupe pull` and `git dupe fetch`, given with the
+//!   repository word typed, where one is, so that they name the destination that refused
+//!   it and not the branch's upstream, the pull run on the branch the push sent; after a `pull` that exited 1 on a branch with no upstream,
 //!   which lacks `branch.<name>.merge` or `branch.<name>.remote`, given no repository, or
 //!   given the branch's `branch.<name>.remote` and no refspec, naming `git dupe pull
 //!   <remote> <branch>` and `git dupe branch --set-upstream-to`; after one that exited 128
@@ -430,16 +430,14 @@ fn hint(then: &Then, ended: &Outcome, mut ask: impl FnMut(Question) -> Answer) -
 }
 
 /// The hint after a `pull` that exited 0, or 1 where `exited_0` is false, and owed no other.
-/// A rebase stopped with nothing unmerged, where Git's advice names plain `git commit
-/// --amend`, draws its line; a conflict, which also exits 1, leaves an unmerged entry and
-/// draws none, Git's advice there naming only commands that fail in the project's repository
-/// (`Holds/G19`). An `edit` or a `break` exits 0, which no conflict does, so the index is
-/// not asked there. With no rebase stopped, a `pull` that exited 0 and left an unmerged entry
-/// has an autostash that came back with conflicts (S12).
+/// A rebase stopped draws its line whatever the index holds: at a conflict too, because Git's
+/// advice names plain `git rebase --continue`, `--skip`, and `--abort`, which act in the
+/// project's repository where a rebase stands paused there (`Holds/G18`), so the index is
+/// not asked. With no rebase stopped, a `pull` that exited 0 and left an unmerged entry has
+/// an autostash that came back with conflicts (S12).
 fn after_the_pull(exited_0: bool, mut ask: impl FnMut(Question) -> Answer) -> Option<Vec<u8>> {
     if ask(Question::RebaseStopped) == Answer::Yes {
-        let unmerged = !exited_0 && ask(Question::Unmerged) != Answer::No;
-        return (!unmerged).then(|| advice::REBASE.to_vec());
+        return Some(advice::REBASE.to_vec());
     }
     (exited_0 && ask(Question::Unmerged) == Answer::Yes).then(|| advice::AUTOSTASH.to_vec())
 }
@@ -489,7 +487,7 @@ fn refuse_group(key: &[u8], place: &Place) -> Outcome {
     line.extend_from_slice(&lines::typed(key));
     line.extend_from_slice(b" names ");
     line.extend_from_slice(&places::described(place));
-    line.extend_from_slice(b"; 'git dupe config --unset ");
+    line.extend_from_slice(b"; 'git dupe config --unset-all ");
     line.extend_from_slice(&shell_word(key));
     line.extend_from_slice(b"' removes that group");
     outcome::refuse(&line)

@@ -27,7 +27,14 @@
 //! the public repository's local configuration holds, a file it includes counted, where
 //! it holds one: `config --local --includes --get` answers nothing, exit 1, for a key set
 //! only globally.
+//!
+//! A key whose effective value a file the `config` includes gives is not written: a
+//! `--replace-all` of a key the file does not hold appends it after the include, where it
+//! would outrank the included value, to which F2 and G1 give the last word. Two `config
+//! -z --local --list` runs, with and without `--includes`, tell them apart (`Holds/G1`).
+//! `core.worktree` is never so kept: Git follows no include for it.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -166,10 +173,12 @@ pub fn set(
             copied.push(("--local", key, value));
         }
     }
+    let included = included_keys(workspace, private)?;
     let keys = FIXED
         .map(|(key, value)| ("--local", key, value.as_bytes().to_vec()))
         .into_iter()
         .chain(copied)
+        .filter(|(_, key, _)| !included.contains(key.to_ascii_lowercase().as_bytes()))
         .chain(
             recorded
                 .scopes()
@@ -189,6 +198,40 @@ pub fn set(
     Ok(())
 }
 
+/// The keys, as Git spells them in a `--list`, whose effective value a file the private
+/// `config` includes gives, from one private `config -z --local --list` with `--includes`
+/// and one with `--no-includes` (`Holds/G1`, S12).
+fn included_keys(workspace: &Workspace, private: &Path) -> Result<BTreeSet<Vec<u8>>, Failed> {
+    // `--list`, unlike `--get`, fails where the file is gone, as it can be after a kill.
+    if fs::symlink_metadata(private.join("config")).is_err() {
+        return Ok(BTreeSet::new());
+    }
+    let list = |includes: &'static str| {
+        let words = ["config", "-z", "--local", includes, "--list"];
+        step(
+            Run::private(private, workspace.root(), words).capture_output(),
+            &[0],
+        )
+    };
+    let with = list("--includes")?;
+    let without = list("--no-includes")?;
+    Ok(takes_from_an_include(&with.stdout, &without.stdout))
+}
+
+/// The keys of `with`, the records under `--includes`, whose last value is missing from
+/// `without`, those of the file alone, or differs from the last value there. A key's last
+/// record is the value Git takes (S12), and a value of none, a key alone, is one too.
+fn takes_from_an_include(with: &[u8], without: &[u8]) -> BTreeSet<Vec<u8>> {
+    let last =
+        |listing| -> BTreeMap<&[u8], Option<&[u8]>> { records::config_records(listing).collect() };
+    let own = last(without);
+    last(with)
+        .into_iter()
+        .filter(|(key, value)| own.get(key) != Some(value))
+        .map(|(key, _)| key.to_vec())
+        .collect()
+}
+
 /// The value of `key` in the public repository's local configuration, from one public
 /// `config -z --local --includes --get`, whose exit 1 means it is not set there. Without
 /// `--includes`, Git reads `--local` as the one file and skips what it includes.
@@ -205,6 +248,20 @@ fn public_local(key: &str) -> Result<Option<Vec<u8>>, Failed> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_key_is_kept_by_an_include_where_the_files_own_last_value_is_not_the_one_git_takes() {
+        // Reading order: what an include gives stands at its record, the last value decides.
+        let with = b"a.b\nown\0a.b\nincluded\0c.d\nsame\0c.d\nsame\0e.f\nincluded\0\
+                     g.h\nincluded\0g.h\nown\0flag.only\0";
+        let without = b"a.b\nown\0c.d\nsame\0g.h\nown\0";
+        let kept: Vec<&[u8]> = vec![b"a.b", b"e.f", b"flag.only"];
+        assert_eq!(
+            takes_from_an_include(with, without),
+            kept.into_iter().map(<[u8]>::to_vec).collect()
+        );
+        assert!(takes_from_an_include(b"", b"").is_empty());
+    }
 
     #[test]
     fn the_relative_work_tree_leaves_the_private_git_directory_for_the_root() {

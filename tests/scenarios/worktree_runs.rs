@@ -174,7 +174,7 @@ fn after_a_move_init_sets_the_keys_once_and_runs_no_git_init() {
         };
         assert_eq!(
             configs(&without_keys),
-            configs(&finished_commands) + keys + 2
+            configs(&finished_commands) + keys + 4
         );
         without_keys.retain(|command| command.as_slice() != b"config");
         let mut finished_without = finished_commands.clone();

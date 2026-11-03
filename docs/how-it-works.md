@@ -149,6 +149,13 @@ or a commit of a branch, a tag, a stash entry, or `HEAD` is on no remote.
   naming the count, never truncated. Files below a hidden directory do not count toward
   the paths: `notes/` is one path.
 
+- **An end forced on git-dupe alone leaves Git running.** A terminal's Ctrl-C reaches
+  git-dupe and its Git child together and ends both. A signal sent to the git-dupe
+  process alone by its process number, or `TerminateProcess` on Windows, ends git-dupe at
+  once with that end's status, and the Git command it was waiting on runs on to its own
+  end, as the child of any launcher not told to stop does, so that a caller who ended it
+  that way cannot take its end for Git's.
+
 ### On Windows
 
 The commands of a day's work hold in PowerShell, `cmd`, and Git Bash. Windows differs in
@@ -160,8 +167,9 @@ these, where keeping Linux's and macOS's behavior is impossible or out of propor
   its exclude rule escapes, which is 17,000 units of paths at 1,000 paths that hold no
   space and no such character.
 - `.gitdupe` is read as UTF-8, its byte order mark and CRLF line endings dropped. What
-  Windows PowerShell 5.1's `>` writes is UTF-16: that file lists nothing, every command
-  says so in a warning, and `git dupe hide` and `unhide` refuse it until it is saved as
+  Windows PowerShell 5.1's `>` writes is UTF-16: that file cannot be read, every command
+  says so in a warning and leaves the exclude rules as they stood, so that what they hid
+  stays hidden, and `git dupe hide`, `unhide`, and `clean` refuse until it is saved as
   UTF-8.
 - A name stored in an index or in `.gitdupe` that is not valid UTF-8 cannot stand on a
   command line: a command that would need one there is refused, naming the path, and

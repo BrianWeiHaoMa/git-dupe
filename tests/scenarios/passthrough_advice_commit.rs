@@ -1,6 +1,6 @@
-//! The hints after a private `commit` that exits 1 (`Holds/G19`, S12): with `--amend` and
-//! not `--allow-empty`, one `hint:` naming `git dupe commit --amend --allow-empty` and
-//! `git dupe reset HEAD^`, in words conditioned on the amend that would have left the
+//! The hints after a private `commit` that exits 1 (`Holds/G19`, S12): with `--amend`, or a
+//! prefix Git reads as it, and not `--allow-empty`, one `hint:` naming `--allow-empty` added
+//! to the command as typed and `git dupe reset HEAD^`, in words conditioned on the amend that would have left the
 //! commit empty, which exit 1 alone does not prove, so that a hook's refusal draws it too;
 //! without `--amend`, while a cherry-pick stands stopped, the cherry-pick's line, or, where
 //! a rebase stands stopped at a pick that became empty, which keeps `CHERRY_PICK_HEAD` too,
@@ -18,7 +18,7 @@ use crate::harness::{
 };
 
 const EMPTY_AMEND: [&[u8]; 2] = [
-    b"'git dupe commit --amend --allow-empty'",
+    b"the same 'git dupe commit' as typed with --allow-empty added",
     b"'git dupe reset HEAD^'",
 ];
 
@@ -69,6 +69,47 @@ fn emptied(s: &Scenario, root: &Path) {
     s.private(root).git(["read-tree", "HEAD^"]).succeeds();
 }
 
+/// `--allow-empty` added to the command as typed keeps its `--only`, where a bare `commit
+/// --amend --allow-empty` would take what else is staged.
+#[test]
+fn the_amend_hints_command_is_the_one_typed_and_commits_only_what_it_named() {
+    under_each_release(|s| {
+        let root = fixture(s);
+        write(&root, ".gitdupe", b"notes.txt\nother.txt\n");
+        private_add(s, &root, ".gitdupe");
+        private_commit(s, &root);
+        write(&root, "other.txt", b"staged\n");
+        s.git(["dupe", "add", "--", "other.txt"])
+            .from(&root)
+            .succeeds();
+        // The commit before the last holds what the working tree now holds in `notes.txt`.
+        s.private(&root)
+            .git(["reset", "-q", "--soft", "start"])
+            .succeeds();
+        write(&root, "notes.txt", b"two\n");
+        let typed = ["commit", "--amend", "--only", "--no-edit", "notes.txt"];
+        let refused = hinted(s, &root, &typed, &EMPTY_AMEND);
+        assert_eq!(refused.end, End::Code(1), "{refused:?}");
+
+        let amended = [
+            "commit",
+            "--amend",
+            "--only",
+            "--no-edit",
+            "--allow-empty",
+            "notes.txt",
+        ];
+        s.git(["dupe"].iter().chain(&amended))
+            .from(&root)
+            .succeeds();
+        let in_head = s
+            .private(&root)
+            .git(["cat-file", "-e", "HEAD:other.txt"])
+            .run();
+        assert_ne!(in_head.end, End::Code(0), "{in_head:?}");
+    });
+}
+
 /// The commit a revision names in the repository a run of `git` reaches.
 fn named(output: Output) -> Vec<u8> {
     assert_eq!(output.end, End::Code(0), "{output:?}");
@@ -112,6 +153,14 @@ fn an_amend_that_refuses_ends_with_one_hint() {
         private_alias(s, &root, "ca", "commit --amend --no-edit");
         hinted(s, &root, &["ca"], &EMPTY_AMEND);
         unhinted(s, &root, &["commit", "--amend", "-h"]);
+
+        // A prefix Git reads as `--amend` draws the same line; `--a` is ambiguous to it.
+        for word in ["--amen", "--ame", "--am"] {
+            let refused = hinted(s, &root, &["commit", word, "--no-edit"], &EMPTY_AMEND);
+            assert_eq!(refused.end, End::Code(1), "{word}: {refused:?}");
+        }
+        let ambiguous = unhinted(s, &root, &["commit", "--a", "--no-edit"]);
+        assert_eq!(ambiguous.end, End::Code(129), "{ambiguous:?}");
 
         // A hook's refusal exits 1 too: the line is conditioned, and `--allow-empty` keeps
         // it away.

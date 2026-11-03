@@ -288,6 +288,52 @@ fn the_fast_forward_only_hint_follows_a_128_that_got_no_other_hint() {
     });
 }
 
+/// A conflict too, because the plain commands Git's advice names act in the project's
+/// repository where a rebase stands paused there (`Holds/G18`): with one paused, its
+/// conflict resolved and staged, the private hint is what stands between the developer and
+/// a public `--abort` that throws that resolution away.
+#[test]
+fn a_pull_stopped_at_its_rebases_conflict_names_the_private_rebase_beside_a_public_one() {
+    under_each_release(|s| {
+        without_maintenance(s);
+        let t = s.pushed_workspace("workspace");
+        let root = &t.root;
+        committing(s, root);
+
+        // The project's own rebase, paused at a conflict resolved and staged.
+        s.git(["switch", "-q", "-c", "public-side"])
+            .from(root)
+            .succeeds();
+        write(root, "README.md", b"side\n");
+        s.git(["add", "README.md"]).from(root).succeeds();
+        s.commit_public(root);
+        s.git(["switch", "-q", "main"]).from(root).succeeds();
+        write(root, "README.md", b"main\n");
+        s.git(["add", "README.md"]).from(root).succeeds();
+        s.commit_public(root);
+        let paused = s.git(["rebase", "public-side"]).from(root).run();
+        assert_eq!(paused.end, End::Code(1), "{paused:?}");
+        write(root, "README.md", b"resolved\n");
+        s.git(["add", "README.md"]).from(root).succeeds();
+        let public_rebase = root.join(".git/rebase-merge");
+        assert!(public_rebase.is_dir());
+        let public_index = fs::read(root.join(".git/index")).unwrap();
+
+        // The private pull, stopped at a conflict of its own.
+        remote_moves_on(s, &t, "shared");
+        write(root, "notes/shared.md", b"here\n");
+        dupe_succeeds(s, root, &["add", "notes/shared.md"]);
+        dupe_succeeds(s, root, &["commit", "-m", "shared here"]);
+        let ours = hinted(s, root, &["pull", "--rebase"], &STOPPED_REBASE);
+        assert_eq!(ours.end, End::Code(1), "{ours:?}");
+        assert!(public_rebase.is_dir());
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), public_index);
+        dupe_succeeds(s, root, &["rebase", "--abort"]);
+        // The stop decides: nothing is asked of the index (G22).
+        transfer_asked_after(s, root, &["pull", "--rebase"], End::Code(1), true, &[]);
+    });
+}
+
 #[test]
 fn a_pull_whose_rebase_stops_with_nothing_unmerged_names_the_private_rebase() {
     under_each_release(|s| {
@@ -325,14 +371,13 @@ fn a_pull_whose_rebase_stops_with_nothing_unmerged_names_the_private_rebase() {
         abort();
 
         // A reword whose editor failed, and a todo list Git cannot read, exit 1, as a
-        // conflict does: the index tells them apart, one run fixed for that end (G22).
+        // conflict does, and the stop alone decides: nothing is asked of the index (G22).
         sequence_editor(s, root, "reword", "sed '1s/^pick /reword /'");
         dupe_succeeds(s, root, &["config", "core.editor", "false"]);
         let reword = hinted(s, root, words, &STOPPED_REBASE);
         assert_eq!(reword.end, End::Code(1), "{reword:?}");
         abort();
-        let unmerged: &[&[&str]] = &[&["ls-files", "-u", "-z"]];
-        transfer_asked_after(s, root, words, End::Code(1), true, unmerged);
+        transfer_asked_after(s, root, words, End::Code(1), true, &[]);
         abort();
         dupe_succeeds(s, root, &["config", "core.editor", "true"]);
         sequence_editor(s, root, "unreadable", "sed '1s/^pick /pickk /'");

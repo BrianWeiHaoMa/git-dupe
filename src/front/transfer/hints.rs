@@ -116,13 +116,13 @@ pub fn other_name(remote: &[u8], merge: &[u8]) -> Vec<u8> {
 }
 
 /// The hint after a `push` that exited 128 on a detached `HEAD`. It names a branch the
-/// remote has, as Git's advice does: given a commit and no ref, Git cannot tell that a
-/// new name is to be a branch, and refuses it.
+/// remote has, as Git's advice does, written in full, so that a tag of its name there does
+/// not make the destination ambiguous (S13).
 pub fn detached(remote: &[u8]) -> Vec<u8> {
     [
         &b"the private HEAD is detached, on no branch: 'git dupe push "[..],
         &offered_remote(remote),
-        b" HEAD:<branch>' pushes the history leading to it to the branch <branch> the \
+        b" HEAD:refs/heads/<branch>' pushes the history leading to it to the branch <branch> the \
             remote has; plain 'git push' acts on the project's repository",
     ]
     .concat()
@@ -133,7 +133,10 @@ pub fn detached(remote: &[u8]) -> Vec<u8> {
 /// word reaches that one destination: not for a remote with a push URL alone or one other
 /// than its fetch URL, nor for a remote group, whose `pull` refuses a refspec. The fetch is
 /// followed by a merge only where it updates a remote-tracking branch: given a URL or a
-/// path, it fetches the remote's `HEAD` alone.
+/// path, it fetches the remote's `HEAD` alone. `pull` merges into the branch checked out,
+/// so that its line says on which branch to run it, or it would bring the commits into
+/// another branch and leave the one pushed behind; the local branch has a placeholder of
+/// its own, because a refspec can send it to a branch of another name.
 pub fn rejected(given: Option<&[u8]>) -> Vec<u8> {
     let Some(given) = given else {
         return REJECTED.to_vec();
@@ -147,7 +150,9 @@ pub fn rejected(given: Option<&[u8]>) -> Vec<u8> {
         &remote,
         b"' fetches from that remote alone, 'git dupe pull ",
         &remote,
-        b" <branch>' brings them here before the next push, and, where that fetch updates ",
+        b" <branch>', run on the local branch the push sent ('git dupe switch \
+            <local-branch>' first where HEAD is on another), brings them here before the next \
+            push, and, where that fetch updates ",
         &remote,
         b"/<branch>, so does it followed by a merge or rebase of ",
         &remote,
@@ -221,7 +226,11 @@ mod tests {
                     expected.escape_ascii()
                 );
             };
-            named_in(detached(remote), b"'git dupe push ", b" HEAD:<branch>'");
+            named_in(
+                detached(remote),
+                b"'git dupe push ",
+                b" HEAD:refs/heads/<branch>'",
+            );
             named_in(
                 other_name(remote, b"refs/heads/main"),
                 b"'git dupe push ",
@@ -309,7 +318,10 @@ mod tests {
             ),
             (
                 &detached,
-                &["'git dupe push origin HEAD:<branch>'", "plain 'git push'"],
+                &[
+                    "'git dupe push origin HEAD:refs/heads/<branch>'",
+                    "plain 'git push'",
+                ],
             ),
             (
                 REJECTED,
@@ -319,6 +331,8 @@ mod tests {
                 &rejected_by,
                 &[
                     "'git dupe pull origin <branch>'",
+                    "run on the local branch the push sent",
+                    "'git dupe switch <local-branch>' first where HEAD is on another",
                     "'git dupe fetch origin'",
                     "plain 'git pull' and 'git fetch'",
                 ],

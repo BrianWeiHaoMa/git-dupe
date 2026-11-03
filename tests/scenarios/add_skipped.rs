@@ -173,6 +173,49 @@ fn ignored_public_files_lose_exclusions_but_remain_unstaged_with_force() {
     });
 }
 
+/// A literal operand's skipped path is asked about as a form's is: Git's `add` answers an
+/// exclusion of an ignored path with its message and exit 1, staged or not, which is no
+/// answer to the developer's words (G14, G15), while under `-f` the exclusion stays.
+#[test]
+fn a_directory_operand_stages_beside_a_skipped_path_the_project_ignores() {
+    under_each_release(|s| {
+        let dir = daily_edited(s, "ignored-public");
+        write(&dir, "notes/shared.log", b"public\n");
+        let mut ignore = fs::read(dir.join(".gitignore")).unwrap();
+        ignore.extend_from_slice(b"*.log\n*.tmp\n");
+        write(&dir, ".gitignore", &ignore);
+        s.git(["add", "-f", ".gitignore", "notes/shared.log"])
+            .from(&dir)
+            .succeeds();
+        s.commit_public(&dir);
+        for (operand, content) in [
+            ("notes/", &b"one\n"[..]),
+            ("notes", b"two\n"),
+            ("./notes", b"three\n"),
+        ] {
+            write(&dir, "notes/today.md", content);
+            let output = s.git(["dupe", "add", operand]).from(&dir).run();
+            skipped_one(&output);
+            assert_eq!(output.end, End::Code(0), "{operand}: {output:?}");
+            not_in_private_index(s, &dir, "notes/shared.log");
+            staged_blob(s, &dir, "notes/today.md", content);
+        }
+
+        write(&dir, "notes/today.md", b"forced\n");
+        let forced = s.git(["dupe", "add", "-f", "notes/"]).from(&dir).run();
+        skipped_one(&forced);
+        assert_eq!(forced.end, End::Code(0), "{forced:?}");
+        not_in_private_index(s, &dir, "notes/shared.log");
+        staged_blob(s, &dir, "notes/today.md", b"forced\n");
+
+        // The operand's own path is never asked about: Git's answer and the hint stand.
+        write(&dir, "notes/cache.tmp", b"ignored\n");
+        let refused = s.git(["dupe", "add", "notes/cache.tmp"]).from(&dir).run();
+        assert_eq!(refused.end, End::Code(1), "{refused:?}");
+        names(&refused.stderr, b"'git dupe add -f <path>'");
+    });
+}
+
 #[test]
 fn exclusions_over_arg_max_refuse_with_the_carried_count_and_preserve_the_index() {
     under_each_release(|s| {

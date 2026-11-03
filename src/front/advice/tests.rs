@@ -467,10 +467,14 @@ fn a_merge_is_asked_about_its_autostash_only_after_exit_0() {
 fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick_and_the_stop_beside_it() {
     let pick = Question::Verifies("CHERRY_PICK_HEAD");
     let rebase = Question::Stopped(A_REBASE_STOPPED);
-    // `--amend` and `--allow-empty` are read exactly, before the first `--`.
+    // `--amend` is read in every prefix Git reads as it, `--allow-empty` exactly, each
+    // before the first `--`.
     for typed in [
         &["commit", "--amend"][..],
         &["commit", "--amend", "--no-edit"],
+        &["commit", "--amen", "--no-edit"],
+        &["commit", "--ame"],
+        &["commit", "--am"],
         &["commit", "--allow-empty-message", "--amend"],
         &["commit", "--amend", "--", "--allow-empty"],
     ] {
@@ -505,7 +509,8 @@ fn a_commit_is_decided_by_its_amend_and_then_by_a_stopped_pick_and_the_stop_besi
         &["commit", "-m", "x"][..],
         &["commit"],
         &["commit", "--allow-empty"],
-        &["commit", "--amen"],
+        &["commit", "--a"],
+        &["commit", "--amended"],
         &["commit", "--", "--amend"],
     ] {
         assert_eq!(
@@ -580,12 +585,13 @@ fn a_detached_head_follows_a_run_that_exited_0_and_symbolic_ref_answering_1() {
 
 #[test]
 fn each_hint_names_the_git_dupe_commands_and_the_plain_ones_project() {
-    let named: [(&[u8], &[&str]); 8] = [
+    let named: [(&[u8], &[&str]); 9] = [
         (
             REBASE,
             &[
                 "'git dupe add <path>'",
                 "'git dupe commit --amend'",
+                "'git dupe commit --allow-empty'",
                 "'git dupe rebase --edit-todo'",
                 "'git dupe rebase --continue'",
                 "'git dupe rebase --skip'",
@@ -639,9 +645,18 @@ fn each_hint_names_the_git_dupe_commands_and_the_plain_ones_project() {
             ],
         ),
         (
+            MERGED_CHANGES,
+            &[
+                "'git dupe add <path>'",
+                "'git dupe stash drop'",
+                "'git dupe reset --hard'",
+                "'git dupe stash pop'",
+            ],
+        ),
+        (
             EMPTY_AMEND,
             &[
-                "'git dupe commit --amend --allow-empty'",
+                "the same 'git dupe commit' as typed with --allow-empty added",
                 "'git dupe reset HEAD^'",
             ],
         ),
@@ -658,4 +673,73 @@ fn each_hint_names_the_git_dupe_commands_and_the_plain_ones_project() {
     for family in &FAMILIES {
         assert!(named.iter().any(|(line, _)| *line == family.line));
     }
+}
+
+#[test]
+fn a_word_git_reads_as_merge_admits_the_entry_of_its_command_after_the_detached_one() {
+    let unmerged = [
+        (Question::OnABranch, Answer::Yes),
+        (Question::Unmerged, Answer::Yes),
+    ];
+    for typed in [
+        &["switch", "-m", "side"][..],
+        &["switch", "--merge", "side"],
+        &["checkout", "-m", "side"],
+        &["checkout", "--merge", "side"],
+        &["checkout", "-qm", "side"],
+        &["switch", "-m", "-q", "side"],
+    ] {
+        let (line, asked) = decision(typed, &End::Code(0), &unmerged);
+        assert_eq!(line, Some(MERGED_CHANGES), "{typed:?}");
+        assert_eq!(asked.last(), Some(&Question::Unmerged), "{typed:?}");
+        // Refused: nothing is asked of the index.
+        assert_eq!(decision(typed, &End::Code(1), &unmerged).0, None);
+        let clean = [
+            (Question::OnABranch, Answer::Yes),
+            (Question::Unmerged, Answer::No),
+        ];
+        assert_eq!(decision(typed, &End::Code(0), &clean).0, None, "{typed:?}");
+    }
+    for typed in [
+        &["switch", "side"][..],
+        &["switch", "--", "-m"],
+        &["switch", "--merge=x"],
+        &["switch", "--me"],
+        &["switch", "-m", "side", "-h"],
+        &["checkout", "--mer"],
+    ] {
+        let admitted = admitted(&words(typed));
+        assert!(
+            !admitted.iter().any(|family| family.line == MERGED_CHANGES),
+            "{typed:?}"
+        );
+    }
+    // A detached `HEAD` decides first, in the table's order.
+    let left = [(Question::OnABranch, Answer::No)];
+    let (line, _) = decision(&["switch", "-m", "v1"], &End::Code(0), &left);
+    assert_eq!(line, Some(DETACHED));
+}
+
+#[test]
+fn only_a_prefix_git_reads_as_amend_is_one() {
+    for word in ["--amend", "--amen", "--ame", "--am"] {
+        assert!(reads_as_amend(word.as_bytes()), "{word}");
+    }
+    for word in ["--a", "--", "-a", "--amended", "--all", "--amend=x"] {
+        assert!(!reads_as_amend(word.as_bytes()), "{word}");
+    }
+}
+
+#[test]
+fn the_merged_changes_line_says_nothing_of_a_stash_entry_unconditioned() {
+    let line = str::from_utf8(MERGED_CHANGES).unwrap();
+    let conditioned = line.find("where Git also kept them").unwrap();
+    for later in [
+        "'git dupe stash drop'",
+        "'git dupe reset --hard'",
+        "'git dupe stash pop'",
+    ] {
+        assert!(line.find(later).unwrap() > conditioned, "{later}");
+    }
+    assert!(line.find("'git dupe add <path>'").unwrap() < conditioned);
 }

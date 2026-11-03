@@ -7,26 +7,11 @@
 //! everywhere else.
 
 use std::fs;
-use std::io::ErrorKind;
-use std::path::Path;
 
 use crate::harness::{
-    End, as_git_spells, holds, names, privately_tracked, records, region_rules, report,
-    under_each_release, watched_dupe_succeeds, word, write,
+    End, as_git_spells, equates_spellings, holds, names, privately_tracked, records, region_rules,
+    report, under_each_release, watched_dupe_succeeds, word, write,
 };
-
-/// Whether `dir` equates spellings that differ in case: an `a` made there is found as `A`.
-fn equates_spellings(dir: &Path) -> bool {
-    let made = dir.join("a");
-    fs::write(&made, b"").unwrap_or_else(|cause| panic!("{}: {cause}", made.display()));
-    let found = match fs::symlink_metadata(dir.join("A")) {
-        Ok(_) => true,
-        Err(cause) if cause.kind() == ErrorKind::NotFound => false,
-        Err(cause) => panic!("{}: {cause}", dir.join("A").display()),
-    };
-    fs::remove_file(&made).unwrap_or_else(|cause| panic!("{}: {cause}", made.display()));
-    found
-}
 
 /// Whether `text` names `notes` in any spelling of its case.
 fn names_notes(text: &[u8]) -> bool {

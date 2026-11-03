@@ -365,6 +365,44 @@ fn an_unreadable_private_repository_ends_clean_before_it_runs_and_deletes_nothin
     });
 }
 
+/// F5, G16: the paths to spare cannot be read, so every form is refused, `-n` too.
+#[test]
+fn an_unreadable_gitdupe_refuses_every_form_naming_the_file_and_deletes_nothing() {
+    under_each_release(|s| {
+        let dir = attached(s, "workspace");
+        let exclude = fs::read(dir.join(".git/info/exclude")).unwrap();
+        let rules = region_rules(&dir);
+        write(&dir, ".gitdupe", b"\xff\xfen\0o\0t\0e\0s\0\r\0\n\0");
+        let git = dir.join(".git");
+        let before = Tree::of(&dir).without_the_lock_file(&git);
+        for words in [
+            &["-fdx"][..],
+            &["-n"],
+            &["-fX"],
+            &["-f", "-e"],
+            &["-fX", "-e", "x"],
+        ] {
+            let (output, runs) = run_traced(
+                s.git(["dupe", "clean"].iter().chain(words)).from(&dir),
+                &s.dir().join("trace"),
+            );
+            assert_eq!(output.end, End::Code(128), "{words:?}: {output:?}");
+            assert_eq!(runs.of("clean"), 0, "{runs:?}");
+            let fatal = output.lines("fatal");
+            assert_eq!(fatal.len(), 1, "{output:?}");
+            assert!(fatal[0].starts_with(b".gitdupe "), "{output:?}");
+            names(fatal[0], b"UTF-16");
+            let warnings = output.lines("warning");
+            assert_eq!(warnings.len(), 1, "{output:?}");
+            assert!(warnings[0].starts_with(b".gitdupe "), "{output:?}");
+            let after = Tree::of(&dir).without_the_lock_file(&git);
+            assert!(before.changed_in(&after).is_empty(), "{words:?}");
+            assert_eq!(fs::read(dir.join(".git/info/exclude")).unwrap(), exclude);
+            assert_eq!(region_rules(&dir), rules);
+        }
+    });
+}
+
 /// `dir` after `git dupe clean -fdx` from its root: the hidden paths of `daily_state` and
 /// the public files stand, and the untracked files are gone.
 fn cleaned_as_clean_fdx(dir: &Path) {

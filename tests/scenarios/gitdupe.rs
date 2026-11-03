@@ -199,13 +199,15 @@ fn an_edit_keeps_every_other_line_of_a_crlf_file_byte_for_byte() {
 }
 
 /// A `.gitdupe` beginning with a UTF-16 byte order mark, as Windows PowerShell 5.1's `>`
-/// writes one, lists nothing: every command warns of it, public Git sees what it meant to
-/// hide, and `hide`, `unhide`, and a hiding `add` refuse naming the cause, changing nothing.
+/// writes one, cannot be read: every command warns of it and leaves the region as it is, so
+/// that public Git goes on ignoring what it hid, and `hide`, `unhide`, and a hiding `add`
+/// refuse naming the cause, changing nothing.
 #[test]
-fn a_utf_16_byte_order_mark_lists_nothing_is_warned_of_and_refuses_an_edit() {
+fn a_utf_16_byte_order_mark_is_warned_of_keeps_the_region_and_refuses_an_edit() {
     under_each_release(|s| {
         let dir = s.dir().join("project");
         s.attached_project(&dir);
+        s.git(["dupe", "hide", "scratch"]).from(&dir).succeeds();
         let bytes = b"\xff\xfes\0c\0r\0a\0t\0c\0h\0\r\0\n\0";
         write(&dir, ".gitdupe", bytes);
 
@@ -219,13 +221,13 @@ fn a_utf_16_byte_order_mark_lists_nothing_is_warned_of_and_refuses_an_edit() {
             );
         };
         warned(&status);
-        assert_eq!(region_rules(&dir), [&b"/.gitdupe"[..]]);
-        write(&dir, "scratch/a.md", b"seen\n");
+        assert_eq!(region_rules(&dir), [&b"/.gitdupe"[..], b"/scratch"]);
+        write(&dir, "scratch/a.md", b"private\n");
         assert!(
-            public_status(s, &dir)
-                .windows(10)
-                .any(|name| name == b"scratch/a."),
-            "public Git does not see what the file meant to hide"
+            !public_status(s, &dir)
+                .windows(8)
+                .any(|name| name == b"scratch/"),
+            "public Git sees what the region hid"
         );
 
         write(&dir, "tools/run.sh", b"private\n");
@@ -241,9 +243,9 @@ fn a_utf_16_byte_order_mark_lists_nothing_is_warned_of_and_refuses_an_edit() {
             names(fatal[0], b"UTF-16");
             warned(&refused);
             assert_eq!(fs::read(dir.join(".gitdupe")).unwrap(), bytes);
-            assert_eq!(region_rules(&dir), [&b"/.gitdupe"[..]]);
+            assert_eq!(region_rules(&dir), [&b"/.gitdupe"[..], b"/scratch"]);
         }
-        assert_eq!(staged_gitdupe(s, &dir), None);
+        assert_eq!(staged_gitdupe(s, &dir), Some(b"scratch\n".to_vec()));
     });
 }
 

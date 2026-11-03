@@ -355,3 +355,23 @@ fn each_pattern_carries_the_path_its_rule_is_written_from() {
     let excluded = patterns(&spared, &Arrangement::Excluded, rule);
     assert_eq!(excluded, [(b"/ign/keep".to_vec(), b"ign/keep".to_vec())]);
 }
+
+#[test]
+fn an_entry_is_case_reached_when_no_query_path_covers_its_bytes() {
+    let query = set(&["notes", "other", "a/deep"]);
+    assert!(!case_reached(&query, &set(&[])));
+    // What an ancestor of one covers is no covering: it can lie below it in another case.
+    assert!(case_reached(&set(&["a/deep"]), &set(&["a/Deep/x"])));
+    assert!(!case_reached(
+        &query,
+        &set(&["notes", "other/README.md", "a/deep/er/x"])
+    ));
+    // One such entry is enough, whatever the others are covered by.
+    assert!(case_reached(
+        &query,
+        &set(&["Notes/README.md", "other/README.md"])
+    ));
+    assert!(case_reached(&query, &set(&["a/Deep/x"])));
+    // A whole component, not a prefix of the bytes.
+    assert!(case_reached(&query, &set(&["notes2/x"])));
+}

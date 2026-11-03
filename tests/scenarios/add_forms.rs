@@ -307,7 +307,13 @@ fn no_operand_with_all_clear_keeps_the_users_words_and_gits_status() {
                 output.end, expected.end,
                 "{output:?}; private: {expected:?}"
             );
-            no_own_hint(&output);
+            let own: Vec<_> = output
+                .lines("hint")
+                .into_iter()
+                .filter(|line| holds(line, b"git dupe"))
+                .collect();
+            assert_eq!(own.len(), 1, "{output:?}");
+            names(own[0], b"'git dupe add .'");
             assert_eq!(fs::read(dir.join(".git/dupe/index")).unwrap(), before);
             assert!(privately_staged(s, &dir).is_empty());
         }

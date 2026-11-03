@@ -266,6 +266,8 @@ fn hides_hint_offers_no_add_beyond_a_symbolic_link() {
         assert_eq!(hints.len(), 1, "{hidden:?}");
         let hint = hints[0];
         names(hint, b"beyond the symbolic link link,");
+        names(hint, b"public Git was not asked");
+        assert!(!holds(hint, b"does not follow"), "{hint:?}");
         assert!(!holds(hint, b"git dupe add"), "{hidden:?}");
         let unhide = offered(hint, b"run from the root, '", b"' stops hiding it");
         runs_as_offered(s, &root, unhide);

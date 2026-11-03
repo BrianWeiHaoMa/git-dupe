@@ -2,8 +2,8 @@
 //! command for (`Holds/G19`, G25): `rebase` and `am` stopped, `rebase` and `merge` whose
 //! autostash came back with conflicts, `cherry-pick` and `revert` stopped, `commit
 //! --amend` refusing and `commit` refusing while a cherry-pick or a rebase's pick stands,
-//! `checkout` and `switch` leaving a branch for a detached `HEAD`, and `branch -d`
-//! refusing. Copied under `git dupe`, Git's command would act on the project's repository;
+//! `checkout` and `switch` leaving a branch for a detached `HEAD` or `-m` leaving
+//! conflicts, and `branch -d` refusing. Copied under `git dupe`, Git's command would act on the project's repository;
 //! the hint names the `git dupe` form.
 //!
 //! What the code below cannot show:
@@ -17,9 +17,10 @@
 //!   to their first `--`, after which a word is an operand. The words that keep the
 //!   `checkout` and `switch` hint away are matched exactly: a bundle or an abbreviation of
 //!   `--detach` or `-q` is not read, so a hint may follow where Git printed no advice,
-//!   never one the state makes false. So are `commit`'s `--amend` and `--allow-empty`, of
-//!   which `--allow-empty-message` is no spelling, and the `--quit` of `merge` and
-//!   `rebase`. `cherry-pick`'s and `revert`'s `-n` is read in a bundle too
+//!   never one the state makes false. So are `commit`'s `--allow-empty`, of which
+//!   `--allow-empty-message` is no spelling, and the `--quit` of `merge` and `rebase`.
+//!   `commit`'s `--amend` is read in every prefix Git reads as it (`reads_as_amend`), and
+//!   the `-m` of `checkout` and `switch` in a bundle too (`reads_as_merge`). `cherry-pick`'s and `revert`'s `-n` is read in a bundle too
 //!   (`reads_as_no_commit`), because the line's `--continue` would commit what it was
 //!   given to leave uncommitted. `branch`'s `--delete` is read in every spelling Git
 //!   reads as it (`reads_as_delete`), so a bundle that holds `d` as another option's value
@@ -46,8 +47,9 @@
 //!   both only where the words admit the hint; `cherry-pick` and `revert` ask `rev-parse
 //!   -q --verify` of their pseudo-reference after a run that did not exit 0, and `commit`
 //!   without `--amend` asks it of `CHERRY_PICK_HEAD` alone after a run that exited 1;
-//!   `merge`, and `rebase` where it left no stop, ask one `ls-files -u -z` after a run
-//!   that exited 0, from the root, because `ls-files` lists only what lies below its
+//!   `merge`, `rebase` where it left no stop, and `checkout` and `switch` given `-m` where
+//!   no detached `HEAD` decided, ask one `ls-files -u -z` after a run that exited 0, from
+//!   the root, because `ls-files` lists only what lies below its
 //!   directory; `am`, `branch`, and `commit --amend` add none. The `symbolic-ref` before
 //!   the run decides nothing about the run (N8).
 //! - An index entry left unmerged by a `rebase` or `merge` that exited 0 has one cause, an
@@ -56,7 +58,9 @@
 //!   words; but for `--quit`, which ends the operation leaving its conflicts in the index
 //!   and an autostash, where there is one, unapplied in the stash, so that the line and its
 //!   `stash drop` would be false there. `merge` keeps no stop of its own, so its entry reads
-//!   no directory.
+//!   no directory. After `checkout -m` or `switch -m` such an entry is a local change whose
+//!   merge conflicted, which only from 2.55.0 Git keeps as a stash entry (S12): its line is
+//!   conditioned on that entry, which nothing it reads can prove.
 //! - `CHERRY_PICK_HEAD` and `REVERT_HEAD` are asked of Git, because they live in the
 //!   reference store, which may hold no file for them (S15); a rebase's stop is in the
 //!   Git directory in every store, read by `lstat` (S12), after the pseudo-reference, so
@@ -74,7 +78,9 @@
 //!   too; it says what deletes a branch `-d` keeps, which is true either way. So does the
 //!   `commit --amend` hint, a hook's or an editor's refusal included, and its line says
 //!   what its commands do where the amend would have left the commit empty; it names
-//!   `reset HEAD^` for a commit with a parent, because a root commit has none.
+//!   `--allow-empty` added to the command as typed, because a bare form would drop an
+//!   `--only <path>` and commit what is staged, and `reset HEAD^` for a commit with a
+//!   parent, because a root commit has none.
 
 use std::fs;
 use std::path::Path;
@@ -88,7 +94,8 @@ use crate::runner::{Against, End, Run};
 pub(super) const REBASE: &[u8] =
     b"a private rebase that stopped goes on with 'git dupe rebase --continue' \
     once 'git dupe add <path>' has marked each conflict resolved, \
-    'git dupe commit --amend' has amended the commit an edit or a reword stopped at, or \
+    'git dupe commit --amend' has amended the commit an edit or a reword stopped at, \
+    'git dupe commit --allow-empty' has kept a commit the replay left empty, or \
     'git dupe rebase --edit-todo' has mended a todo list Git could not read, as the stop \
     asks; 'git dupe rebase --skip' leaves out a commit that would not apply, and \
     'git dupe rebase --abort' ends the rebase; plain 'git add', 'git commit', and \
@@ -131,14 +138,23 @@ pub(super) const AUTOSTASH: &[u8] = b"the private changes Git stashed before mer
     'git add', 'git stash', and 'git reset' act on the project's repository";
 
 // Conditioned: exit 1 alone does not prove the amend empty. A root commit has no `HEAD^`.
-const EMPTY_AMEND: &[u8] = b"where the private amend would have left the commit empty, \
-    'git dupe commit --amend --allow-empty' amends it all the same, and, on a commit with a \
-    parent, 'git dupe reset HEAD^' removes the commit, leaving the files as they are; \
-    plain 'git commit' and 'git reset' act on the project's repository";
+const EMPTY_AMEND: &[u8] = b"where the private amend would have left the commit empty, the \
+    same 'git dupe commit' as typed with --allow-empty added amends it all the same, and, on \
+    a commit with a parent, 'git dupe reset HEAD^' removes the commit, leaving the files as \
+    they are; plain 'git commit' and 'git reset' act on the project's repository";
+
+// Conditioned: earlier releases keep no stash entry here, so that `reset --hard` would
+// lose the change for good and `stash drop` has nothing to drop.
+const MERGED_CHANGES: &[u8] = b"the private changes carried across the switch came back with \
+    conflicts: 'git dupe add <path>' marks each one resolved; where Git also kept them as a \
+    stash entry, as it does from 2.55.0, 'git dupe stash drop' then drops the entry, or \
+    'git dupe reset --hard' throws away the changes that came back, conflicts and all, and \
+    'git dupe stash pop' applies the entry again later; plain 'git add', 'git stash', and \
+    'git reset' act on the project's repository";
 
 /// The entries of the table, in its order: where a word has several, the first whose
 /// words, end, and state hold decides.
-const FAMILIES: [Family; 11] = [
+const FAMILIES: [Family; 13] = [
     Family {
         word: b"rebase",
         excluding: None,
@@ -184,13 +200,13 @@ const FAMILIES: [Family; 11] = [
     Family {
         word: b"commit",
         excluding: Some(|word| word == b"--allow-empty"),
-        requiring: Some(|word| word == b"--amend"),
+        requiring: Some(reads_as_amend),
         trigger: Trigger::ExitedOne,
         line: EMPTY_AMEND,
     },
     Family {
         word: b"commit",
-        excluding: Some(|word| word == b"--amend"),
+        excluding: Some(reads_as_amend),
         requiring: None,
         trigger: Trigger::ExitedOneWhile("CHERRY_PICK_HEAD"),
         line: CHERRY_PICK,
@@ -215,6 +231,20 @@ const FAMILIES: [Family; 11] = [
         requiring: Some(reads_as_delete),
         trigger: Trigger::ExitedOne,
         line: UNMERGED,
+    },
+    Family {
+        word: b"checkout",
+        excluding: None,
+        requiring: Some(reads_as_merge),
+        trigger: Trigger::Unmerged,
+        line: MERGED_CHANGES,
+    },
+    Family {
+        word: b"switch",
+        excluding: None,
+        requiring: Some(reads_as_merge),
+        trigger: Trigger::Unmerged,
+        line: MERGED_CHANGES,
     },
 ];
 
@@ -354,6 +384,22 @@ fn admitted(words: &[Vec<u8>]) -> Vec<&'static Family> {
 /// `--quiet`, which Git refuses, exit 129.
 fn quits(word: &[u8]) -> bool {
     word == b"--quit"
+}
+
+/// Whether `commit` reads `word` as `--amend`, in every listed release (S12): the word, or
+/// a prefix of it at least four bytes long. `--a` is ambiguous, exit 129.
+fn reads_as_amend(word: &[u8]) -> bool {
+    word.len() >= 4 && b"--amend".starts_with(word)
+}
+
+/// Whether `checkout` or `switch` reads `word` as `--merge`: the word itself, or a word
+/// beginning with one `-` that holds `m` among its letters, which a value attached to
+/// another letter can also spell, the line being true either way.
+fn reads_as_merge(word: &[u8]) -> bool {
+    word == b"--merge"
+        || word
+            .strip_prefix(b"-")
+            .is_some_and(|letters| !letters.starts_with(b"-") && letters.contains(&b'm'))
 }
 
 /// Whether `cherry-pick` or `revert` reads `word` as `--no-commit`: the word itself, or

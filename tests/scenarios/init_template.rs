@@ -8,7 +8,7 @@ use std::path::Path;
 
 use crate::harness::{
     End, Output, Scenario, Tree, completed_hint, detached, dupe_succeeds, private_config_value,
-    unchanged, under_each_release,
+    unchanged, under_each_release, write,
 };
 
 /// The template is copied as plain `git init` copies it, and its `HEAD` stands in place of
@@ -175,10 +175,10 @@ fn a_templates_config_left_partly_copied_is_started_over_by_detach_force_then_in
     });
 }
 
-/// A file a template's `config` includes is read after the keys `init` writes in place in
-/// the repository's own `config`, and keeps its own values of them: F2's keys and the
-/// identity G1 copies stand in the own file, the included values are the ones Git reads,
-/// and neither file is edited, by `init` or by `init` run again (F2, G1, S12).
+/// A file a template's `config` includes, read after the keys that `config` holds, keeps
+/// its own values of them: a key whose effective value it gives is not written, so that
+/// the `config`'s own values stand there, the included values are the ones Git reads, and
+/// neither file is edited, by `init` or by `init` run again (F2, G1, S12).
 #[test]
 fn a_file_a_templates_config_includes_keeps_its_values_over_inits_keys() {
     under_each_release(|s| {
@@ -203,17 +203,17 @@ fn a_file_a_templates_config_includes_keeps_its_values_over_inits_keys() {
             let output = dupe_succeeds(s, &dir, &["config", scope, "--get", key]);
             String::from_utf8(output.stdout).unwrap()
         };
-        for (key, written, included) in [
-            ("status.showUntrackedFiles", "no", "normal"),
-            ("advice.statusHints", "false", "yes"),
-            ("user.name", "Public Name", "Included Name"),
+        for (key, own, included) in [
+            ("status.showUntrackedFiles", "all", "normal"),
+            ("advice.statusHints", "true", "yes"),
+            ("user.name", "Template Name", "Included Name"),
             (
                 "user.email",
-                "public@example.invalid",
+                "template@example.invalid",
                 "included@example.invalid",
             ),
         ] {
-            assert_eq!(get("--local", key), format!("{written}\n"), "{key}");
+            assert_eq!(get("--local", key), format!("{own}\n"), "{key}");
             assert_eq!(get("--includes", key), format!("{included}\n"), "{key}");
         }
         let private = dir.join(".git/dupe");
@@ -222,6 +222,140 @@ fn a_file_a_templates_config_includes_keeps_its_values_over_inits_keys() {
 
         completed_hint(&s.git(["dupe", "init"]).from(&dir).run(), false);
         unchanged(&configured, &private);
+    });
+}
+
+/// What `git dupe config --includes --get <key>` answers in the workspace at `dir`.
+fn effective(s: &Scenario, dir: &Path, key: &str) -> String {
+    let output = dupe_succeeds(s, dir, &["config", "--includes", "--get", key]);
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// What a template holding only an `[include]` gives: the four keys, each the included
+/// file's.
+const INCLUDED_FILE: &[u8] =
+    b"[user]\n\tname = Included Name\n\temail = included@example.invalid\n\
+    [status]\n\tshowUntrackedFiles = all\n[advice]\n\tstatusHints = true\n";
+
+const INCLUDE_ALONE: &[u8] = b"[include]\n\tpath = included\n";
+
+/// A repository at `dir` whose local configuration sets an identity of its own.
+fn with_a_public_identity(s: &Scenario, dir: &Path) {
+    for (key, value) in [
+        ("user.name", "Public Name"),
+        ("user.email", "public@example.invalid"),
+    ] {
+        s.git(["config", key, value]).from(dir).succeeds();
+    }
+}
+
+fn the_included_values_stand(s: &Scenario, dir: &Path) {
+    for (key, value) in [
+        ("user.name", "Included Name\n"),
+        ("user.email", "included@example.invalid\n"),
+        ("status.showUntrackedFiles", "all\n"),
+        ("advice.statusHints", "true\n"),
+    ] {
+        assert_eq!(effective(s, dir, key), value, "{key}");
+    }
+}
+
+/// The identity of the next private commit, as it lands.
+fn commits_as_included(s: &Scenario, dir: &Path) {
+    write(dir, "notes/mine.md", b"mine\n");
+    dupe_succeeds(s, dir, &["add", "notes/"]);
+    dupe_succeeds(s, dir, &["commit", "-m", "mine"]);
+    let log = dupe_succeeds(s, dir, &["log", "-1", "--format=%an <%ae>"]);
+    assert_eq!(log.stdout, b"Included Name <included@example.invalid>\n");
+}
+
+/// Git leaves the include first and appends a key the file does not hold after it, where
+/// the key would outrank the included value: a key whose effective value the include gives
+/// is not written, and one it leaves unset is (F2, G1, S12).
+#[test]
+fn a_template_holding_only_an_include_keeps_what_the_included_file_sets() {
+    under_each_release(|s| {
+        let template_dir = template(s, &[("config", INCLUDE_ALONE), ("included", INCLUDED_FILE)]);
+        let dir = s.dir().join("workspace");
+        s.repository(&dir);
+        with_a_public_identity(s, &dir);
+        let output = init_under(s, &template_dir, &dir);
+        assert_eq!(output.end, End::Code(0), "{output:?}");
+        the_included_values_stand(s, &dir);
+        let own = s
+            .private(&dir)
+            .git(["config", "--local", "--no-includes", "--get", "user.name"])
+            .run();
+        assert_eq!(own.end, End::Code(1), "{own:?}");
+        commits_as_included(s, &dir);
+
+        // A complete workspace: nothing is written again.
+        let config = fs::read(dir.join(".git/dupe/config")).unwrap();
+        let again = init_under(s, &template_dir, &dir);
+        assert_eq!(again.end, End::Code(0), "{again:?}");
+        assert_eq!(fs::read(dir.join(".git/dupe/config")).unwrap(), config);
+
+        // An `init` a kill left unfinished is completed under the same rule.
+        s.private(&dir)
+            .git(["config", "--local", "--unset", "core.worktree"])
+            .succeeds();
+        let again = init_under(s, &template_dir, &dir);
+        assert_eq!(again.end, End::Code(0), "{again:?}");
+        the_included_values_stand(s, &dir);
+    });
+}
+
+#[test]
+fn a_key_the_included_file_leaves_unset_is_copied_all_the_same() {
+    under_each_release(|s| {
+        let included = b"[user]\n\tname = Included Name\n";
+        let template_dir = template(s, &[("config", INCLUDE_ALONE), ("included", included)]);
+        let dir = s.dir().join("workspace");
+        s.repository(&dir);
+        with_a_public_identity(s, &dir);
+        let output = init_under(s, &template_dir, &dir);
+        assert_eq!(output.end, End::Code(0), "{output:?}");
+        assert_eq!(effective(s, &dir, "user.name"), "Included Name\n");
+        assert_eq!(effective(s, &dir, "user.email"), "public@example.invalid\n");
+        assert_eq!(effective(s, &dir, "status.showUntrackedFiles"), "no\n");
+        assert_eq!(effective(s, &dir, "advice.statusHints"), "false\n");
+    });
+}
+
+/// A value of the file's own after the include is the effective one, and is written in
+/// place, as F2 admits.
+#[test]
+fn a_value_of_the_config_itself_after_the_include_is_replaced_by_the_copy() {
+    under_each_release(|s| {
+        let config = b"[include]\n\tpath = included\n[user]\n\tname = Template Name\n";
+        let included = b"[user]\n\tname = Included Name\n";
+        let template_dir = template(s, &[("config", config), ("included", included)]);
+        let dir = s.dir().join("workspace");
+        s.repository(&dir);
+        with_a_public_identity(s, &dir);
+        let output = init_under(s, &template_dir, &dir);
+        assert_eq!(output.end, End::Code(0), "{output:?}");
+        assert_eq!(effective(s, &dir, "user.name"), "Public Name\n");
+    });
+}
+
+#[test]
+fn clone_under_a_template_holding_only_an_include_keeps_what_the_included_file_sets() {
+    under_each_release(|s| {
+        let template_dir = template(s, &[("config", INCLUDE_ALONE), ("included", INCLUDED_FILE)]);
+        let second = s.second_machine("workspace");
+        with_a_public_identity(s, &second.root);
+        let words = [
+            OsStr::new("-c"),
+            &template_dir,
+            OsStr::new("dupe"),
+            OsStr::new("clone"),
+            second.first.private_remote.as_os_str(),
+        ];
+        let output = s.git(words).from(&second.root).run();
+        assert_eq!(output.end, End::Code(0), "{output:?}");
+        the_included_values_stand(s, &second.root);
+        commits_as_included(s, &second.root);
     });
 }
 

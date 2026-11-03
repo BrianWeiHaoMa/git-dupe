@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
+use std::io;
 use std::path::Path;
 use std::process::Command;
 
@@ -139,4 +140,17 @@ pub fn junction(target: &Path, at: &Path) {
         .output()
         .unwrap_or_else(|cause| panic!("cmd: {cause}"));
     assert!(made.status.success(), "mklink /J: {made:?}");
+}
+
+/// Whether `dir` equates spellings that differ in case: an `a` made there is found as `A`.
+pub fn equates_spellings(dir: &Path) -> bool {
+    let made = dir.join("a");
+    fs::write(&made, b"").unwrap_or_else(|cause| panic!("{}: {cause}", made.display()));
+    let found = match fs::symlink_metadata(dir.join("A")) {
+        Ok(_) => true,
+        Err(cause) if cause.kind() == io::ErrorKind::NotFound => false,
+        Err(cause) => panic!("{}: {cause}", dir.join("A").display()),
+    };
+    fs::remove_file(&made).unwrap_or_else(|cause| panic!("{}: {cause}", made.display()));
+    found
 }

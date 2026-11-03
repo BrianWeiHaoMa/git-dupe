@@ -160,6 +160,8 @@ pub enum Hiding {
     Add,
     /// `add -n`: nothing is written, and each path that would be hidden is named.
     DryRun,
+    /// `add` whose words Git will refuse: nothing is written, and nothing is named.
+    RefusalsAlone,
 }
 
 /// Hides `paths`: the one operation of every command that hides a path, given the hidden
@@ -178,6 +180,9 @@ pub fn hide_paths(
     let privately_tracked = &hidden.paths.privately_tracked;
     if let Some(refusal) = decision::refusal(paths, GITDUPE, privately_tracked, publicly_tracked) {
         return Err(refuse(refusal, publicly_tracked));
+    }
+    if let Hiding::RefusalsAlone = hiding {
+        return Ok(());
     }
     if let Hiding::DryRun = hiding {
         for path in keeper::hiding(&hidden, paths) {
@@ -238,7 +243,7 @@ fn newly_hidden(path: &[u8], tracked: bool, hiding: Hiding, at: impl Fn() -> Sta
         (Hiding::Hide, Standing::BeyondALink(link)) => [
             b", though it lies beyond the symbolic link ",
             &link[..],
-            b", which Git's add does not follow; run from the root, ",
+            b", and public Git was not asked about it; run from the root, ",
             &unhide,
             b" stops hiding it",
         ]
@@ -261,7 +266,7 @@ fn newly_hidden(path: &[u8], tracked: bool, hiding: Hiding, at: impl Fn() -> Sta
             b" stops hiding it",
         ]
         .concat(),
-        (Hiding::Add | Hiding::DryRun, _) => {
+        (Hiding::Add | Hiding::DryRun | Hiding::RefusalsAlone, _) => {
             [b"; run from the root, ", &unhide[..], b" stops hiding it"].concat()
         }
     };
@@ -482,7 +487,7 @@ pub fn route_to_private(path: Option<&[u8]>) -> Vec<u8> {
 fn refuse(refusal: Refusal, publicly_tracked: &BTreeSet<Vec<u8>>) -> Outcome {
     let line = match refusal {
         Refusal::TracksGitdupe => b"the project's repository tracks .gitdupe and the private \
-            repository does not; run 'git rm --cached .gitdupe' first"
+            repository does not; run 'git rm --cached .gitdupe' from the root first"
             .to_vec(),
         Refusal::PubliclyTracked { count, under } => match &under[..] {
             [file] if count == 1 && publicly_tracked.contains(file) => [

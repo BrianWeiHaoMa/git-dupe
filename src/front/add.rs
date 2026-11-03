@@ -13,6 +13,13 @@
 //!   word is the user's, so they carry `-c help.autocorrect=0` (`runner`).
 //! - A directory to hide is hidden by `hide::hide_paths`, the one operation that hides a
 //!   path, which decides its refusals and prints its `hint:`.
+//! - With no operand and the all-flag clear the run is the user's words alone, and, where
+//!   they name nothing Git acts on without a pathspec and it exits 0, one `hint:` follows,
+//!   because Git's advice there names plain `git add .`, which would stage the whole
+//!   project (`Holds/G13, G14`). The words decide, never Git's line (R5).
+//! - A last word that lacks its value is Git's usage error, and the run is the user's
+//!   words alone, after every refusal and before hide-first, so that no `--` of git-dupe's
+//!   becomes the value and nothing is hidden for a run Git refuses.
 //! - After the run that carries the literal operands exits 1, while the words spell
 //!   neither `-f` nor `--force`, one more private `check-ignore` asks about those
 //!   operands' paths, and a `hint:` names `git dupe add -f` when it reports any ignored,
@@ -53,6 +60,11 @@ const IGNORED: &[u8] = b"a path the private repository ignores is added with \
     'git dupe add -f <path>', and 'git dupe config advice.addIgnoredFile false' turns \
     Git's advice about it off; plain 'git add' and 'git config' act on the project's \
     repository";
+
+/// The hint after a `git dupe add` that named nothing, which staged nothing.
+const NOTHING_NAMED: &[u8] = b"'git dupe add .' adds what changed under the hidden paths here, \
+    and 'git dupe config advice.addEmptyPathspec false' turns Git's advice about it off; \
+    plain 'git add .' and 'git config' act on the project's repository";
 
 /// P1's table for `add`.
 pub const TABLE: [Entry; 17] = [
@@ -131,13 +143,18 @@ pub fn add(workspace: &Workspace, read: &Read, words: &[Vec<u8>], operands: &[Op
         operands,
         all_flag(read),
     ) {
-        Scoped::Unchanged => return unchanged(workspace, words),
+        Scoped::Unchanged => {
+            let ended = unchanged(workspace, words);
+            if let Outcome::Git(End::Code(0)) = ended
+                && nothing_acted_on(read)
+            {
+                lines::write(Level::Hint, NOTHING_NAMED);
+            }
+            return ended;
+        }
         Scoped::NothingHidden => {
-            lines::write(
-                Level::Hint,
-                b"no hidden path but .gitdupe lies there; 'git dupe add <path>' makes a path \
-                  private",
-            );
+            let tracked = hidden.paths.privately_tracked.contains(GITDUPE);
+            lines::write(Level::Hint, nothing_hidden_line(tracked));
             return Outcome::Answered;
         }
         Scoped::Scope(scope) => scope,
@@ -178,10 +195,25 @@ pub fn add(workspace: &Workspace, read: &Read, words: &[Vec<u8>], operands: &[Op
         .filter(|path| !hidden.paths.hides(path) && directory_at(root, path))
         .cloned()
         .collect();
+    if read.lacking_a_value().is_some() {
+        if !to_hide.is_empty()
+            && let Err(ended) = hide::hide_paths(
+                workspace,
+                &to_hide,
+                hidden,
+                &publicly_tracked,
+                Hiding::RefusalsAlone,
+            )
+        {
+            return ended;
+        }
+        return unchanged(workspace, words);
+    }
     let found = found(root, &scope.forms, &skipped);
     let updating = read.spells(&UPDATE) || read.spells(&REFRESH);
     let mut pathspecs = Pathspecs::kept(&scope, &skipped, privately_tracked, &found, updating);
-    if !scope.forms.is_empty() && !NOT_ASKED.iter().any(|entry| read.spells(entry)) {
+    let asking = !scope.forms.is_empty() || !skipped.is_empty();
+    if asking && !NOT_ASKED.iter().any(|entry| read.spells(entry)) {
         let ignored = match ignored(workspace, &pathspecs.asked(&scope)) {
             Ok(ignored) => ignored,
             Err(ended) => return ended,
@@ -236,6 +268,26 @@ pub fn add(workspace: &Workspace, read: &Read, words: &[Vec<u8>], operands: &[Op
         lines::write(Level::Warning, &skipped_line(skipped.len()));
     }
     Outcome::Git(status)
+}
+
+/// The hint where a form finds nothing hidden but `.gitdupe`. The list itself is named only
+/// where the private repository tracks it, the state a list emptied by hand leaves: of a
+/// file absent, or one the project's rules ignore, `git dupe add .gitdupe` adds nothing.
+fn nothing_hidden_line(gitdupe_tracked: bool) -> &'static [u8] {
+    if gitdupe_tracked {
+        b"no hidden path but .gitdupe lies there; 'git dupe add <path>' makes a path private, \
+          and, run from the root, 'git dupe add .gitdupe' stages the list itself"
+    } else {
+        b"no hidden path but .gitdupe lies there; 'git dupe add <path>' makes a path private"
+    }
+}
+
+/// Whether the words hold none of the spellings under which Git's `add` acts without a
+/// pathspec or before it looks for one, the all-flag's never reaching this run (S4).
+fn nothing_acted_on(read: &Read) -> bool {
+    ![&UPDATE, &PATCH, &EDIT]
+        .iter()
+        .any(|entry| read.spells(entry))
 }
 
 /// The first of `paths` that is no name, on a platform where a name is valid UTF-8.
@@ -396,6 +448,40 @@ mod tests {
         match table::read(&TABLE, &words) {
             Reading::Read(read) => all_flag(&read),
             other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn git_acts_without_a_pathspec_under_these_words_alone() {
+        let acts_on_nothing = |words: &[&str]| {
+            let words = read_add(words);
+            match table::read(&TABLE, &words) {
+                Reading::Read(read) => nothing_acted_on(&read),
+                other => panic!("{other:?}"),
+            }
+        };
+        for words in [
+            &["-u"][..],
+            &["--update"],
+            &["-p"],
+            &["--patch"],
+            &["-e"],
+            &["--edit"],
+        ] {
+            assert!(!acts_on_nothing(words), "{words:?}");
+        }
+        for words in [
+            &[][..],
+            &["--refresh"],
+            &["--renormalize"],
+            &["--no-all"],
+            &["--ignore-removal"],
+            &["-n"],
+            &["-v"],
+            &["-f"],
+            &["--chmod=+x"],
+        ] {
+            assert!(acts_on_nothing(words), "{words:?}");
         }
     }
 

@@ -15,9 +15,9 @@ it lists ("git dupe hide" or by hand), or a file "git dupe add <path>" tracks.
   git dupe help [COMMAND]    this text, or the help of COMMAND
 Refused: stash -u and -a ("git dupe add" first, then "git dupe stash"); push,
 pull, fetch, remote, or clone naming the project's repository or a remote of it
-("git dupe git" if meant, "git dupe remote remove" or "git dupe config --unset"
-for a private remote or group). Plain git is not guarded: git clean -x deletes
-private files, git stash -a stashes them, git add -f makes them public, a pull
-or checkout may overwrite them; commit first: "git dupe restore ." brings back
-what was staged. Each worktree is attached on its own, and git worktree remove
-takes its private repository with it. Needs Git 2.43.0 or newer, below 3.0.0.
+("git dupe git" if meant, "git dupe remote remove" or "git dupe config
+--unset-all" for a private remote/group). Plain git is not guarded: git clean -x
+deletes private files, git stash -a stashes them, git add -f makes them public,
+a pull or checkout may overwrite them; commit first: "git dupe restore ." brings
+back what was staged. Each worktree is attached on its own, and git worktree
+remove takes its private repository with it. Git 2.43.0 or newer, below 3.0.0.

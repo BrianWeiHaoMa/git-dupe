@@ -112,12 +112,15 @@ pub fn warnings(
     let mut asked = Vec::new();
     for (path, kind) in paths {
         let path = *path;
-        if beyond_a_link(workspace.root(), path, known) {
+        if let Some(link) = link_above(workspace.root(), path, known) {
+            // Nothing here of what Git does beyond it: on Windows a junction is such a
+            // link, and a directory Git walks (S24).
             warnings.push(
                 [
                     path,
-                    b" lies beyond a symbolic link, where public Git does not look; \
-                      whether it is ignored was not asked",
+                    b" lies beyond the symbolic link ",
+                    link,
+                    b"; public Git was not asked whether it ignores the path",
                 ]
                 .concat(),
             );

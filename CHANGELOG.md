@@ -8,6 +8,52 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Fixed
+
+- `git dupe clean -X` without `-d` no longer deletes untracked files under a hidden
+  directory spelled in another case than `.gitdupe` spells it, on macOS and on Windows,
+  while the project tracks a file there, nor through a Windows junction standing at a
+  hidden path into which the project tracks a file. While the project tracks such a path,
+  the ignored files beside a hidden directory, in a directory no rule names, are deleted
+  where plain `git clean -X` keeps them with it.
+- While `.gitdupe` cannot be read, as a file Windows PowerShell 5.1's `>` wrote cannot,
+  every command leaves the exclude rules as they stood, so that what they hid stays
+  hidden, and `git dupe clean` is refused, naming the file, where it used to delete what
+  the file listed.
+- `git dupe init` and `git dupe clone` under a template whose `config` includes another
+  file leave that file's `user.name`, `user.email`, `status.showUntrackedFiles`, and
+  `advice.statusHints` in force, where the keys written after the include outranked them.
+- The `clone` help and the page say `git dupe restore <path>`, which replaces a kept file,
+  where they said `git dupe restore`, which restores nothing.
+- `git dupe add notes/` stages the private changes under `notes` and exits 0 when a public
+  file there matches an ignore rule, where it exited 1 and staged nothing over it.
+- `git dupe add notes/ --chmod`, its value missing, is Git's usage error and hides nothing.
+- After a `git dupe add` that names nothing, a hint names `git dupe add .`, where Git's
+  advice names plain `git add .`, which stages the whole project. Where nothing but a
+  privately tracked `.gitdupe` is hidden, the hint also names `git dupe add .gitdupe`.
+- The refusal while the project tracks `.gitdupe` says to run `git rm --cached .gitdupe`
+  from the root.
+- After a private `pull --rebase` stopped at a conflict, `git dupe` names the private
+  `rebase --continue`, `--skip`, and `--abort`, where Git's advice names plain commands
+  that act on a rebase paused in the project's repository.
+- After `git dupe switch -m` or `checkout -m` that leaves conflicts, a hint names the
+  private `add`, `stash drop`, `reset --hard`, and `stash pop`, where Git from 2.55.0 keeps
+  the local change as a stash entry and names plain commands.
+- The hint after an amend that would leave the commit empty names `--allow-empty` added to
+  the command as typed, so that `--only <path>` stands, and it follows `--am`, `--ame`, and
+  `--amen`, which Git reads as `--amend`.
+- The hint after a rejected `git dupe push <remote> <branch>` says the pull runs on the
+  local branch pushed, switching to it first, where it used to bring the commits into
+  whichever branch was checked out.
+- The hint after a `push` from a detached `HEAD` writes `HEAD:refs/heads/<branch>`, which a
+  tag of the branch's name on the remote does not make ambiguous.
+- The hint at a stopped rebase names `git dupe commit --allow-empty` for a commit the replay
+  left empty.
+- The refusal of a private remote group names `git dupe config --unset-all`, because
+  `--unset` fails on a key with several values.
+- The lines about a hidden path beyond a symbolic link say that public Git was not asked
+  about it, and no longer what Git does there, which was false of a Windows junction.
+
 ## [0.4.0] - 2026-11-01
 
 ### Added

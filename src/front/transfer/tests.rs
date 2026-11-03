@@ -194,22 +194,14 @@ fn answering(then: &Then, ended: &Outcome, answers: &[(Question, Answer)]) -> Op
 /// `edit` or a `break`, no conflict, and the index is not asked; after exit 1 the index
 /// tells a conflict, which draws none, from a failed reword or an unreadable todo list.
 #[test]
-fn a_pull_left_stopped_with_nothing_unmerged_draws_the_rebases_line() {
+fn a_pull_left_stopped_draws_the_rebases_line_whatever_the_index_holds() {
     let then = pull(None, None);
     let stopped = (Question::RebaseStopped, Answer::Yes);
-    let unmerged = |answer| (Question::Unmerged, answer);
-    assert_eq!(
-        answering(&then, &git(0), &[stopped]).as_deref(),
-        Some(advice::REBASE)
-    );
-    assert_eq!(
-        answering(&then, &git(1), &[stopped, unmerged(Answer::No)]).as_deref(),
-        Some(advice::REBASE)
-    );
-    for answer in [Answer::Yes, Answer::Unanswered] {
+    // The stop decides at either end: nothing is asked of the index.
+    for end in [git(0), git(1)] {
         assert_eq!(
-            answering(&then, &git(1), &[stopped, unmerged(answer)]),
-            None
+            answering(&then, &end, &[stopped]).as_deref(),
+            Some(advice::REBASE)
         );
     }
     // No rebase stopped, after exit 1: nothing more is asked, and no hint.

@@ -298,9 +298,9 @@ fn an_obstruction_is_named_once_and_nothing_is_written_through_or_below_it() {
                     b"git dupe restore -- lnk",
                 ],
                 // Settle's own: hidden paths beyond a link, which public Git never sees.
-                &[b"lnk/a lies beyond a symbolic link"],
-                &[b"lnk/b lies beyond a symbolic link"],
-                &[b"dangling/x lies beyond a symbolic link"],
+                &[b"lnk/a lies beyond the symbolic link lnk"],
+                &[b"lnk/b lies beyond the symbolic link lnk"],
+                &[b"dangling/x lies beyond the symbolic link dangling"],
             ],
         );
 
