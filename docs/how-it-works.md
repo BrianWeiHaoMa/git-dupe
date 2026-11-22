@@ -31,14 +31,16 @@ screen of `git dupe help`:
   a `push`, `pull`, `fetch`, `remote`, or `clone` naming the project's repository or any
   of its remotes. `git dupe git <words>` is the route to any of them when you mean it.
 
-A day's work, from the root, is the commands you already type, after `git dupe`:
+A day's work, from the root, is the commands you already type, after `git dupe`: see
+what changed under the hidden paths, stage it as `git add -A` does, under them alone,
+commit, take what your other machines pushed, and send what this one committed:
 
 ```sh
-git dupe status                        # what changed under the hidden paths
-git dupe add -A                        # stage it as git add -A does, under them alone
+git dupe status
+git dupe add -A
 git dupe commit -m "Notes of the day"
-git dupe pull                          # take what your other machines pushed
-git dupe push                          # send what this one committed
+git dupe pull
+git dupe push
 ```
 
 ## The dupe and the hidden paths
@@ -95,9 +97,11 @@ project/
 
 Your history lives in `.git/dupe`, or, in a linked worktree, in that worktree's own Git
 directory under `.git/worktrees/`. Delete the clone, or remove the worktree, and
-unpushed history goes with it, so push first. `git dupe detach` is the way out: it
-leaves every file on disk, and refuses, without `--force`, while a change is uncommitted
-or a commit of a branch, a tag, a stash entry, or `HEAD` is on no remote.
+unpushed history goes with it, and so does a file in no commit: before removing a
+worktree, save its work in the order [Questions](questions.md) gives. `git dupe detach`
+is the way out: it leaves every file on disk, and refuses, without `--force`, while a
+change is uncommitted or a commit of a branch, a tag, a stash entry, or `HEAD` is on no
+remote.
 
 ## Limits
 
@@ -143,7 +147,8 @@ or a commit of a branch, a tag, a stash entry, or `HEAD` is on no remote.
   apply in every worktree, since `.git/info/exclude` is shared: a path one worktree hides
   is ignored by the project's Git in the others too. `git worktree remove` and
   `git worktree prune` delete a linked worktree's dupe with it, whatever files of yours
-  stand on disk, so push first.
+  stand on disk, which are ignored files to the project's Git: save its work first, in
+  the order [Questions](questions.md) gives.
 - **Up to 1,000 hidden paths, a few thousand files.** That is the envelope the suite
   covers, the hidden paths not below another one taking at most 128,000 bytes together.
   They are passed to Git on one command line; a list that does not fit is refused,

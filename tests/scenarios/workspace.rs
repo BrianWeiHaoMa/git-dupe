@@ -1,20 +1,22 @@
 //! Where a command that needs a workspace stands: outside any repository it ends as Git
 //! does, and in a worktree git-dupe is not attached to it is refused naming
-//! `git dupe init`, whatever the other worktrees of the project hold. Nothing here is
-//! attached by git-dupe, `.git/dupe` being a fixture, but the linked worktrees whose own
-//! `init` shows that each worktree is attached on its own.
+//! `git dupe clone`, `git dupe help clone`, and `git dupe init`, whatever the other
+//! worktrees of the project hold. Nothing here is attached by git-dupe, `.git/dupe` being a
+//! fixture, but the linked worktrees whose own `init` shows that each worktree is attached
+//! on its own, and the worktrees the refusal's own commands attach.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Scenario, Tree, Worktree, as_git_spells_bytes, holds, locate_words, name, name_accepted,
-    names, under_each_release, word_of,
+    End, Scenario, Tree, Worktree, as_git_spells_bytes, common_private_url, holds, locate_words,
+    name, name_accepted, names, under_each_release, word_of,
 };
 
 /// `git dupe <words>` from `directory` must be the refusal of an unattached repository:
-/// nothing on standard output, one `fatal:` line naming `git dupe init`, exit 128.
+/// nothing on standard output, one `fatal:` line naming both ways to attach, `git dupe
+/// clone` with `git dupe help clone` beside it and `git dupe init`, exit 128.
 fn refused_as_unattached(s: &Scenario, directory: &Path, words: &[&OsStr]) -> Vec<u8> {
     let refusal = s
         .git([OsStr::new("dupe")].iter().chain(words))
@@ -22,9 +24,74 @@ fn refused_as_unattached(s: &Scenario, directory: &Path, words: &[&OsStr]) -> Ve
         .run();
     assert!(refusal.stdout.is_empty(), "{words:?}: {refusal:?}");
     let line = refusal.only_line("fatal");
-    assert!(holds(line, b"git dupe init"), "{words:?}: {refusal:?}");
+    for named in [
+        &b"'git dupe clone <url>'"[..],
+        b"'git dupe help clone'",
+        b"'git dupe init'",
+    ] {
+        assert!(holds(line, named), "{words:?}: {refusal:?}");
+    }
     assert_eq!(refusal.end, End::Code(128), "{words:?}: {refusal:?}");
     line.to_vec()
+}
+
+/// The refusal says the same in an unattached main worktree, a second machine's clone, as
+/// in an unattached linked worktree, and each command it names, typed as it shows it there,
+/// does what it says: `git dupe help clone` shows the URL of the main worktree's private
+/// repository, `git dupe clone` of that URL in the linked worktree, or of the private remote
+/// on the second machine, brings the private files, and `git dupe init` attaches an empty
+/// private repository (G4, In use 5, In use 11).
+#[test]
+fn the_unattached_refusal_names_clone_and_init_and_each_does_what_it_says() {
+    under_each_release(|s| {
+        let machines = s.second_machine("named");
+        let first = &machines.first;
+        let main_line = refused_as_unattached(s, &machines.root, &[OsStr::new("status")]);
+        let linked_line = refused_as_unattached(s, &first.linked, &[OsStr::new("status")]);
+        assert_eq!(main_line, linked_line);
+
+        let help = s
+            .git(["dupe", "help", "clone"])
+            .from(&first.linked)
+            .succeeds();
+        let url_form = br#""$(git rev-parse --git-common-dir)/dupe""#;
+        assert!(holds(&help.stdout, url_form), "{help:?}");
+        // The URL as a shell expands the form `help clone` shows, from the linked worktree.
+        let url = common_private_url(s, &first.linked);
+        let private_remote = first.private_remote.to_str().unwrap();
+        let tracked = s.private(&first.root).git(["ls-files"]).succeeds().stdout;
+        let tracked = String::from_utf8(tracked).unwrap();
+        assert!(tracked.lines().count() > 1, "{tracked}");
+        for (root, url) in [
+            (&first.linked, url.as_str()),
+            (&machines.root, private_remote),
+        ] {
+            s.git(["dupe", "clone", url]).from(root).succeeds();
+            // Every private file, `.gitdupe` and the files it hides among them.
+            for path in tracked.lines() {
+                assert_eq!(
+                    fs::read(root.join(path)).unwrap(),
+                    fs::read(first.root.join(path)).unwrap(),
+                    "{}: {path}",
+                    root.display()
+                );
+            }
+            s.git(["dupe", "status"]).from(root).succeeds();
+        }
+
+        let empty = s.dir().join("empty");
+        s.repository(&empty);
+        refused_as_unattached(s, &empty, &[OsStr::new("status")]);
+        s.git(["dupe", "init"]).from(&empty).succeeds();
+        assert!(empty.join(".git/dupe/HEAD").is_file());
+        let log = s.git(["dupe", "log"]).from(&empty).run();
+        assert_ne!(
+            log.end,
+            End::Code(0),
+            "an empty private repository: {log:?}"
+        );
+        s.git(["dupe", "status"]).from(&empty).succeeds();
+    });
 }
 
 #[test]

@@ -16,6 +16,10 @@
 //!   whole alone. The same reading of a relative path, and of one beginning with `~`,
 //!   serves them and the public URLs, so that a URL and a word that Git would open at one
 //!   path compare equal.
+//! - The same places say which other worktree's private repository a URL names, for the
+//!   hint after a push to one (`Holds/G18`): the URL's local forms against the canonical
+//!   path of `dupe` in each Git directory other than the one the command runs in. The main worktree's is the common Git directory's, and a linked
+//!   worktree's is named for its Git directory's last component, as G27's warnings name it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -35,6 +39,24 @@ pub enum Place {
     GitDirectory(Vec<u8>),
 }
 
+/// A worktree of the project, as git-dupe's lines name it (G27).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Worktree {
+    Main,
+    /// The linked worktree of this name, as bytes.
+    Linked(Vec<u8>),
+}
+
+impl Worktree {
+    /// `the main worktree`, or `worktree <name>`, the name's bytes as they stand.
+    pub fn named(&self) -> Vec<u8> {
+        match self {
+            Worktree::Main => b"the main worktree".to_vec(),
+            Worktree::Linked(name) => [&b"worktree "[..], name].concat(),
+        }
+    }
+}
+
 /// The public places of one command, and where a relative path is read from.
 pub struct Places {
     root: PathBuf,
@@ -44,12 +66,15 @@ pub struct Places {
     urls: BTreeMap<Form, Place>,
     /// The canonical path of every root, `.git` entry, and Git directory.
     paths: BTreeMap<Vec<u8>, Place>,
+    /// Each Git directory as given, with the worktree it is the Git directory of.
+    worktrees: Vec<(Vec<u8>, Worktree)>,
 }
 
 impl Places {
     /// The places of `remotes`, each a remote's name and one URL it is given; of `roots`,
-    /// each a working tree's root; and of `git_directories`, each absolute. A relative path
-    /// is read `from` where `ReadFrom` says, for the URLs here and for every word asked.
+    /// each a working tree's root; and of `git_directories`, each absolute, the common one
+    /// first and then each directly under its `worktrees/`. A relative path is read `from`
+    /// where `ReadFrom` says, for the URLs here and for every word asked.
     pub fn new<'a>(
         remotes: impl IntoIterator<Item = (&'a [u8], &'a [u8])>,
         roots: impl IntoIterator<Item = &'a [u8]>,
@@ -62,6 +87,7 @@ impl Places {
             home: from.home.map(<[u8]>::to_vec),
             urls: BTreeMap::new(),
             paths: BTreeMap::new(),
+            worktrees: Vec::new(),
         };
         for (name, url) in remotes {
             let place = Place::Remote {
@@ -83,10 +109,64 @@ impl Places {
             path(root, Place::WorkingTree(root.to_vec()));
             path(&entry, Place::GitEntry(entry.clone()));
         }
-        for directory in git_directories {
+        for (at, directory) in git_directories.into_iter().enumerate() {
             path(directory, Place::GitDirectory(directory.to_vec()));
+            let worktree = match at {
+                0 => Worktree::Main,
+                _ => Worktree::Linked(last_component(directory).to_vec()),
+            };
+            places.worktrees.push((directory.to_vec(), worktree));
         }
         places
+    }
+
+    /// The worktree whose private repository Git opens for `url`, a URL it sends to: `dupe`
+    /// in that worktree's Git directory, other than `own`, the private repository of the
+    /// worktree the command runs in. Asked strictly, since a hint names it as where the push
+    /// went. `url` is a local path or a `file://` URL, which Git opens no other way, an
+    /// absolute path as `Path::is_absolute` tells included, so that a drive's on Windows is
+    /// one. Git opens `X/.git`, then `X`, then `X.git/.git`, then `X.git`, the first that
+    /// exists (S13): of the paths Git may open for `url` (`destination`), the repository
+    /// exists, and every other that exists is one Git tries only after it, `X.git` or
+    /// `X.git/.git` of it, so that Git opens it; a `.git` inside it, which Git tries first,
+    /// is one of the others. `None` otherwise.
+    pub fn private_repository_named_by(&self, url: &[u8], own: &Path) -> Option<&Worktree> {
+        let from = ReadFrom {
+            root: &self.root,
+            outside: self.outside.as_deref(),
+            home: self.home.as_deref(),
+        };
+        let forms = destination::forms(url, from);
+        let absolute = crate::bytes::name(url).is_some_and(|name| Path::new(name).is_absolute());
+        let local_only = absolute
+            || url.starts_with(b"file://")
+            || forms.iter().all(|form| matches!(form, Form::Local(_)));
+        if !local_only {
+            return None;
+        }
+        let exists =
+            |path: &[u8]| crate::bytes::name(path).is_some_and(|name| Path::new(name).exists());
+        let existing: Vec<&[u8]> = forms
+            .iter()
+            .filter_map(|form| match form {
+                Form::Local(path) => Some(path.as_slice()),
+                Form::Url { .. } => None,
+            })
+            .filter(|path| exists(path))
+            .collect();
+        let own = destination::canonical(crate::bytes::of(own.as_os_str()));
+        self.worktrees.iter().find_map(|(directory, worktree)| {
+            let private = destination::canonical(&[&directory[..], b"/dupe"].concat());
+            let after: Vec<Vec<u8>> = [&b".git"[..], b".git/.git"]
+                .iter()
+                .map(|suffix| destination::canonical(&[&private[..], suffix].concat()))
+                .collect();
+            let opened = existing.contains(&private.as_slice())
+                && existing
+                    .iter()
+                    .all(|path| *path == private || after.iter().any(|later| later == path));
+            (opened && private != own).then_some(worktree)
+        })
     }
 
     /// The public place `word` names, asked of the word whole and, when it holds `=`, of
@@ -119,6 +199,15 @@ impl Places {
                 path.or_else(|| self.urls.get(&form))
             })
     }
+}
+
+/// What follows the last separator of `path`, as the platform calls one.
+fn last_component(path: &[u8]) -> &[u8] {
+    let after = path
+        .iter()
+        .rposition(|&byte| std::path::is_separator(char::from(byte)))
+        .map_or(0, |at| at + 1);
+    &path[after..]
 }
 
 #[cfg(test)]
@@ -279,6 +368,96 @@ mod tests {
         ] {
             assert_eq!(named(word), None, "{}", word.escape_ascii());
         }
+    }
+
+    /// The private repository of another worktree is `dupe` in its Git directory, whatever
+    /// spelling of its path a URL holds, never the one the command runs in, and only where
+    /// it is the one path Git may open for the URL that exists.
+    #[test]
+    fn a_url_names_another_worktree_s_private_repository_where_git_opens_only_it() {
+        let scratch =
+            Scratch(std::env::temp_dir().join(format!("git-dupe-private-{}", std::process::id())));
+        let _ = fs::remove_dir_all(&scratch.0);
+        let real = fs::canonicalize(std::env::temp_dir()).unwrap();
+        let printed = bytes(&real).strip_prefix(br"\\?\").unwrap_or(bytes(&real));
+        let base =
+            Path::new(crate::bytes::name(printed).unwrap()).join(scratch.0.file_name().unwrap());
+        let root = base.join("repo");
+        let common = root.join(".git");
+        let linked = common.join("worktrees/agent");
+        let (main_private, linked_private) = (common.join("dupe"), linked.join("dupe"));
+        for directory in [&main_private, &linked_private, &base.join("both")] {
+            fs::create_dir_all(directory).unwrap();
+        }
+        // `both` exists, and `both.git` leads to the main worktree's private repository:
+        // Git opens `both`, so the URL names neither.
+        symlink(&main_private, base.join("both.git")).unwrap();
+        let from = ReadFrom {
+            root: &root,
+            outside: None,
+            home: None,
+        };
+        let places = Places::new([], [], [bytes(&common), bytes(&linked)], from);
+        let agent = Worktree::Linked(b"agent".to_vec());
+        let path = |path: &Path| bytes(path).to_vec();
+        for (url, own, named) in [
+            (
+                b".git/dupe".to_vec(),
+                &linked_private,
+                Some(&Worktree::Main),
+            ),
+            (
+                b".git/dupe/".to_vec(),
+                &linked_private,
+                Some(&Worktree::Main),
+            ),
+            (
+                b".git/sub/../dupe".to_vec(),
+                &linked_private,
+                Some(&Worktree::Main),
+            ),
+            (path(&main_private), &linked_private, Some(&Worktree::Main)),
+            (
+                file_url(&main_private),
+                &linked_private,
+                Some(&Worktree::Main),
+            ),
+            (
+                b".git/worktrees/agent/dupe".to_vec(),
+                &main_private,
+                Some(&agent),
+            ),
+            (b".git/dupe".to_vec(), &main_private, None),
+            (b".git/dupe-other".to_vec(), &linked_private, None),
+            (b".git".to_vec(), &linked_private, None),
+            (path(&base.join("both")), &linked_private, None),
+            (
+                b"https://example.com/repo/.git/dupe".to_vec(),
+                &linked_private,
+                None,
+            ),
+        ] {
+            assert_eq!(
+                places.private_repository_named_by(&url, own),
+                named,
+                "{}",
+                url.escape_ascii()
+            );
+        }
+        // A sibling `dupe.git` is a path Git tries only after `dupe` itself.
+        fs::create_dir(common.join("dupe.git")).unwrap();
+        assert_eq!(
+            places.private_repository_named_by(b".git/dupe", &linked_private),
+            Some(&Worktree::Main)
+        );
+        // A `.git` inside it is what Git opens first for that path, so it names none.
+        fs::create_dir(linked_private.join(".git")).unwrap();
+        assert_eq!(
+            places.private_repository_named_by(b".git/worktrees/agent/dupe", &main_private),
+            None
+        );
+        assert_eq!(Worktree::Main.named(), b"the main worktree");
+        assert_eq!(agent.named(), b"worktree agent");
     }
 
     #[test]

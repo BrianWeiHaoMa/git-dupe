@@ -43,6 +43,7 @@ status are unchanged:
   a push to an upstream of another name than the branch's
   a push or pull from a detached HEAD
   a push that exits 1, as a rejected one does
+  a push into another worktree's private repository that exits 1
   a pull that cannot reconcile divergent branches
   a pull told to fast-forward only that refuses
   an add of a path the private repository ignores
@@ -55,6 +56,18 @@ unset, the only remote configured, else origin. One from a detached HEAD gets
 its hint where it fails given no refspec. A pull gets either only where it
 exits 1: given a URL or a path, it merges the remote's HEAD, and where it
 cannot, it exits 128.
+
+A push given no refspec that exits 1, where the one URL it sends to, the
+remote's pushurl where one is set, else its url, or the path typed in place of
+a remote, names the private repository of another worktree of the project, gets
+in place of the hint that names git dupe pull the one that names git dupe push
+<remote> HEAD:refs/heads/<name>, which sends the branch to a branch of a name
+no branch or tag there has, and git dupe merge <name>, run in that worktree,
+which takes it: by default Git refuses a push to the branch a worktree has
+checked out, the one a worktree attached from its private repository tracks. A
+push among whose options is one git-dupe does not list as taking no value, a
+bundle of them, or --repo, any of which may change where Git sends it, gets the
+hint that names git dupe pull.
 
 While a rebase stands stopped, a cherry-pick or revert gets no hint, and a
 commit that exits 1 while a cherry-pick is stopped gets the rebase's, as

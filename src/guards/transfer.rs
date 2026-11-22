@@ -5,8 +5,9 @@
 //! answers whether each names a public place; the front takes the configuration and the
 //! branch, and writes the lines. The same words and records decide the front's hints
 //! after a failed run (`Holds/G18`): whether `push` given no repository leaves the choice
-//! of a remote to Git, which remote it takes, whether a repository given with no refspec
-//! is the one Git's advice names a plain command for, whether a branch has an upstream,
+//! of a remote to Git, which remote it takes, the one URL it sends to there, whether a
+//! repository given with no refspec is the one Git's advice names a plain command for,
+//! whether the words are read as Git reads them, whether a branch has an upstream,
 //! whether that upstream has another name and `push.default` has Git refuse for it, and
 //! whether `pull` is told how to reconcile divergent branches, or to fast-forward only.
 //!
@@ -426,6 +427,78 @@ pub fn push_chooses_no_remote(records: &[Record<'_>], branch: Option<&[u8]>) -> 
 /// otherwise `origin`, which then has a URL (S13).
 pub fn push_remote<'a>(records: &[Record<'a>], branch: Option<&[u8]>) -> &'a [u8] {
     first_set(Transfer::Push, records, branch).map_or(b"origin", |found| found.value)
+}
+
+/// The one URL `push` sends to for `remote`, the remote Git takes or the word typed, as the
+/// configuration's `records` give it: the remote's one `pushurl` where it has any, else its
+/// one `url` (`remote.c`'s `push_url_of_remote`, at 2.43.0 and 2.56.0); and the word itself
+/// where no key of the configuration names a remote of that name, which Git then reads as a
+/// URL (S13). None where Git would send to two or more; where a record of either key is
+/// empty or has no value, which Git refuses or, from 2.46.0 only, reads as clearing the
+/// list; where the value of any `url.<base>.insteadOf` or `pushInsteadOf` begins the URL,
+/// so that Git may send to another; where a `remotes.<remote>` group shares the name, whose
+/// members `push` given that name sends to from 2.55.0 (S13); and where the remote has
+/// `mirror` set, under which Git refuses a push given a refspec.
+pub fn push_url<'a>(records: &[Record<'a>], remote: &'a [u8]) -> Option<&'a [u8]> {
+    let grouped_or_mirrored = records.iter().any(|&(key, _)| {
+        let group = key
+            .split_at_checked(b"remotes.".len())
+            .is_some_and(|(section, name)| {
+                section.eq_ignore_ascii_case(b"remotes.") && name.eq_ignore_ascii_case(remote)
+            });
+        group || is(key, b"remote", Some(remote), b"mirror")
+    });
+    if grouped_or_mirrored {
+        return None;
+    }
+    let values = |variable: &[u8]| -> Vec<Option<&'a [u8]>> {
+        records
+            .iter()
+            .filter(|&&(key, _)| is(key, b"remote", Some(remote), variable))
+            .map(|&(_, value)| value)
+            .collect()
+    };
+    let (pushurls, urls) = (values(b"pushurl"), values(b"url"));
+    if pushurls
+        .iter()
+        .chain(&urls)
+        .any(|value| value.is_none_or(<[u8]>::is_empty))
+    {
+        return None;
+    }
+    let named = records.iter().any(|&(key, _)| {
+        Key::of(key).is_some_and(|key| {
+            key.section.eq_ignore_ascii_case(b"remote") && key.name == Some(remote)
+        })
+    });
+    let url = match (pushurls.as_slice(), urls.as_slice()) {
+        ([one], _) | ([], [one]) => (*one)?,
+        ([], []) if !named && !remote.is_empty() => remote,
+        _ => return None,
+    };
+    let rewritten = records.iter().any(|&(key, value)| {
+        Key::of(key).is_some_and(|key| {
+            key.section.eq_ignore_ascii_case(b"url")
+                && (key.variable.eq_ignore_ascii_case(b"insteadof")
+                    || key.variable.eq_ignore_ascii_case(b"pushinsteadof"))
+        }) && value.is_some_and(|value| url.starts_with(value))
+    });
+    (!rewritten).then_some(url)
+}
+
+/// Whether `words`, those after `transfer`'s command word, are read here as Git reads them,
+/// with nothing presumed: every dashed word before the first `--` is one the command's list
+/// of options that take no separate value holds, exactly as written. A bundle, an
+/// abbreviation, `--repo`, or an option a later Git adds may move the repository Git takes
+/// from the one `repository` reads (S13), which a refusal may presume but a hint naming a
+/// remote may not.
+pub fn read_plainly(transfer: Transfer, words: &[&[u8]]) -> bool {
+    let known = transfer.known();
+    words
+        .iter()
+        .take_while(|&&word| word != b"--")
+        .filter(|word| word.starts_with(b"-"))
+        .all(|word| known.contains(word))
 }
 
 /// Whether `word`, the repository `transfer` is given with no refspec on `branch`, is the

@@ -169,3 +169,16 @@ pub fn worktree_public_clean(s: &Scenario, wt: &Worktree) {
 pub fn worktree_private_head(s: &Scenario, wt: &Worktree) -> Vec<u8> {
     wt.private(s).git(["rev-parse", "HEAD"]).succeeds().stdout
 }
+
+/// The URL `git dupe help clone` shows for attaching a linked worktree from the main
+/// worktree's private repository, `"$(git rev-parse --git-common-dir)/dupe"`, as a shell
+/// expands it in the worktree at `root`.
+pub fn common_private_url(s: &Scenario, root: &Path) -> String {
+    let common = s
+        .git(["rev-parse", "--git-common-dir"])
+        .from(root)
+        .succeeds()
+        .stdout;
+    let common = String::from_utf8(common).expect("a UTF-8 scenario path");
+    format!("{}/dupe", common.strip_suffix('\n').unwrap_or(&common))
+}

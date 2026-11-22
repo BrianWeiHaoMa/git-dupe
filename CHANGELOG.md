@@ -8,6 +8,27 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ## [Unreleased]
 
+### Changed
+
+- In a worktree no private repository is attached to, a command is refused naming both
+  ways to attach: `git dupe clone <url>` to bring private files kept elsewhere, with
+  `git dupe help clone` for the URL a linked worktree gives, and `git dupe init` to start
+  empty, where it named `git dupe init` alone.
+- After a `git dupe push` given no refspec that fails where the one URL it sends to names
+  another worktree's private repository, as in a linked worktree attached from the main
+  one's, the hint names `git dupe push <remote> HEAD:refs/heads/<name>` and then
+  `git dupe merge <name>` in that worktree, in place of `git dupe pull`, which could not
+  help there. `git dupe help clone` shows that route beside the URL.
+- The manual page, the general help, the README, and the documents give the order that
+  saves a linked worktree's private work before `git worktree remove`: the files in no
+  commit, the ignored ones included, a file another worktree alone hides, the stash
+  entries, and the commits no remote-tracking branch holds, which a push alone does not
+  cover.
+- The README's quick start can be pasted into an interactive zsh, macOS's default shell:
+  its command lines carry no comment, and a second machine's `git dupe clone` has a block
+  of its own. It says before its commands that the private repository is created empty,
+  with no README, license, or ignore file, and how `-b` names the project's branch.
+
 ## [0.4.1] - 2026-11-03
 
 ### Fixed

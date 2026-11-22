@@ -173,13 +173,16 @@ fn help_clone_prints_its_text_anywhere_without_running_git() {
         );
         let words = String::from_utf8_lossy(&text.stdout);
         let words = words.split_whitespace().collect::<Vec<_>>().join(" ");
-        // The way to start over, as the refusal in an attached workspace names it.
+        // The way to start over, as the refusal in an attached workspace names it; and,
+        // beside the URL a linked worktree gives, the hand-back that the hint after a push
+        // there names (`transfer_push_hand_back`).
         for phrase in [
             "Unlike \"git clone\"",
             "-b",
             "\"git dupe detach\"",
             "\"git dupe detach --force\"",
             "\"git dupe clone\" start over",
+            r#"URL may be "$(git rev-parse --git-common-dir)/dupe", the main one's: then "git dupe push origin HEAD:refs/heads/<name>" hands work back, and "git dupe merge <name>" in the main worktree takes it."#,
         ] {
             assert!(words.contains(phrase), "missing {phrase}: {words}");
         }
@@ -287,11 +290,11 @@ fn general_help_names_hidden_paths_stash_alternatives_and_recovery() {
             "Plain git is not guarded:",
             "git clean -x deletes private files,",
             "git stash -a stashes them,",
-            "git add -f makes them public,",
-            "a pull or checkout may overwrite them; commit first:",
+            "git add -f makes them public; commit first:",
             r#""git dupe restore ." brings back what was staged."#,
-            // Each worktree on its own, and what removing a linked one takes with it.
-            "Each worktree is attached on its own, and git worktree remove takes its private repository with it.",
+            // Each worktree on its own, what removing a linked one takes with it, and the
+            // order before it, which the page spells out.
+            "Each worktree is attached on its own, and git worktree remove takes its private repository with it: unstash, commit, and push its work first.",
             // The unguarded route.
             "git dupe git WORDS Git with WORDS as typed, guarded by nothing",
         ] {

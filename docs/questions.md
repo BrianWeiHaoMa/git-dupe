@@ -13,6 +13,27 @@ alone, and [What it is for](use-cases.md) the uses it was made for.
   Attached instead by `git dupe clone <url>` of your remote, it moves its work through
   that remote with `git dupe push` and `git dupe pull`. After `git worktree move`, run
   `git dupe init` in the new place so that plain Git finds it again.
+- **Is everything in a worktree saved, before `git worktree remove`?** A push alone does
+  not say. `git worktree remove` deletes the worktree's dupe, and your files there are
+  ignored files to the project's Git, which removes them without asking. In that worktree,
+  in this order, as the manual page's WORKTREES section gives it:
+  `git dupe status --short -uall` lists what no commit holds, `??` an untracked file and
+  `!!` one the project ignores: `git dupe add <path>`, with `-f` for a `!!` one, then
+  `git dupe commit`, keeps each. A warning that a path stands here and is hidden by
+  another worktree alone names a file that status does not list: `git dupe add <path>`,
+  with `-f` where Git says the project ignores it, and a commit keep it.
+  `git dupe stash list` shows the stash entries, which no push sends:
+  `git dupe stash pop --index` puts the newest back, what was staged staged again, and
+  `git dupe commit`, where something is staged, then `git dupe commit -a` keep it.
+  `git dupe fetch --all --prune`, then
+  `git dupe log HEAD --branches --tags --not --remotes`, lists the commits no
+  remote-tracking branch holds: `git dupe push origin <branch>` sends a branch, and
+  `git dupe push origin HEAD:refs/heads/<name>`, or `<tag>~0:refs/heads/<name>`, the commit
+  `HEAD` or a tag names, to a branch of a name no branch or tag there has; attached from
+  another worktree's dupe, that is how this branch goes back, and `git dupe merge <name>`
+  in that worktree takes it, as the hint after a refused push there says.
+  `git dupe detach` without `--force` refuses while a change is staged or a commit or a
+  stash entry is on no remote, but it sees no untracked file, nor one the project ignores.
 - **Does the dupe come along when someone clones the project?** No. `.git` is not part
   of a clone, so nothing of yours is in the project. In a fresh clone,
   `git dupe clone <url>` writes the files that are missing, keeps any already there, and

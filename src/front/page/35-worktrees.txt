@@ -6,7 +6,7 @@ own region of the one .git/info/exclude, between markers that carry its name.
 It is unattached, whatever the main worktree holds, until git dupe init or
 git dupe clone is run in it, and every other git dupe command there, but help,
 a request for help, --version, and a usage error, is refused naming git dupe
-init.
+clone and git dupe init.
 
 Private work moves between worktrees as it moves between machines. In a linked
 worktree, git dupe clone "$(git rev-parse --git-common-dir)/dupe" attaches it
@@ -40,8 +40,41 @@ at the same time; each replaces its own region alone.
 
 git worktree remove and git worktree prune delete a linked worktree's Git
 directory and its private repository with it, and the private files on disk do
-not stop them: private work not pushed first is gone. Push it, or run git dupe
-detach, before removing the worktree. Its region stays in .git/info/exclude,
-and its paths stay ignored in the other worktrees, until the next git dupe
-command in any of them that keeps its region up to date, or detaches it, which
-leaves out the region of every worktree whose private repository is gone.
+not stop them: private work not pushed first is gone. Git's own guard is
+silent, because to the project's Git a private file is an ignored file: git
+worktree remove refuses while a worktree holds an untracked file, and deletes
+ignored files without a word. So before removing a linked worktree, in that
+worktree:
+
+  1. git dupe status --short -uall lists what no commit holds under the
+     hidden paths: ?? marks an untracked file, !! one the project
+     ignores. git dupe add <path>, with -f for a !! one, then git dupe
+     commit, keeps each one.
+  2. A warning that a path stands here and is hidden by another worktree
+     alone names a file that git dupe status does not list, because this
+     worktree does not hide it: git dupe add <path>, with -f where Git
+     says the project ignores it, then git dupe commit, keeps it.
+  3. git dupe stash list lists the stash entries, and a push sends none:
+     git dupe stash pop --index puts the newest back as it was stashed,
+     what was staged staged again, and git dupe commit, where something
+     is staged, then git dupe commit -a keep it.
+  4. git dupe fetch --all --prune, then git dupe log HEAD --branches
+     --tags --not --remotes, lists the commits no remote-tracking branch
+     holds, on HEAD, a branch, or a tag. git dupe push origin <branch>
+     sends a branch. git dupe push origin HEAD:refs/heads/<name>, or
+     <tag>~0:refs/heads/<name>, sends the commit HEAD or a tag names to a
+     branch of a name no branch or tag there has: so go a detached HEAD,
+     a tag, and, attached from another worktree's private repository,
+     where Git refuses by default a push to the branch that worktree has
+     checked out, this branch, which git dupe merge <name>, run in that
+     worktree, takes.
+
+git dupe detach without --force refuses while a change is staged, a tracked
+file is modified, or a commit or a stash entry is on no remote, but it sees no
+untracked file, nor one the project ignores, which steps 1 and 2 alone find.
+The same steps answer whether everything private in a worktree is saved.
+
+A removed worktree's region stays in .git/info/exclude, and its paths stay
+ignored in the other worktrees, until the next git dupe command in any of them
+that keeps its region up to date, or detaches it, which leaves out the region
+of every worktree whose private repository is gone.

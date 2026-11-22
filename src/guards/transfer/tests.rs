@@ -904,3 +904,85 @@ fn pull_ff_is_only_while_its_last_record_says_only_exactly() {
         assert!(!only(listing), "{listing:?}");
     }
 }
+
+#[test]
+fn push_sends_to_a_remote_s_one_push_url_else_its_one_url() {
+    let url = |listing: &[(&str, Option<&str>)]| {
+        push_url(&records(listing), b"origin").map(<[u8]>::to_vec)
+    };
+    let some = |url: &str| Some(url.as_bytes().to_vec());
+    let fetched = ("remote.origin.url", Some("/srv/fetched.git"));
+    let pushed = ("remote.origin.pushurl", Some("/srv/pushed.git"));
+    assert_eq!(url(&[fetched]), some("/srv/fetched.git"));
+    assert_eq!(url(&[fetched, pushed]), some("/srv/pushed.git"));
+    assert_eq!(url(&[pushed]), some("/srv/pushed.git"));
+    // Keys as Git reads them; another remote's, and a name in another case, are not its,
+    // and the word is then a URL of its own.
+    assert_eq!(url(&[("Remote.origin.PushURL", Some("/p"))]), some("/p"));
+    assert_eq!(url(&[("remote.Origin.url", Some("/o"))]), some("origin"));
+    assert_eq!(url(&[("remote.other.url", Some("/o"))]), some("origin"));
+    // Two of the kind Git pushes to: Git sends to each, so there is no one URL.
+    let second = ("remote.origin.pushurl", Some("/srv/second.git"));
+    assert_eq!(url(&[fetched, pushed, second]), None);
+    let two = ("remote.origin.url", Some("/srv/two.git"));
+    assert_eq!(url(&[fetched, two]), None);
+    assert_eq!(url(&[fetched, two, pushed]), some("/srv/pushed.git"));
+    // An empty value or none, which releases read differently, and a rewrite whose value
+    // begins the URL; one that begins no URL of the remote's rewrites nothing.
+    assert_eq!(url(&[fetched, ("remote.origin.pushurl", Some(""))]), None);
+    assert_eq!(url(&[("remote.origin.url", None), pushed]), None);
+    for rewrite in ["url.x.insteadof", "url.x.pushInsteadOf"] {
+        assert_eq!(url(&[fetched, (rewrite, Some("/srv/"))]), None, "{rewrite}");
+        assert_eq!(
+            url(&[fetched, (rewrite, Some("unused:"))]),
+            some("/srv/fetched.git"),
+            "{rewrite}"
+        );
+    }
+    // A group of the remote's name, whose members a push given the name reaches from
+    // 2.55.0, and a mirror, which refuses a refspec; a group of another name is none.
+    assert_eq!(url(&[fetched, ("remotes.origin", Some("elsewhere"))]), None);
+    assert_eq!(url(&[fetched, ("Remotes.Origin", Some("elsewhere"))]), None);
+    assert_eq!(
+        url(&[fetched, ("remote.origin.mirror", Some("true"))]),
+        None
+    );
+    assert_eq!(
+        url(&[fetched, ("remotes.all", Some("origin elsewhere"))]),
+        some("/srv/fetched.git")
+    );
+    // A remote with no URL; a word no key names a remote is a URL itself (S13).
+    assert_eq!(
+        url(&[("remote.origin.fetch", Some("+refs/heads/*:x"))]),
+        None
+    );
+    assert_eq!(url(&[]), some("origin"));
+    assert_eq!(
+        push_url(&records(&[fetched]), b"/srv/word.git"),
+        Some(&b"/srv/word.git"[..])
+    );
+    assert_eq!(push_url(&records(&[fetched]), b""), None);
+}
+
+#[test]
+fn words_are_read_plainly_when_every_dashed_one_is_a_known_option() {
+    let plain = |words: &[&str]| {
+        let words: Vec<&[u8]> = words.iter().map(|word| word.as_bytes()).collect();
+        read_plainly(Transfer::Push, &words)
+    };
+    assert!(plain(&[]));
+    assert!(plain(&["origin"]));
+    assert!(plain(&["-v", "--force", "origin"]));
+    assert!(plain(&["--", "-strange-remote"]));
+    // A bundle, an abbreviation, `--repo`, a value attached, or an option not listed.
+    for words in [
+        &["-qv", "elsewhere"][..],
+        &["--rep=elsewhere"],
+        &["--repo", "elsewhere"],
+        &["--force-with-lease=main", "origin"],
+        &["-o", "x", "origin"],
+        &["--recurse-submodules=check", "origin"],
+    ] {
+        assert!(!plain(words), "{words:?}");
+    }
+}

@@ -8,6 +8,7 @@
 //! a line after the last one it shows is not compared. Its other command lines, the
 //! install lines, are pinned by `install_lines`.
 
+use std::fs;
 use std::path::Path;
 
 use crate::harness::{command_lines, is_git_dupe, page_texts_present, shown_command_lines};
@@ -45,4 +46,29 @@ fn the_readme_shows_the_page_s_command_lines_in_the_page_s_order() {
             path.display()
         );
     }
+}
+
+/// The quick start says, before its first command, that the private repository is made
+/// empty, with nothing a host may add, and, before the second machine's `clone`, which has
+/// a block of its own as the page's has, how `-b` names the project's branch: a reader who
+/// pastes each block as they meet it has read both first.
+#[test]
+fn the_quick_start_says_what_the_remote_is_and_how_clone_names_a_branch_before_them() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
+    let text = fs::read_to_string(&path).unwrap();
+    let section = text
+        .split_once("\n## Quick start\n")
+        .and_then(|(_, after)| after.split("\n## ").next())
+        .expect("README.md has a Quick start section");
+    // Prose, a block, prose, a block, prose: each block's text after its opening fence.
+    let parts: Vec<&str> = section.split("```").collect();
+    assert_eq!(parts.len(), 5, "two blocks in the quick start: {section}");
+    let words = |prose: &str| prose.split_whitespace().collect::<Vec<_>>().join(" ");
+    let before = words(parts[0]);
+    for phrase in ["created empty", "no README, license, or ignore file"] {
+        assert!(before.contains(phrase), "before the first block: {before}");
+    }
+    assert!(words(parts[2]).contains("`-b <branch>`"), "{}", parts[2]);
+    assert_eq!(parts[3], "sh\ngit dupe clone <url>\n");
+    assert!(!parts[1].contains("clone"), "{}", parts[1]);
 }

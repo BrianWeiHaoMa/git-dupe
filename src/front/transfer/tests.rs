@@ -8,6 +8,7 @@ fn push(refused: Option<Refused>, given: Option<&str>) -> Then {
     Then::Push {
         refused,
         given: given.map(|given| given.as_bytes().to_vec()),
+        back: None,
     }
 }
 
@@ -128,6 +129,73 @@ fn each_push_hint_follows_its_end_and_asks_only_where_the_upstream_hint_is_due()
         unasked(&Then::NoRemoteChosen, &git(1)).as_deref(),
         Some(NO_REMOTE_CHOSEN)
     );
+}
+
+/// A push that sent to another worktree's private repository gets the hand-back hint after
+/// exit 1 alone, in place of the rejected one, naming the remote and the worktree; after 128
+/// the refusal's hint stands, and after any other end there is none, and no question.
+#[test]
+fn the_hand_back_hint_takes_the_rejected_one_s_place_after_exit_1() {
+    for (worktree, named) in [
+        (Worktree::Main, &b"the main worktree"[..]),
+        (Worktree::Linked(b"agent".to_vec()), b"worktree agent"),
+    ] {
+        for (refused, after_128) in [
+            (None, None),
+            (
+                Some(Refused::NoUpstream { remote: origin() }),
+                Some(no_upstream(b"origin")),
+            ),
+        ] {
+            let then = Then::Push {
+                refused,
+                given: None,
+                back: Some(HandBack {
+                    remote: origin(),
+                    worktree: worktree.clone(),
+                }),
+            };
+            let hint = unasked(&then, &git(1)).unwrap();
+            assert_eq!(hint, handed_back(b"origin", &worktree));
+            let text = String::from_utf8(hint).unwrap();
+            let named = std::str::from_utf8(named).unwrap();
+            assert!(
+                text.contains("'git dupe push origin HEAD:refs/heads/<name>'"),
+                "{text}"
+            );
+            assert!(
+                text.contains(&format!("'git dupe merge <name>', run in {named},")),
+                "{text}"
+            );
+            assert!(!text.contains("pull"), "{text}");
+            if after_128.is_some() {
+                assert_eq!(
+                    answered(&then, &git(128), Question::HeadVerifies, Answer::Yes),
+                    after_128
+                );
+            } else {
+                assert_eq!(unasked(&then, &git(128)), None);
+            }
+            for ended in [
+                git(0),
+                git(2),
+                Outcome::Git(End::Signal(1)),
+                Outcome::Refused,
+            ] {
+                assert_eq!(unasked(&then, &ended), None, "{then:?}");
+            }
+        }
+    }
+    // A remote that is no word a shell keeps whole is named as a placeholder.
+    let hint = handed_back(b"-x", &Worktree::Main);
+    assert!(holds_bytes(
+        &hint,
+        b"'git dupe push <remote> HEAD:refs/heads/<name>'"
+    ));
+}
+
+fn holds_bytes(text: &[u8], part: &[u8]) -> bool {
+    text.windows(part.len()).any(|window| window == part)
 }
 
 /// In the table's order, the first that holds: a branch with no upstream after 1, an

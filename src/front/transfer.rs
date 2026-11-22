@@ -51,8 +51,15 @@
 //!   the remote the branch's own, whose upstream the first pushes to; after a `push` given
 //!   no repository, or a repository word and no refspec, that exited 128 on a detached
 //!   `HEAD`, naming `git dupe push <remote> HEAD:refs/heads/<branch>` with the remote Git
-//!   takes or the word typed; after any other `push` that exited 1, a rejected update or a
-//!   hook's refusal alike, naming `git dupe pull` and `git dupe fetch`, given with the
+//!   takes or the word typed; after a `push` given no refspec, its words read plainly
+//!   (`guards::transfer::read_plainly`), that exited 1 to a remote whose one push URL, or the
+//!   path typed in its place (`guards::transfer::push_url`), names the private repository of
+//!   another worktree of the project, the one path Git may open there that exists
+//!   (`guards::places`), which by default refuses a push to the branch it has checked out,
+//!   naming `git dupe push <remote> HEAD:refs/heads/<name>` and then `git dupe merge <name>`
+//!   in that worktree, named as G27's warnings name it; after any other
+//!   `push` that exited 1, a rejected update or a hook's refusal alike, naming `git dupe
+//!   pull` and `git dupe fetch`, given with the
 //!   repository word typed, where one is, so that they name the destination that refused
 //!   it and not the branch's upstream, the pull run on the branch the push sent; after a `pull` that exited 1 on a branch with no upstream,
 //!   which lacks `branch.<name>.merge` or `branch.<name>.remote`, given no repository, or
@@ -77,9 +84,9 @@
 //!   follow where Git chose, never where a key did, and a `--ff-only` is read wherever it
 //!   stands, the value of another option included; the detached and fast-forward lines
 //!   say under which cause their commands do what they say.
-//! - Each hint is decided from the records the guard already read and the run's end,
-//!   never from what Git printed (R5), so it costs no run (G22) but two, each `advice`'s
-//!   question, an answer of neither giving no hint: the private `rev-parse -q --verify
+//! - Each hint is decided from the records and the places the guard already read and the
+//!   run's end, never from what Git printed (R5), so it costs no run (G22) but two, each
+//!   `advice`'s question, an answer of neither giving no hint: the private `rev-parse -q --verify
 //!   HEAD` after a `push` that exited 128 owed the no-upstream hint, whose answer alone
 //!   tells a branch with no commit, exit 1, from one with commits, exit 0 (S12); and
 //!   whether the private index holds an unmerged entry, after a `pull` that exited 0 with
@@ -98,7 +105,7 @@ use super::commands::{self, Command};
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
 use super::places;
-use crate::guards::places::Place;
+use crate::guards::places::{Place, Places, Worktree};
 use crate::guards::quoted::shell_word;
 use crate::guards::transfer::{self, Current, DefaultRemote, Record, Repository, Transfer};
 use crate::runner::locate::Facts;
@@ -106,7 +113,7 @@ use crate::runner::records;
 use crate::runner::{Against, End, Run};
 use hints::{
     DETACHED_PULL, FAST_FORWARD_ONLY, NO_REMOTE_CHOSEN, NOT_TRACKING, UNRECONCILED, detached,
-    no_upstream, other_name, rejected, unborn,
+    handed_back, no_upstream, other_name, rejected, unborn,
 };
 
 mod hints;
@@ -132,11 +139,13 @@ pub enum Then {
     /// run that did not exit 0.
     NoRemoteChosen,
     /// Any other `push`: after a run that exited 128, the hint for what Git refused it
-    /// for, where `refused` holds that; after a run that exited 1, the hint after a
-    /// rejected update, naming the repository word `given`, where one was.
+    /// for, where `refused` holds that; after a run that exited 1, the hint that hands the
+    /// branch back where `back` holds where to, else the hint after a rejected update,
+    /// naming the repository word `given`, where one was.
     Push {
         refused: Option<Refused>,
         given: Option<Vec<u8>>,
+        back: Option<HandBack>,
     },
     /// `pull`: after a run that exited 1, the hint for what left Git no branch to merge,
     /// where `unnamed` holds that; after one that exited 128, the hint for divergent
@@ -171,6 +180,16 @@ pub enum Diverging {
     /// Told to fast-forward only: `--ff-only` typed, or `pull.ff` `only` and none of the
     /// six typed, any of which overrides the key.
     FastForwardOnly,
+}
+
+/// Where a `push` given no refspec sends: the private repository of another worktree of
+/// the project, which by default refuses a push to the branch it has checked out, as the
+/// worktree a linked one was attached from is (`Holds/G18`). The remote is the one Git
+/// takes, or the word typed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HandBack {
+    pub remote: Vec<u8>,
+    pub worktree: Worktree,
 }
 
 /// What Git refuses a `push` given no refspec for, exit 128, naming a plain command
@@ -261,6 +280,7 @@ pub fn guard(words: &[Vec<u8>], facts: &Facts, against: Against) -> Result<Then,
         (Some(Transfer::Push), Some(given)) => Then::Push {
             refused: refused(&records, given, current),
             given: given.word().map(<[u8]>::to_vec),
+            back: back(&records, given, current, &after, &places, against),
         },
         (Some(Transfer::Pull), Some(given)) => Then::Pull {
             unnamed: unnamed(&records, given, current),
@@ -305,6 +325,40 @@ fn refused(records: &[Record<'_>], given: Repository<'_>, current: Current<'_>) 
     transfer::push_default_is_simple(records).then(|| Refused::OtherName {
         remote: upstream.remote.to_vec(),
         merge: upstream.merge.to_vec(),
+    })
+}
+
+/// Where `push`, given `given` with `HEAD` at `current` and the words `after` its command
+/// word, hands the branch back, where the configuration's `records` and the project's
+/// `places` say: given no refspec, the remote Git takes on a branch, or the word typed,
+/// whose one push URL (`transfer::push_url`) names the private repository of another
+/// worktree of the project. Nothing given a refspec, whose source the hint's `HEAD` would
+/// not be; nothing on a detached `HEAD` given no repository, which Git refuses, exit 128,
+/// before it pushes; and nothing where a word may move the repository Git takes from the
+/// one read here (`transfer::read_plainly`), which the hint would name wrongly.
+fn back(
+    records: &[Record<'_>],
+    given: Repository<'_>,
+    current: Current<'_>,
+    after: &[&[u8]],
+    places: &Places,
+    against: Against,
+) -> Option<HandBack> {
+    if !transfer::read_plainly(Transfer::Push, after) {
+        return None;
+    }
+    let remote = match (given, current) {
+        (Repository::Alone(word), _) => word,
+        (Repository::Default, Current::Branch(branch)) => {
+            transfer::push_remote(records, Some(branch))
+        }
+        _ => return None,
+    };
+    let url = transfer::push_url(records, remote)?;
+    let worktree = places.private_repository_named_by(url, against.private_repository()?)?;
+    Some(HandBack {
+        remote: remote.to_vec(),
+        worktree: worktree.clone(),
     })
 }
 
@@ -403,6 +457,9 @@ fn hint(then: &Then, ended: &Outcome, mut ask: impl FnMut(Question) -> Answer) -
             refused: Some(refused),
             ..
         } if *end == End::Code(128) => refusal(refused, || ask(Question::HeadVerifies)),
+        Then::Push {
+            back: Some(back), ..
+        } if *end == End::Code(1) => Some(handed_back(&back.remote, &back.worktree)),
         Then::Push { given, .. } if *end == End::Code(1) => Some(rejected(given.as_deref())),
         // In the table's order, the first that holds (`Holds/G18`): Git's advice for no
         // branch to merge comes with exit 1, and for divergent branches with 128.

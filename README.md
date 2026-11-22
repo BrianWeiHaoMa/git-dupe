@@ -39,24 +39,29 @@ it needs, what Windows differs in, and uninstalling.
 
 ## Quick start
 
-In a clone of a project, from the root. Here `notes/` is a directory of yours and
-`AGENTS.md` your instructions for a coding agent, neither of them the project's:
+In a clone of a project, from the root, with `notes/` a directory of yours and `AGENTS.md`
+your instructions for a coding agent, neither of them the project's. `<url>` is a
+repository of your own on a host or a disk you trust, created empty, with no README,
+license, or ignore file; on a disk, `git init --bare -b main` makes one for a project on
+`main`. A URL of the project's repository, or of any of its remotes, is refused.
 
 ```sh
-git dupe init                                      # attach an empty dupe to this clone
-git dupe add notes/ AGENTS.md                      # hide them from the project and stage them
-git dupe commit -m "Notes and agent instructions"  # a commit git log never shows
-git dupe remote add origin <url>                   # an empty repository of your own
-git dupe push -u origin HEAD                       # send the history there
-git dupe clone <url>                               # in a clone elsewhere: the files come back
+git dupe init
+git dupe add notes/ AGENTS.md
+git dupe commit -m "Notes and agent instructions"
+git dupe remote add origin <url>
+git dupe push -u origin HEAD
 ```
 
-`<url>` is an empty repository on a host or a disk you trust, with the project's branch
-as its default branch, which `git dupe clone` checks out unless `-b` names another; on a
-disk, `git init --bare -b main` makes one for a project on `main`. A URL of the
-project's repository, or of any of its remotes, is refused. From then on,
-`git dupe pull` and `git dupe push` move your work between machines. A file the
-project's `.gitignore` ignores is added with `-f`, as `git add` adds one.
+On another machine, in a clone of the project, the files come back; `-b <branch>` after
+`<url>` names the project's branch where `<url>`'s default branch is another:
+
+```sh
+git dupe clone <url>
+```
+
+From then on, `git dupe pull` and `git dupe push` move your work between machines. A file
+the project's `.gitignore` ignores is added with `-f`, as `git add` adds one.
 
 ## Things to know
 
@@ -77,7 +82,8 @@ project's `.gitignore` ignores is added with `-f`, as `git add` adds one.
   file the dupe tracks as last staged.
 - **Each worktree on its own.** A linked worktree is attached by its own `git dupe init`
   or `git dupe clone`, and `git worktree remove` and `git worktree prune` delete its
-  dupe with it, whatever files of yours stand there, so push first.
+  dupe with it, whatever files of yours stand there. A push alone misses a file in no
+  commit and a stash entry: [Questions](docs/questions.md) has the order to follow first.
 - **Nothing is encrypted.** Push to a remote you would trust with the files.
 
 More of what it does not do is under [Limits](docs/how-it-works.md#limits), and

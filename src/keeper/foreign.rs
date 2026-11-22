@@ -28,13 +28,8 @@ use crate::guards::operand;
 use crate::guards::quoted::shell_word;
 use crate::runner::locate::present;
 
-/// Whose region another region is.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Owner {
-    Main,
-    /// The linked worktree of this name, as bytes.
-    Linked(Vec<u8>),
-}
+/// Whose region another region is: a worktree, named as every line names one.
+pub use crate::guards::places::Worktree as Owner;
 
 /// Another worktree's region, as the composition kept it: its worktree, and the paths its
 /// rules were written for.
@@ -133,13 +128,7 @@ pub fn still_hidden(path: &[u8], owners: &[&Owner], hideable: bool) -> Vec<u8> {
 /// The worktrees as a line names them: `the main worktree` or `worktree <name>`, the name's
 /// bytes as they stand, joined with commas and a final `and`.
 fn named(owners: &[&Owner]) -> Vec<u8> {
-    let names: Vec<Vec<u8>> = owners
-        .iter()
-        .map(|owner| match owner {
-            Owner::Main => b"the main worktree".to_vec(),
-            Owner::Linked(name) => [&b"worktree "[..], name].concat(),
-        })
-        .collect();
+    let names: Vec<Vec<u8>> = owners.iter().map(|owner| owner.named()).collect();
     match names.as_slice() {
         [] => Vec::new(),
         [one] => one.clone(),

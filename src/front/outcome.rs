@@ -66,9 +66,16 @@ pub fn usage_error(fault: &[u8], usage_line: &[u8]) -> Outcome {
 }
 
 /// The refusal of a command that requires an attached workspace, in a worktree that is
-/// not attached, whatever the other worktrees hold (G4).
+/// not attached, whatever the other worktrees hold (G4). It names both ways to attach, in
+/// a main worktree as in a linked one, because a second machine is misled as a new linked
+/// worktree is: `clone` where private files exist elsewhere, with `help clone` for the URL a
+/// linked worktree gives, and `init` to start empty. It names no path of the project's.
 pub fn refuse_unattached() -> Outcome {
-    refuse(b"no private repository is attached to this worktree; run 'git dupe init' here first")
+    refuse(
+        b"no private repository is attached to this worktree; to bring private files kept \
+          elsewhere, run 'git dupe clone <url>' here ('git dupe help clone' shows the URL a \
+          linked worktree gives), or run 'git dupe init' to start an empty one",
+    )
 }
 
 /// The refusals of G4 where `init` and `clone` do not attach, each with its explanation.
@@ -192,7 +199,9 @@ mod tests {
 
     #[test]
     fn a_word_that_is_no_name_is_a_refusal() {
-        let outcome = not_started(Failure::NotAName(b"notes/\xff".to_vec()));
+        // The line goes to the test run's standard error, which its readers decode as UTF-8;
+        // which bytes are no name is the conversion's to test (`src/bytes.rs`), not this.
+        let outcome = not_started(Failure::NotAName(b"notes/a".to_vec()));
         assert!(matches!(outcome, Outcome::Refused));
         let failed = failed(Failed::NotStarted(Failure::NotAName(b"x".to_vec())));
         assert!(matches!(failed, Outcome::Refused));

@@ -97,6 +97,6 @@ pub use sweep::{GITDUPE, Killed, Sweep, Version, copied, files, lived_in, outsid
 pub use trace::{Runs, run_traced, run_words};
 pub use tree::{Tree, changed_since, unchanged};
 pub use worktrees::{
-    Worktree, linked_on_branch, worktree_clone, worktree_dupe, worktree_private_head,
-    worktree_public_clean,
+    Worktree, common_private_url, linked_on_branch, worktree_clone, worktree_dupe,
+    worktree_private_head, worktree_public_clean,
 };

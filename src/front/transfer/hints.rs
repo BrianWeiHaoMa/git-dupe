@@ -9,6 +9,7 @@
 //!   that the command, typed as the line shows it, runs as the line says and the line
 //!   stays one line (F8, G25).
 
+use crate::guards::places::Worktree;
 use crate::guards::quoted::shell_word;
 
 /// The hint after a failed `push` whose configuration chooses no remote: true whichever
@@ -161,6 +162,34 @@ pub fn rejected(given: Option<&[u8]>) -> Vec<u8> {
         b"/<branch>, so does it followed by a merge or rebase of ",
         &remote,
         b"/<branch>; plain 'git pull' and 'git fetch' act on the project's repository",
+    ]
+    .concat()
+}
+
+/// The hint after a `push` given no refspec that exited 1, sent to `remote`, whose one push
+/// URL names the private repository of `worktree`: such a repository refuses, by default, a
+/// push to the branch it has checked out, the one a worktree attached from it tracks, so the
+/// line names pushing to a branch of another name there, written in full so that no tag of
+/// that name makes it ambiguous, and the merge run in that worktree. Conditioned on that
+/// cause, which exit 1 alone does not prove, a hook's refusal or a branch that moved on
+/// exiting 1 too; and on a name no branch or tag there has, which the push creates and the
+/// merge reads as that branch, where a tag of the name would be merged instead.
+pub fn handed_back(remote: &[u8], worktree: &Worktree) -> Vec<u8> {
+    let remote = offered_remote(remote);
+    let worktree = worktree.named();
+    [
+        &b"where a private push to "[..],
+        &remote,
+        b", the private repository of ",
+        &worktree,
+        b", is refused because ",
+        &worktree,
+        b" has the branch checked out, 'git dupe push ",
+        &remote,
+        b" HEAD:refs/heads/<name>' pushes it to a branch of a name no branch or tag there \
+            has, and 'git dupe merge <name>', run in ",
+        &worktree,
+        b", takes it; plain 'git push' and 'git merge' act on the project's repository",
     ]
     .concat()
 }

@@ -2,8 +2,12 @@
 //! copies them, for the checks that pin them to what the scenarios run. A document's code
 //! stands in fenced blocks of three kinds: a `sh` block and a `powershell` block, every
 //! line of which is a command line as a reader copies it, with no `$ ` or `PS> ` prompt,
-//! and a `text` block, which holds none and no `git dupe`. A command line may end with a
-//! comment for the reader, after `COMMENT`, which neither shell runs. Outside the fenced
+//! and a `text` block, which holds none and no `git dupe`. A command line of a `powershell`
+//! block may end with a comment for the reader, after `COMMENT`, which PowerShell does not
+//! run. A line of a `sh` block holds no comment at all, a plain `git` line's included: an
+//! interactive zsh, macOS's default shell, reads a `#` as a word of the command unless
+//! `interactive_comments` is set, so that a pasted line fails or acts on words of the
+//! comment (`holds_a_comment`). Outside the fenced
 //! blocks no line begins with a prompt, and no indented line, which Markdown can read as
 //! code, holds `git dupe`, so that no command a document shows escapes the checks. A
 //! document that breaks one of these rules fails the check that reads it, naming the
@@ -34,7 +38,8 @@ enum Block {
 
 /// The command lines of `document`, a path from the repository root such as
 /// `docs/install.md`, as the repository holds it: every line of its `sh` and `powershell`
-/// blocks, in order, each without its indentation and its comment. A trailing space on a
+/// blocks, in order, each without its indentation, and a `powershell` line without its
+/// comment. A trailing space on a
 /// line with no comment is kept, so that it fails the comparison it reaches.
 pub fn shown_command_lines(document: &str) -> Vec<String> {
     shown_lines(document)
@@ -118,13 +123,21 @@ fn lines_of(document: &str, text: &str) -> Vec<(Block, String)> {
                             "{document}:{number}: a line of a command block that is not a \
                              command line as a reader copies it: {line}"
                         );
-                        commands.push((
-                            block,
-                            trimmed
+                        let command = match block {
+                            Block::PowerShell => trimmed
                                 .split_once(COMMENT)
-                                .map_or(trimmed, |(command, _)| command.trim_end())
-                                .to_owned(),
-                        ));
+                                .map_or(trimmed, |(command, _)| command.trim_end()),
+                            _ => {
+                                assert!(
+                                    !holds_a_comment(trimmed),
+                                    "{document}:{number}: a comment on a line of a `sh` \
+                                     block, which an interactive zsh, macOS's default shell, \
+                                     passes to the command as words: {line}"
+                                );
+                                trimmed
+                            }
+                        };
+                        commands.push((block, command.to_owned()));
                     }
                     Block::Text => {
                         assert!(
@@ -146,6 +159,81 @@ fn lines_of(document: &str, text: &str) -> Vec<(Block, String)> {
     commands
 }
 
+/// Whether `line`, a line of a `sh` block, holds a comment: a `#` outside quotes that begins
+/// a word, after the line's start, whitespace, or an operator, a redirection's included, as
+/// POSIX `sh` reads one, a command substitution, `$(…)` or `` `…` ``, reading its own words
+/// so inside double quotes too, and continuing the word it stands in. A `#` inside quotes,
+/// after a backslash, or inside a word is none.
+fn holds_a_comment(line: &str) -> bool {
+    // What each open context is: a quote, or a substitution, `(` or `` ` ``, whose words are
+    // a command's.
+    let mut open: Vec<char> = Vec::new();
+    let mut escaped = false;
+    let mut word_starts = true;
+    let mut characters = line.chars().peekable();
+    while let Some(character) = characters.next() {
+        if escaped {
+            escaped = false;
+            word_starts = false;
+            continue;
+        }
+        let substitution = match character {
+            '$' if characters.peek() == Some(&'(') => {
+                characters.next();
+                Some('(')
+            }
+            '`' if open.last() != Some(&'`') && open.last() != Some(&'\'') => Some('`'),
+            _ => None,
+        };
+        match open.last() {
+            Some('\'') => {
+                if character == '\'' {
+                    open.pop();
+                }
+                continue;
+            }
+            Some('"') => {
+                match (character, substitution) {
+                    (_, Some(opened)) => {
+                        open.push(opened);
+                        word_starts = true;
+                    }
+                    ('\\', _) => escaped = true,
+                    ('"', _) => {
+                        open.pop();
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            _ => {}
+        }
+        if let Some(opened) = substitution {
+            open.push(opened);
+            word_starts = true;
+            continue;
+        }
+        match character {
+            '#' if word_starts => return true,
+            '\\' => escaped = true,
+            '\'' | '"' => open.push(character),
+            ')' if open.last() == Some(&'(') => {
+                open.pop();
+                word_starts = false;
+                continue;
+            }
+            '`' if open.last() == Some(&'`') => {
+                open.pop();
+                word_starts = false;
+                continue;
+            }
+            _ => {}
+        }
+        word_starts = character.is_whitespace() || ";&|()<>".contains(character);
+    }
+    false
+}
+
 /// Whether `line` runs git-dupe.
 pub fn is_git_dupe(line: &str) -> bool {
     line.starts_with("git dupe ")
@@ -162,7 +250,7 @@ mod tests {
     #[test]
     fn each_command_block_keeps_its_kind_in_the_document_s_order() {
         let lines = read(
-            "```sh\nmake  # a comment\n```\n\n```powershell\n$env:Path = 'x'  # a comment\n\
+            "```sh\nmake\n```\n\n```powershell\n$env:Path = 'x'  # a comment\n\
              irm u | iex\n```\n",
         );
         assert_eq!(
@@ -173,6 +261,44 @@ mod tests {
                 (Block::PowerShell, "irm u | iex".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "d.md:3: a comment on a line of a `sh` block")]
+    fn a_comment_after_a_sh_command_fails_a_plain_git_line_s_too() {
+        read("```sh\ngit dupe init\ngit status  # the project's\n```\n");
+    }
+
+    #[test]
+    fn a_comment_is_a_hash_beginning_a_word_outside_quotes() {
+        for line in [
+            "git dupe init # attach",
+            "make;# done",
+            "# a line",
+            "a |#b",
+            "x\t#y",
+            "echo marker >#note",
+            "echo \"$(echo first # leaked)\"",
+            "echo $(echo first # leaked)",
+            "printf \"%s\" \"`printf value # leaked`\"",
+            "echo `echo a #b`",
+        ] {
+            assert!(holds_a_comment(line), "{line}");
+        }
+        for line in [
+            "git dupe commit -m \"Fix #12\"",
+            "git dupe commit -m 'a # b'",
+            "echo a\\ #b",
+            "git dupe log --format=%h#%s",
+            "echo \"a \\\" # b\"",
+            "curl -fsSL https://example.com/x.sh#top | sh",
+            "echo \"$(echo a#b) # c\"",
+            "echo \"(#)\"",
+            "printf value $(printf value)#suffix",
+            "printf value `printf value`#suffix",
+        ] {
+            assert!(!holds_a_comment(line), "{line}");
+        }
     }
 
     #[test]

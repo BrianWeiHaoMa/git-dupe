@@ -6,7 +6,7 @@
 //! The order is the guard. What needs no repository is answered before the locate run;
 //! a misuse is reported after it, so that outside a repository Git's own message ends the
 //! command, and in an unattached one a command that requires attachment is refused naming
-//! `git dupe init` first. A word F6 does not name is resolved in step (4), after the
+//! `git dupe clone` and `git dupe init` first. A word F6 does not name is resolved in step (4), after the
 //! locate, because its aliases are read where its run would be made (`alias`); the command
 //! a chain reaches is read as step (2) reads it typed, and goes on as that command. Every
 //! command that gets past step (5) but `detach` is one G6 covers, and ends with the
@@ -188,7 +188,7 @@ fn first_word(words: &[Vec<u8>]) -> Result<&[u8], Outcome> {
 /// `help` needs no repository, and a help request is answered here, as is the usage error
 /// F7 names for `git`. A misuse is held until after steps (3) and (5), so that outside a
 /// repository Git's own message ends the command, and in an unattached one a command that
-/// requires attachment is refused naming `git dupe init` first. The words of a command
+/// requires attachment is refused naming `git dupe clone` and `git dupe init` first. The words of a command
 /// Git runs as itself are not read here: its guard reads them when it runs.
 fn read_words(command: Command, words: &[Vec<u8>]) -> Words<'_> {
     let word = command.word();
@@ -350,7 +350,7 @@ fn relocated(workspace: Workspace, aliased_attaching: bool) -> Result<Workspace,
 }
 
 /// Step (5) in an unattached worktree, for a command that does not attach: refused naming
-/// `git dupe init`, but for a help request after a word passed through, after `stash`, or
+/// `git dupe clone` and `git dupe init`, but for a help request after a word passed through, after `stash`, or
 /// after a transfer command, which Git answers alone, after the command's guard, against
 /// this worktree's private Git directory, which no `init` has made, so that it never
 /// selects the public repository nor another worktree's private one. Where something other
