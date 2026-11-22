@@ -29,6 +29,7 @@ mod clone;
 mod commands;
 mod detach;
 mod git;
+mod git_version;
 mod help;
 mod hide;
 mod init;

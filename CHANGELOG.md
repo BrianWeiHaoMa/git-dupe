@@ -58,6 +58,19 @@ Every change a user of git-dupe would notice, newest first, in the form of
   the project's Git. The manual page and the questions give the order that exposes
   nothing, hide the new name, move, unhide the old, and say that a public `git mv` of a
   directory holding private files needs the same care.
+- `git dupe init` and `git dupe clone` leave the line `/.gitdupe -text merge=union` in
+  the private repository's own `info/attributes`, after any lines a template put there.
+  Git then converts no line ending in `.gitdupe` and warns of none under
+  `core.autocrlf=true`, the setting Git for Windows's installer ships, so `add` and `hide`
+  no longer fail under `core.safecrlf=true` and a `clone` leaves the list as committed;
+  and two private branches that each hid a path merge, or rebase, without a conflict in
+  `.gitdupe`, Git's own `union` driver keeping each side's lines. A workspace attached by
+  an earlier release gets the line when `git dupe init` is run there again, which names it
+  in its hint.
+- `git dupe init` and `git dupe clone`, run with a Git on `PATH` older than 2.43.0 and
+  not older than 2.31.0, first print a warning naming that Git and the supported range,
+  Git 2.43.0 or newer, below 3.0.0, where until now the first sign was a Git message about
+  an option the user never typed.
 
 ## [0.4.1] - 2026-11-03
 

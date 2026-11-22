@@ -283,6 +283,16 @@ fn configured(s: &Scenario, dir: &Path) {
     }
     let head = s.private(dir).git(["symbolic-ref", "HEAD"]).succeeds();
     assert_eq!(head.stdout, b"refs/heads/main\n");
+    assert_eq!(
+        attributes(dir).as_deref(),
+        Some(&b"/.gitdupe -text merge=union\n"[..]),
+        "F2's line, after the lines of Git's own template, which holds none"
+    );
+}
+
+/// The private repository's `info/attributes` in the workspace at `dir`, if any.
+fn attributes(dir: &Path) -> Option<Vec<u8>> {
+    fs::read(dir.join(".git/dupe/info/attributes")).ok()
 }
 
 /// The value of `core.worktree` in the private repository of `dir`, if any.
@@ -365,6 +375,15 @@ fn a_killed_init_is_completed_by_running_it_again() {
                         (Version::Unchanged, Version::Old)
                     );
                 }
+                // A kill leaves the line whole or no file: never part of one (G21).
+                let left = attributes(&killed.dir);
+                assert!(
+                    matches!(
+                        left.as_deref(),
+                        None | Some(b"/.gitdupe -text merge=union\n")
+                    ),
+                    "{killed:?}: {left:?}"
+                );
                 let attached = killed.dir.join(".git/dupe").is_dir();
                 let unfinished =
                     attached && worktree(s, &killed.dir).as_deref() != Some(&b"../..\n"[..]);

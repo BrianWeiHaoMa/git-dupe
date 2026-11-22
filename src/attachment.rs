@@ -6,9 +6,11 @@
 //!
 //! What the listing below cannot show:
 //!
-//! - Only this part creates a private repository, writes its keys, or removes it, and
-//!   every write there is Git's own: `git init`, `git config`, and `clone`'s steps, each a
-//!   private run. git-dupe writes no file of its own in it here.
+//! - Only this part creates a private repository, writes its keys or its
+//!   `info/attributes`, or removes it. Every write there is Git's own — `git init`,
+//!   `git config`, and `clone`'s steps, each a private run — except `.gitdupe`'s line in
+//!   `info/attributes` (F2), which `attributes` adds through the keeper's whole-file
+//!   replacement.
 //! - The refusals of G4 are decided before any Git step that writes, by `refusals` for
 //!   `init` and `clone` alike; `clone` decides its own before them and G18's after them,
 //!   and runs `init`'s steps as its first.
@@ -29,6 +31,7 @@
 //!   git-dupe makes of its own of a file or directory it did not just write itself; the
 //!   other is the keeper's removal of its own fresh file when a replacement fails (R8).
 
+mod attributes;
 mod clone;
 mod detach;
 mod init;
@@ -36,6 +39,7 @@ mod refusals;
 mod settings;
 mod write;
 
+pub use attributes::Unwritten;
 pub use clone::{Cloned, NotCloned, clone};
 pub use detach::{NotDetached, NotRemoved, detach};
 pub use init::{Initialized, NotInitialized, init};

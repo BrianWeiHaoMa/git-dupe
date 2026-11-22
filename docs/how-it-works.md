@@ -77,6 +77,15 @@ project/
   you hide, one per line; every path it lists, or, while it is missing from disk and
   staged, its staged version lists; and every file the dupe tracks, as a file you add
   is. Nothing versioned is added to the project.
+- **`.gitdupe`'s attributes.** `git dupe init` and `git dupe clone` put the line
+  `/.gitdupe -text merge=union` in the dupe's own `info/attributes`, after any lines a
+  template put there, and `git dupe init` run again adds it to a dupe an earlier release
+  attached. `-text` tells Git to convert no line ending in `.gitdupe`, whatever
+  `core.autocrlf` says, and `merge=union` to merge two branches' changes to it with Git's
+  own union driver, which keeps both sides' lines where both changed the same place: two
+  branches that each hid a path merge, or rebase, with both paths listed. A path one
+  branch alone unhid is unhidden by the merge, as any change made on one side alone is,
+  and the command warns of what that leaves visible to the project's Git.
 - Three commands are changed to fit a shared working tree: `git dupe status` and
   `git dupe add` act on the hidden paths instead of every file of the project, and
   `git dupe clean` cleans the project while sparing them. `git dupe stash -u` and `-a`,
@@ -111,7 +120,8 @@ remote.
   a hidden path in every spelling of its ASCII case.
 - **Git 2.43.0 or newer, below 3.0.0.** No single feature needs it; it is the floor the
   suite covers, and Ubuntu 24.04's stock Git. [Installing](install.md#git) says what
-  older distributions ship.
+  older distributions ship. `git dupe init` and `git dupe clone` name an older Git, from
+  2.31.0 on, in a warning before they go on.
 - **Nothing is encrypted.** The dupe's remote is an ordinary Git remote: what you push
   is stored there as you pushed it, for whoever can read that repository. Push to one
   you would trust with the files, and keep out what you would not push to any Git

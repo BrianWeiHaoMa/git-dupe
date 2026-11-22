@@ -2,8 +2,8 @@
 //! `config -z` answer, as one `--get` value, as the scoped values of
 //! `--show-scope --get-all`, or as the records of `--list` and `--get-regexp`, the
 //! records of `check-ignore -v -n -z --stdin`, the name lines of `--list-cmds`, the
-//! records of `worktree list --porcelain -z`, the line of `symbolic-ref -q HEAD`, and the
-//! `ref:` line of `ls-remote --symref`.
+//! records of `worktree list --porcelain -z`, the line of `symbolic-ref -q HEAD`, the
+//! `ref:` line of `ls-remote --symref`, and the line of `git version`.
 //!
 //! A reader parses its form and nothing more. Which listing or key is asked for, and what
 //! an answer means, stay with the part that asks. A form read by one caller whose checks
@@ -108,6 +108,40 @@ pub fn default_branch(answer: &[u8]) -> Option<&[u8]> {
             .strip_prefix(b"refs/heads/")
             .filter(|branch| !branch.is_empty())
     })
+}
+
+/// The release a `git version` answer names, and the version as it spells it: its line
+/// `git version <version>`, whose first three dotted numbers are the release, whatever
+/// follows them, as a vendor's build or a release candidate adds (`2.50.1 (Apple
+/// Git-155)`, `2.55.0.windows.5`, `2.43.0.rc1`). `None` when the line is not of that form,
+/// which names no release.
+pub fn git_version(answer: &[u8]) -> Option<GitVersion<'_>> {
+    let line = answer.split(|&byte| byte == b'\n').next()?;
+    let spelled = line.strip_suffix(b"\r").unwrap_or(line);
+    let spelled = spelled.strip_prefix(b"git version ")?;
+    let mut rest = spelled;
+    let mut release = [0u32; 3];
+    for (index, number) in release.iter_mut().enumerate() {
+        if index > 0 {
+            rest = rest.strip_prefix(b".")?;
+        }
+        let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
+        *number = std::str::from_utf8(&rest[..digits]).ok()?.parse().ok()?;
+        rest = &rest[digits..];
+    }
+    Some(GitVersion {
+        release: (release[0], release[1], release[2]),
+        spelled,
+    })
+}
+
+/// A `git version` answer read (`git_version`).
+#[derive(Debug, PartialEq, Eq)]
+pub struct GitVersion<'a> {
+    /// The major, minor, and patch numbers.
+    pub release: (u32, u32, u32),
+    /// Everything after `git version ` on its line, as Git printed it.
+    pub spelled: &'a [u8],
 }
 
 /// The standard input of `check-ignore -z --stdin` asking about `paths`: each written
@@ -338,5 +372,48 @@ mod tests {
         // A scope without its value, and a value without its NUL.
         assert_eq!(config_scoped_values(b"local\0"), None);
         assert_eq!(config_scoped_values(b"local\0../.."), None);
+    }
+
+    #[test]
+    fn a_version_answer_names_its_release_whatever_a_vendor_adds() {
+        let read = |answer: &[u8]| git_version(answer).map(|version| version.release);
+        assert_eq!(read(b"git version 2.43.0\n"), Some((2, 43, 0)));
+        assert_eq!(
+            read(b"git version 2.50.1 (Apple Git-155)\n"),
+            Some((2, 50, 1))
+        );
+        assert_eq!(read(b"git version 2.55.0.windows.5\n"), Some((2, 55, 0)));
+        assert_eq!(read(b"git version 2.43.0.rc1\n"), Some((2, 43, 0)));
+        assert_eq!(read(b"git version 2.43.0-rc1\r\n"), Some((2, 43, 0)));
+        assert_eq!(read(b"git version 2.34.1\n"), Some((2, 34, 1)));
+        assert_eq!(read(b"git version 2.42.4"), Some((2, 42, 4)));
+        assert_eq!(read(b"git version 3.0.0\n"), Some((3, 0, 0)));
+        assert_eq!(read(b"git version 1.8.5.6\n"), Some((1, 8, 5)));
+        assert_eq!(
+            git_version(b"git version 2.50.1 (Apple Git-155)\nmore\n")
+                .unwrap()
+                .spelled,
+            b"2.50.1 (Apple Git-155)"
+        );
+    }
+
+    #[test]
+    fn an_answer_of_another_form_names_no_release() {
+        for answer in [
+            &b""[..],
+            b"\n",
+            b"2.43.0\n",
+            b"git version\n",
+            b"git version \n",
+            b"git version 2.43\n",
+            b"git version 2..0\n",
+            b"git version two\n",
+            b"git version v2.43.0\n",
+            b"git version 2.43.99999999999\n",
+            b"Git version 2.43.0\n",
+            b"\ngit version 2.43.0\n",
+        ] {
+            assert_eq!(git_version(answer), None, "{answer:?}");
+        }
     }
 }

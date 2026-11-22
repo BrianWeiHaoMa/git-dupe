@@ -76,6 +76,9 @@ fn clone_git_run_sequences_do_not_follow_private_file_counts() {
                 let sequence: Vec<_> = own.commands().into_iter().map(<[u8]>::to_vec).collect();
                 let expected: Vec<_> = [
                     "rev-parse",
+                    // Git's version, asked once and first, before any run an older Git
+                    // can fail.
+                    "version",
                     "config",
                     "worktree",
                     "ls-files",

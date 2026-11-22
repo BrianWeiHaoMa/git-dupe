@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use super::lines::{self, Level};
-use crate::attachment::{Refusal, Unresolved};
+use crate::attachment::{Refusal, Unresolved, Unwritten};
 use crate::bytes;
 use crate::keeper::Failed;
 use crate::runner::locate::Workspace;
@@ -134,6 +134,23 @@ pub fn unresolved(unresolved: &Unresolved) -> Outcome {
         bytes::of(unresolved.path.as_os_str()),
         b" to record the private repository's working tree: ",
         unresolved.cause.to_string().as_bytes(),
+    ]
+    .concat();
+    refuse(&line)
+}
+
+/// The private repository's `info/attributes` that `.gitdupe`'s line could not be added
+/// to: a refusal naming the path, the cause, and `way_on`, what the command that refused
+/// takes next once the cause is gone, the file as it was and the workspace attached with
+/// the steps done before it (G1, G2).
+pub fn unwritten(unwritten: &Unwritten, way_on: &[u8]) -> Outcome {
+    let line = [
+        &b"cannot add .gitdupe's line to "[..],
+        bytes::of(unwritten.path.as_os_str()),
+        b": ",
+        unwritten.cause.to_string().as_bytes(),
+        b"; once that is fixed, ",
+        way_on,
     ]
     .concat();
     refuse(&line)

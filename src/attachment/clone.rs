@@ -6,7 +6,8 @@
 //! a public place (G18), every word asked, `-b`'s value included. Step 1 is where the
 //! workspace becomes attached, so that a refusal leaves nothing behind.
 //!
-//! The steps: `init` as G1 does it without `-b`; `remote add origin URL`;
+//! The steps: `init` as G1 does it without `-b`, `.gitdupe`'s line in `info/attributes`
+//! among them, before anything writes or reads `.gitdupe`; `remote add origin URL`;
 //! `fetch --update-shallow origin` with the refspec `remote add` records, its output Git's,
 //! which takes the refs of a shallow repository and makes this one shallow as `git clone`
 //! of it would, where a plain fetch rejects them and leaves no branch to check out (S12),
@@ -30,6 +31,7 @@
 //! as a misuse, because each reaches a step as a plain word that Git would read as an
 //! option. `clone` never settles: the sequence does, after it, wherever it ends attached.
 
+use super::attributes::Unwritten;
 use super::init::{self, NotAttached};
 use super::refusals::{self, Refusal};
 use super::settings::Unresolved;
@@ -58,6 +60,9 @@ pub enum NotCloned {
     NamesAPublicPlace(Vec<u8>, Place),
     /// The relative work tree cannot be computed; nothing ran that writes.
     Unresolved(Unresolved),
+    /// The private repository's `info/attributes` could not be completed: the workspace is
+    /// attached, and the steps after it did not run.
+    Unwritten(Unwritten),
     /// No `BRANCH` was given, and the remote's `HEAD` names no branch it has; the
     /// workspace is attached with `origin` configured and fetched.
     NoDefaultBranch,
@@ -78,6 +83,7 @@ impl From<NotAttached> for NotCloned {
     fn from(not_attached: NotAttached) -> Self {
         match not_attached {
             NotAttached::Unresolved(unresolved) => NotCloned::Unresolved(unresolved),
+            NotAttached::Unwritten(unwritten) => NotCloned::Unwritten(unwritten),
             NotAttached::Failed(failed) => NotCloned::Failed(failed),
         }
     }

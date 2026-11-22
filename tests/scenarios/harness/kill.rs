@@ -32,8 +32,8 @@
 //! writes fail, not kill it, while Git's runs write as ever.
 //!
 //! The same forwarder can select a run by its argument prefix and public/private
-//! environment, to fail it, truncate its real answer, observe bytes before it starts,
-//! or pause it. A pause has a bounded wait and its process group is cleaned up even
+//! environment, to fail it, truncate its real answer, answer it with bytes of its own as
+//! another release would, observe bytes before it starts, or pause it. A pause has a bounded wait and its process group is cleaned up even
 //! when the scenario fails; no product hook or second forwarding script is needed.
 
 use std::cell::Cell;
@@ -119,6 +119,10 @@ if [ -f "$control/selection" ]; then
                 [ "$count" -gt 0 ] || exit 125
                 head -c "$((count - 1))" "$control/answer"
                 exit "$status"
+                ;;
+            print)
+                cat "$control/printed" || exit 125
+                exit 0
                 ;;
             pause)
                 n=0
@@ -405,6 +409,9 @@ pub enum ForwardEffect {
     Exit(i32),
     Truncate,
     Pause,
+    /// The run prints these bytes on its standard output and exits 0, Git never running:
+    /// an answer of another release's.
+    Print(Vec<u8>),
 }
 
 /// A command using the kill harness's one forwarder, selected by arguments and scope.
@@ -438,6 +445,10 @@ impl Scenario {
             }
             ForwardEffect::Truncate => "truncate".into(),
             ForwardEffect::Pause => "pause".into(),
+            ForwardEffect::Print(bytes) => {
+                fs::write(killing.control.join("printed"), bytes).unwrap();
+                "print".into()
+            }
         };
         fs::write(killing.control.join("effect"), effect).unwrap();
         Forwarded { killing }

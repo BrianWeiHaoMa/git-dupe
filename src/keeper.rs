@@ -30,7 +30,8 @@
 //!   `detach` leaves none; under `--force` a listing that failed leaves the paths it asks
 //!   about to `.gitdupe` on disk and the region it deletes (`Holds/G3`).
 //! - Every file the keeper writes is written to a fresh file inside the private Git
-//!   directory and renamed into place (G21, `Foundations/Storage`).
+//!   directory and renamed into place (G21, `Foundations/Storage`); `replace_whole` is that
+//!   one way for the attachment's write of the private repository's `info/attributes` too.
 
 mod edit;
 mod exposure;
@@ -55,5 +56,6 @@ pub use listing::{
 };
 pub use region::{NotDeleted, StartingRegion, beyond_a_link as region_beyond_a_link, start};
 pub use remove::remove;
+pub use replace::whole as replace_whole;
 pub use rule::of as rule;
 pub use settle::settle;

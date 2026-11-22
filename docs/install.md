@@ -91,11 +91,14 @@ daily use from the executable; the manual page behind `man git-dupe` and
 ## Git
 
 However git-dupe is installed, the Git on `PATH` decides: `git --version` must say
-2.43.0 or newer, below 3.0.0. Ubuntu 24.04 ships 2.43.0 and Debian 13 ships 2.47;
-Ubuntu 22.04 ships 2.34 and Debian 12 ships 2.39, so there a newer Git comes first, from
-the `git-core` PPA, a backport, or a build from source. On a Mac, Apple's Git, which the
-Command Line Tools for Xcode install, will do, 2.50.1 in their version 26.6, and so will
-Homebrew's.
+2.43.0 or newer, below 3.0.0. With an older one, from 2.31.0 on, `git dupe init` and
+`git dupe clone` say so first, in a warning naming the Git they found, and a later step
+can fail with Git's own message about an option; below 2.31.0 every command that looks
+for the repository ends with `fatal: cannot read where Git says this repository is`.
+Ubuntu 24.04 ships 2.43.0 and Debian 13 ships 2.47; Ubuntu 22.04 ships 2.34 and Debian 12
+ships 2.39, so there a newer Git comes first, from the `git-core` PPA, a backport, or a
+build from source. On a Mac, Apple's Git, which the Command Line Tools for Xcode install,
+will do, 2.50.1 in their version 26.6, and so will Homebrew's.
 
 ## On Windows
 

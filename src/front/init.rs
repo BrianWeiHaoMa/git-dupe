@@ -4,6 +4,7 @@
 //! anywhere before `--` is answered without locating, and a misuse is reported after the
 //! locate run, so that outside a repository Git's own message ends the command.
 
+use super::git_version;
 use super::help;
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
@@ -58,10 +59,11 @@ pub fn read(words: &[Vec<u8>]) -> Asked<'_> {
     Asked::Attach(branch)
 }
 
-/// The handler: attaches the workspace, or completes an attachment, and says so in one
-/// `hint:` where the workspace was attached before the command. Settle follows in the
-/// sequence, whatever this returns.
+/// The handler: names a Git older than F4's range first, then attaches the workspace, or
+/// completes an attachment, and says so in one `hint:` where the workspace was attached
+/// before the command. Settle follows in the sequence, whatever this returns.
 pub fn run(workspace: &Workspace, branch: Option<&[u8]>) -> Outcome {
+    git_version::warn_when_too_old();
     match attachment::init(workspace, branch) {
         Ok(initialized) => {
             if workspace.attached() {
@@ -71,19 +73,36 @@ pub fn run(workspace: &Workspace, branch: Option<&[u8]>) -> Outcome {
         }
         Err(NotInitialized::Refused(refusal)) => outcome::refuse_to_attach(workspace, refusal),
         Err(NotInitialized::Unresolved(unresolved)) => outcome::unresolved(&unresolved),
+        Err(NotInitialized::Unwritten(unwritten)) => {
+            outcome::unwritten(&unwritten, b"'git dupe init' completes the attachment")
+        }
         Err(NotInitialized::Failed(failed)) => outcome::failed(failed),
     }
 }
 
 /// The hint of an `init` in a workspace attached before it: which steps it completed.
 fn completed(initialized: &Initialized) -> Vec<u8> {
-    let done: &[u8] = match (initialized.repository, initialized.settings) {
-        (true, true) => b"completed its private repository and its settings",
-        (true, false) => b"completed its private repository",
-        (false, true) => b"completed its settings",
-        (false, false) => b"nothing was missing",
+    let done: Vec<&[u8]> = [
+        (initialized.repository, &b"its private repository"[..]),
+        (initialized.settings, b"its settings"),
+        (
+            initialized.attributes,
+            b"its info/attributes line for .gitdupe",
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(completed, what)| completed.then_some(what))
+    .collect();
+    let said: Vec<u8> = match done.as_slice() {
+        [] => b"nothing was missing".to_vec(),
+        [one] => [b"completed ", *one].concat(),
+        [first, second] => [b"completed ", *first, b" and ", *second].concat(),
+        [first, second, third] => {
+            [b"completed ", *first, b", ", *second, b", and ", *third].concat()
+        }
+        _ => unreachable!("three steps at most"),
     };
-    [b"this workspace was already attached; ", done].concat()
+    [&b"this workspace was already attached; "[..], &said].concat()
 }
 
 #[cfg(test)]
@@ -159,21 +178,38 @@ mod tests {
 
     #[test]
     fn the_hint_says_what_was_completed() {
-        let hint = |repository, settings| {
+        let hint = |repository, attributes, settings| {
             completed(&Initialized {
                 repository,
                 settings,
+                attributes,
             })
         };
-        let all = [
-            hint(true, true),
-            hint(true, false),
-            hint(false, true),
-            hint(false, false),
-        ];
+        let mut all = Vec::new();
+        for repository in [false, true] {
+            for attributes in [false, true] {
+                for settings in [false, true] {
+                    all.push(hint(repository, attributes, settings));
+                }
+            }
+        }
         for (index, text) in all.iter().enumerate() {
             assert!(text.starts_with(b"this workspace was already attached; "));
             assert!(all[..index].iter().all(|earlier| earlier != text));
         }
+        assert_eq!(
+            hint(false, false, false),
+            b"this workspace was already attached; nothing was missing"
+        );
+        assert_eq!(
+            hint(false, true, true),
+            b"this workspace was already attached; completed its settings and its \
+              info/attributes line for .gitdupe"
+        );
+        assert_eq!(
+            hint(true, true, true),
+            b"this workspace was already attached; completed its private repository, its \
+              settings, and its info/attributes line for .gitdupe"
+        );
     }
 }

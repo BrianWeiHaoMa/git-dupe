@@ -81,11 +81,14 @@ struct Run<'c> {
 }
 
 impl Run<'_> {
-    /// The part of the run `point` falls in. A kill inside a write is inside settle's,
-    /// the one write of git-dupe's own in `clone`.
+    /// The part of the run `point` falls in. `clone` makes two writes of its own: the
+    /// private repository's `info/attributes`, of one short line, in `init`'s steps, which a
+    /// limit of no block stops, and settle's write of the region, which the developer's own
+    /// lines make longer than a block, and which a limit of one block stops.
     fn part(&self, point: Point) -> Part {
         let n = match point {
             Point::BeforeRun(n) | Point::AfterRun(n) => n,
+            Point::InsideWrite { blocks: 0 } => return Part::Init,
             Point::InsideWrite { .. } => return Part::Settle,
         };
         let starts = [
@@ -106,6 +109,8 @@ impl Run<'_> {
         match point {
             Point::BeforeRun(at) => at > n,
             Point::AfterRun(at) => at >= n,
+            // The line follows Git's `init`, before the settings' first run.
+            Point::InsideWrite { blocks: 0 } => n <= first(self.commands, "init"),
             // Composition/Keeper: replacement follows the private listing, before
             // the public listing and check-ignore, the final two runs.
             Point::InsideWrite { .. } => n < self.commands.len() - 1,

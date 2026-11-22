@@ -1,7 +1,8 @@
-//! `init` after its words: the refusals, then the repository, then the settings, each
-//! step done only where it is missing (G1, `State` "`init`"). The relative work tree the
-//! settings compare and write is computed first, so that a root or Git directory with no
-//! canonical form ends the command before anything is written.
+//! `init` after its words: the refusals, then the repository, then `.gitdupe`'s line in its
+//! `info/attributes`, then the settings, each step done only where it is missing (G1, F2,
+//! `State` "`init`"). The relative work tree the settings compare and write is computed
+//! first, so that a root or Git directory with no canonical form ends the command before
+//! anything is written.
 //!
 //! The private repository is made, completed, and configured only where its path is a
 //! directory by `lstat`, or nothing yet: something else standing there is one of the
@@ -17,6 +18,7 @@
 use std::fs;
 use std::path::Path;
 
+use super::attributes::{self, Unwritten};
 use super::refusals::{self, Refusal};
 use super::settings::{self, Unresolved};
 use super::step;
@@ -31,6 +33,8 @@ pub struct Initialized {
     pub repository: bool,
     /// The keys were set.
     pub settings: bool,
+    /// `.gitdupe`'s line was added to the private repository's `info/attributes`.
+    pub attributes: bool,
 }
 
 pub enum NotInitialized {
@@ -38,6 +42,9 @@ pub enum NotInitialized {
     Refused(Refusal),
     /// The relative work tree cannot be computed; nothing ran that writes.
     Unresolved(Unresolved),
+    /// The private repository's `info/attributes` could not be completed, and the steps
+    /// after it did not run.
+    Unwritten(Unwritten),
     /// A Git step failed, and the steps after it did not run.
     Failed(Failed),
 }
@@ -52,6 +59,9 @@ impl From<Failed> for NotInitialized {
 pub(super) enum NotAttached {
     /// The relative work tree cannot be computed; nothing ran that writes.
     Unresolved(Unresolved),
+    /// The private repository's `info/attributes` could not be completed, and the steps
+    /// after it did not run.
+    Unwritten(Unwritten),
     /// A Git step failed, and the steps after it did not run.
     Failed(Failed),
 }
@@ -66,6 +76,7 @@ impl From<NotAttached> for NotInitialized {
     fn from(not_attached: NotAttached) -> Self {
         match not_attached {
             NotAttached::Unresolved(unresolved) => NotInitialized::Unresolved(unresolved),
+            NotAttached::Unwritten(unwritten) => NotInitialized::Unwritten(unwritten),
             NotAttached::Failed(failed) => NotInitialized::Failed(failed),
         }
     }
@@ -81,7 +92,8 @@ pub fn init(workspace: &Workspace, branch: Option<&[u8]>) -> Result<Initialized,
 }
 
 /// What `init` does once nothing refuses, and the first step of `clone`: the repository,
-/// then the settings, each where it is missing.
+/// then `.gitdupe`'s line, then the settings, each where it is missing, so that `clone`'s
+/// steps after it, which write `.gitdupe`, find the line in place.
 pub(super) fn attach(
     workspace: &Workspace,
     branch: Option<&[u8]>,
@@ -92,6 +104,7 @@ pub(super) fn attach(
     if repository {
         make(workspace, &private, branch)?;
     }
+    let attributes = attributes::complete(&private).map_err(NotAttached::Unwritten)?;
     let recorded = settings::recorded(workspace, &private)?;
     let settings = recorded.unfinished(&work_tree);
     if settings {
@@ -100,6 +113,7 @@ pub(super) fn attach(
     Ok(Initialized {
         repository,
         settings,
+        attributes,
     })
 }
 

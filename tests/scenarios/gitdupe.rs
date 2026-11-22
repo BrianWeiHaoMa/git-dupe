@@ -1,5 +1,6 @@
 //! `.gitdupe` as the privately tracked file it is: staged by `hide`, `unhide`, and `add`
-//! as Git's `add` stages any file, merged as Git merges any file, and the hidden paths
+//! as Git's `add` stages any file, merged by Git's `union` driver, which its attributes
+//! line names (`gitdupe_merge.rs`, `gitdupe_attributes.rs`), and the hidden paths
 //! following what stands on disk, whatever line endings or byte order mark a checkout or
 //! an editor gave it (F5).
 
@@ -101,10 +102,16 @@ fn a_merge_of_two_branches_hiding_paths_is_gits_and_hides_what_the_merged_file_l
 }
 
 /// With `core.autocrlf=true` in the global configuration, as Git for Windows's installer
-/// ships it, the `.gitdupe` a second machine's `clone` checks out has CRLF line endings
-/// and hides what it listed (`Done when`, F5, `In use` 12).
+/// ships it, the `.gitdupe` a second machine's `clone` checks out keeps the LF line endings
+/// it was committed with and hides what it listed; saved again with CRLF line endings, it
+/// still does (`Done when`, F2, F5, `In use` 12). `Done when`'s ninth bullet: "`git dupe
+/// clone URL` on a second clone of a project that hides `notes`, its `.gitdupe` committed
+/// with LF line endings, leaves `.gitdupe` with LF line endings (F2), and a new `notes/x.md`
+/// is invisible to `git status` and untracked in `git dupe status`; and with `.gitdupe`
+/// then saved with CRLF line endings, a new `notes/y.md` is so too (F5)." Before F2's
+/// line in the private repository's `info/attributes`, the checkout had CRLF.
 #[test]
-fn a_gitdupe_checked_out_with_crlf_line_endings_hides_what_it_listed() {
+fn a_gitdupe_committed_with_lf_stays_lf_under_autocrlf_and_hides_saved_with_crlf() {
     under_each_release(|s| {
         let m = s.second_machine("project");
         fs::write(
@@ -112,6 +119,11 @@ fn a_gitdupe_checked_out_with_crlf_line_endings_hides_what_it_listed() {
             b"[core]\n\tautocrlf = true\n",
         )
         .unwrap();
+        let committed = s
+            .private(&m.first.root)
+            .git(["cat-file", "blob", "HEAD:.gitdupe"])
+            .succeeds();
+        assert_eq!(committed.stdout, b"notes\n.vscode\n");
 
         let second = &m.root;
         s.git([
@@ -123,30 +135,36 @@ fn a_gitdupe_checked_out_with_crlf_line_endings_hides_what_it_listed() {
         .succeeds();
         assert_eq!(
             fs::read(second.join(".gitdupe")).unwrap(),
-            b"notes\r\n.vscode\r\n"
+            b"notes\n.vscode\n"
         );
+        let new_file_is_hidden = |path: &str| {
+            write(second, path, b"new\n");
+            assert!(
+                !public_status(s, second)
+                    .windows(5)
+                    .any(|name| name == b"notes")
+            );
+            let status = s
+                .git(["dupe", "status", "--porcelain"])
+                .from(second)
+                .succeeds();
+            let line = format!("?? {path}");
+            assert!(
+                status
+                    .stdout
+                    .split(|&byte| byte == b'\n')
+                    .any(|shown| shown == line.as_bytes()),
+                "{status:?}"
+            );
+        };
+        new_file_is_hidden("notes/x.md");
+
+        write(second, ".gitdupe", b"notes\r\n.vscode\r\n");
+        new_file_is_hidden("notes/y.md");
         // The rule of the path listed, and none with a carriage return in brackets.
         let rules = region_rules(second);
         assert!(rules.contains(&b"/notes".to_vec()), "{rules:?}");
         assert!(!rules.iter().any(|rule| rule.contains(&b'[')), "{rules:?}");
-
-        write(second, "notes/x.md", b"new\n");
-        assert!(
-            !public_status(s, second)
-                .windows(5)
-                .any(|name| name == b"notes")
-        );
-        let status = s
-            .git(["dupe", "status", "--porcelain"])
-            .from(second)
-            .succeeds();
-        assert!(
-            status
-                .stdout
-                .split(|&byte| byte == b'\n')
-                .any(|line| line == b"?? notes/x.md"),
-            "{status:?}"
-        );
     });
 }
 

@@ -13,6 +13,7 @@
 //! sequence, whatever this returns: after the refusal in an attached workspace, after a
 //! step that failed once the workspace is attached, and after success.
 
+use super::git_version;
 use super::help;
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
@@ -82,9 +83,11 @@ pub fn read(words: &[Vec<u8>]) -> Asked<'_> {
     Asked::Clone { url, branch }
 }
 
-/// The handler: `words` are every word after `clone`, each compared with the public
-/// places.
+/// The handler: names a Git older than F4's range first, before the runs of the public
+/// places such a Git can fail; `words` are every word after `clone`, each compared with
+/// the public places.
 pub fn run(workspace: &Workspace, words: &[Vec<u8>], url: &[u8], branch: Option<&[u8]>) -> Outcome {
+    git_version::warn_when_too_old();
     let places = match places::take(&workspace.facts()) {
         Ok(places) => places,
         Err(ended) => return ended,
@@ -111,6 +114,11 @@ pub fn run(workspace: &Workspace, words: &[Vec<u8>], url: &[u8], branch: Option<
         Err(NotCloned::Refused(refusal)) => outcome::refuse_to_attach(workspace, refusal),
         Err(NotCloned::NamesAPublicPlace(word, place)) => places::refuse(&word, &place),
         Err(NotCloned::Unresolved(unresolved)) => outcome::unresolved(&unresolved),
+        // The steps after the line did not run, which only a new `clone` takes (G2).
+        Err(NotCloned::Unwritten(unwritten)) => outcome::unwritten(
+            &unwritten,
+            b"'git dupe detach --force', then 'git dupe clone' again, start over",
+        ),
         Err(NotCloned::NoDefaultBranch) => outcome::refuse(
             b"the private remote's HEAD names no branch it has, so there is no default \
               branch to check out; run 'git dupe detach', or 'git dupe detach --force' \

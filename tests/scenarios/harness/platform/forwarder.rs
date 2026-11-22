@@ -277,9 +277,20 @@ impl Run {
         }
         match effect.as_str() {
             "truncate" => self.truncated(),
+            "print" => self.printed(),
             "pause" => self.paused(),
             _ => {}
         }
+    }
+
+    /// Prints the bytes of `printed` in place of Git's answer, and ends with 0.
+    fn printed(&self) -> ! {
+        let printed =
+            fs::read(self.file("printed")).unwrap_or_else(|_| gave_up("cannot read printed"));
+        std::io::stdout()
+            .write_all(&printed)
+            .unwrap_or_else(|_| gave_up("cannot print the answer"));
+        exit(0)
     }
 
     /// Prints Git's answer without its last byte, and ends with its status.
