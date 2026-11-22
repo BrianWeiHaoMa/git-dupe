@@ -71,6 +71,20 @@ Every change a user of git-dupe would notice, newest first, in the form of
   not older than 2.31.0, first print a warning naming that Git and the supported range,
   Git 2.43.0 or newer, below 3.0.0, where until now the first sign was a Git message about
   an option the user never typed.
+- The Linux archive's executable is linked statically, built for
+  `x86_64-unknown-linux-musl`, and needs no C library on the machine: it starts on
+  distributions older than the build machine, as Debian 12, Ubuntu 22.04, and RHEL 9, and
+  in the container images built on them, where the one built on Ubuntu 24.04 needed the
+  GNU C library 2.39 or newer. The archive keeps its name.
+- The manual page's daily example says that `git dupe add -A` leaves out a new file the
+  project ignores, which `git dupe status` lists as ignored and `git dupe add -f <path>`
+  stages. The documents say that `npm pack` and a Docker build can take private files
+  while `git status` is clean; how to search private files, how to take out a repository of
+  its own that `git dupe add` staged as a link under a hidden directory, and what Git LFS
+  does with a private file; that deleting the executable leaves every file hidden, and
+  that `git dupe detach` is run in each attached worktree; that on Windows a path is
+  added with `git dupe hide`, not PowerShell 5.1's `Add-Content`; and when hiding a
+  directory of files tracked one by one makes `git dupe status` faster.
 
 ## [0.4.1] - 2026-11-03
 

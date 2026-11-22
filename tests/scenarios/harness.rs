@@ -21,6 +21,7 @@ mod platform;
 mod provision;
 mod public;
 mod release_archive;
+mod release_build;
 mod release_site;
 mod releases;
 mod remotes;
@@ -29,6 +30,7 @@ mod running;
 mod scenario;
 mod sha256;
 mod stash;
+mod static_linking;
 mod sweep;
 mod trace;
 mod tree;
@@ -74,7 +76,8 @@ pub use output::{
 pub use platform::{
     MACHINES_WITHOUT_AN_ARCHIVE, architecture, as_git_spells, as_git_spells_bytes,
     backslash_separates, canonical, command_line_limit, commondir_read_through_a_link,
-    held_from_deletion, identity, permissions, second_filesystems, sleeping, symlink, word,
+    held_from_deletion, identity, permissions, release_target, second_filesystems, sleeping,
+    symlink, word,
 };
 pub use public::{
     EVERY_OBJECT, held_publicly, leaving_public_git, privately_tracked, public_git, public_status,
@@ -84,6 +87,7 @@ pub use release_archive::{
     archive_extension, install_note, note_commands, path_for_an_install, release_archive,
     windows_install_note, windows_powershell, zip_members,
 };
+pub use release_build::tested_executable;
 pub use release_site::ReleaseSite;
 pub use releases::oldest_supported;
 pub use remotes::{
@@ -94,6 +98,7 @@ pub use repository::locate_words;
 pub use scenario::{Git, Scenario, report, under_each_release};
 pub use sha256::hex_digest;
 pub use stash::{refused_stash_untracked, stash_refusal_first, stash_untracked_line};
+pub use static_linking::{RunTimeNeeds, run_time_needs};
 pub use sweep::{GITDUPE, Killed, Sweep, Version, copied, files, lived_in, outside};
 pub use trace::{Runs, run_traced, run_words};
 pub use tree::{Tree, changed_since, unchanged};

@@ -6,17 +6,17 @@
 use std::env::consts::EXE_SUFFIX;
 use std::ffi::OsStr;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::harness::{
-    End, general_text, holds, name, oldest_supported, run_traced, under_each_release, usage_line,
-    word_of, write_executable,
+    End, general_text, holds, name, oldest_supported, run_traced, tested_executable,
+    under_each_release, usage_line, word_of, write_executable,
 };
 
 #[test]
 fn help_needs_only_the_installed_executable_outside_any_repository() {
     under_each_release(|s| {
-        let built = Path::new(env!("CARGO_BIN_EXE_git-dupe"));
+        let built = tested_executable();
         let installed = s.dir().join("installed");
         fs::create_dir(&installed).unwrap();
         let executable = installed.join(format!("git-dupe{EXE_SUFFIX}"));

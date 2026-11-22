@@ -1,5 +1,6 @@
-//! The release archive: this package built in the release profile and its members packed
-//! into `git-dupe-<version>-<platform>-<architecture>.<extension>` beside the executable,
+//! The release archive: this package built in the release profile for the release's target
+//! (`release_build.rs`), and its members packed into
+//! `git-dupe-<version>-<platform>-<architecture>.<extension>` beside the executable,
 //! the platform's word and the architecture from the platform module (P3), all under the
 //! one directory `git-dupe-<version>`, with a `.sha256` beside it that names it by its bare
 //! name. On Linux and macOS it is a tar of the executable, the manual page that build
@@ -15,12 +16,13 @@ use std::env::consts::EXE_SUFFIX;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::OnceLock;
 
 use super::fresh::FreshDirectory;
 use super::platform::{architecture, permissions, word};
 use super::provision::windows_tar;
+use super::release_build::{built_for_the_release, run, tested_executable};
 use super::scenario::Scenario;
 use super::sha256::hex_digest;
 
@@ -109,7 +111,7 @@ pub fn windows_powershell() -> PathBuf {
 /// and without any directory that holds a `git-dupe`, because this machine may have one
 /// installed, which would answer in place of the copy.
 pub fn path_for_an_install(s: &Scenario, front: &[&Path]) -> OsString {
-    let built = Path::new(env!("CARGO_BIN_EXE_git-dupe")).parent().unwrap();
+    let built = tested_executable().parent().unwrap();
     let callers = std::env::var_os("PATH").unwrap_or_default();
     let executable = format!("git-dupe{EXE_SUFFIX}");
     let callers = std::env::split_paths(&callers)
@@ -120,7 +122,7 @@ pub fn path_for_an_install(s: &Scenario, front: &[&Path]) -> OsString {
 }
 
 fn make() -> Result<ReleaseArchive, String> {
-    let (executable, out_dir) = release_build()?;
+    let (executable, out_dir) = built_for_the_release(true)?;
     let page = out_dir.join("git-dupe.1");
     let leading = format!("git-dupe-{}", env!("CARGO_PKG_VERSION"));
 
@@ -233,74 +235,6 @@ fn placed(written: Result<(), String>, from: &Path, to: &Path) -> Result<(), Str
     done
 }
 
-/// Builds the package in the release profile and returns the executable and the build
-/// script's output directory as Cargo names them in its messages. `.cargo/config.toml`
-/// reaches this build as it reaches every other (S25).
-fn release_build() -> Result<(PathBuf, PathBuf), String> {
-    let said = run(Command::new(env!("CARGO"))
-        .args([
-            "build",
-            "--release",
-            "--locked",
-            "--message-format=json-render-diagnostics",
-        ])
-        .current_dir(env!("CARGO_MANIFEST_DIR")))?;
-    named(&said)
-}
-
-/// The executable and the output directory that Cargo's messages name, one each: a
-/// `compiler-artifact` line with an `executable`, the build script's having none, and a
-/// `build-script-executed` line with its `out_dir`. One package is built.
-fn named(said: &str) -> Result<(PathBuf, PathBuf), String> {
-    let field = |reason: &str, name: &str| -> Result<Vec<PathBuf>, String> {
-        let opening = format!("{{\"reason\":\"{reason}\",");
-        said.lines()
-            .filter(|line| line.starts_with(&opening))
-            .filter_map(|line| string_field(line, name).transpose())
-            .collect()
-    };
-    let executables = field("compiler-artifact", "executable")?;
-    let out_dirs = field("build-script-executed", "out_dir")?;
-    match (&executables[..], &out_dirs[..]) {
-        ([executable], [out_dir]) if names_the_executable(executable) => {
-            Ok((executable.clone(), out_dir.clone()))
-        }
-        _ => Err(format!(
-            "the release build named the executables {executables:?} and the output \
-             directories {out_dirs:?}, where one `git-dupe` and one directory were expected:\n\
-             {said}"
-        )),
-    }
-}
-
-/// Whether `path`'s last component, after either separator, is the package's executable:
-/// read from the text, because the build machine's `Path` is not the message's.
-fn names_the_executable(path: &Path) -> bool {
-    let path = path.to_string_lossy();
-    let name = path.rsplit(['/', '\\']).next();
-    matches!(name, Some("git-dupe" | "git-dupe.exe"))
-}
-
-/// The value of the string field `name` of a one-line JSON message, or none where the
-/// line holds no such string. Of Cargo's escapes only `\\` is read, the separator of a
-/// Windows path.
-fn string_field(line: &str, name: &str) -> Result<Option<PathBuf>, String> {
-    let opening = format!("\"{name}\":\"");
-    let Some((_, rest)) = line.split_once(&opening) else {
-        return Ok(None);
-    };
-    let mut value = String::new();
-    let mut characters = rest.chars();
-    loop {
-        match characters.next() {
-            Some('"') => return Ok(Some(PathBuf::from(value))),
-            Some('\\') if characters.next() == Some('\\') => value.push('\\'),
-            Some('\\') | None => return Err(format!("cannot read the field {name} of: {line}")),
-            Some(character) => value.push(character),
-        }
-    }
-}
-
 /// One entry of a zip's central directory.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ZipMember {
@@ -350,22 +284,6 @@ pub fn zip_members(archive: &[u8]) -> Vec<ZipMember> {
     }
     assert_eq!(at, end, "nothing between the central directory and its end");
     members
-}
-
-/// Runs a tool to its end and returns what it printed; a failure carries the command and
-/// the end of what it said on standard error.
-fn run(command: &mut Command) -> Result<String, String> {
-    let output = command
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|cause| format!("cannot run {command:?}: {cause}"))?;
-    if !output.status.success() {
-        let said = String::from_utf8_lossy(&output.stderr);
-        let lines: Vec<&str> = said.lines().collect();
-        let tail = lines[lines.len().saturating_sub(40)..].join("\n");
-        return Err(format!("{command:?}: {}\n{tail}", output.status));
-    }
-    String::from_utf8(output.stdout).map_err(|cause| format!("{command:?}: {cause}"))
 }
 
 fn because(act: &str, path: &Path) -> impl Fn(std::io::Error) -> String {
@@ -437,61 +355,5 @@ mod tests {
                 ("d/b", 8, &b"deflated"[..])
             ]
         );
-    }
-
-    /// Windows's path as Cargo escapes it, on every platform: `\\` read, every other escape
-    /// refused.
-    #[test]
-    fn a_windows_path_is_read_from_its_escaped_separators() {
-        const OUT: &str = r#"{"reason":"build-script-executed","out_dir":"C:\\p\\out"}"#;
-        const EXE: &str =
-            r#"{"reason":"compiler-artifact","executable":"C:\\p\\release\\git-dupe.exe"}"#;
-        assert_eq!(
-            named(&[EXE, OUT].join("\n")).unwrap(),
-            (
-                PathBuf::from(r"C:\p\release\git-dupe.exe"),
-                PathBuf::from(r"C:\p\out")
-            )
-        );
-        let quoted = EXE.replace(r"C:\\p", r#"C:\"p"#);
-        assert!(named(&[&quoted, OUT].join("\n")).is_err());
-        let unknown = EXE.replace(r"C:\\p", r"C:\up");
-        assert!(named(&[&unknown, OUT].join("\n")).is_err());
-    }
-
-    const BUILD_SCRIPT: &str = r#"{"reason":"compiler-artifact","package_id":"path+file:///p#0.1.0","target":{"kind":["custom-build"],"name":"build-script-build"},"executable":null,"fresh":true}"#;
-    const EXECUTED: &str = r#"{"reason":"build-script-executed","package_id":"path+file:///p#0.1.0","linked_libs":[],"env":[],"out_dir":"/p/target/release/build/git-dupe-1/out"}"#;
-    const BINARY: &str = r#"{"reason":"compiler-artifact","package_id":"path+file:///p#0.1.0","target":{"kind":["bin"],"name":"git-dupe"},"executable":"/p/target/release/git-dupe","fresh":false}"#;
-    const FINISHED: &str = r#"{"reason":"build-finished","success":true}"#;
-
-    #[test]
-    fn the_executable_and_the_output_directory_are_the_ones_cargo_named() {
-        let said = [BUILD_SCRIPT, EXECUTED, BINARY, FINISHED].join("\n");
-        assert_eq!(
-            named(&said).unwrap(),
-            (
-                PathBuf::from("/p/target/release/git-dupe"),
-                PathBuf::from("/p/target/release/build/git-dupe-1/out")
-            )
-        );
-    }
-
-    #[test]
-    fn a_build_that_names_neither_or_two_is_not_read() {
-        for said in [
-            [BUILD_SCRIPT, FINISHED].join("\n"),
-            [BUILD_SCRIPT, EXECUTED, FINISHED].join("\n"),
-            [EXECUTED, BINARY, BINARY, FINISHED].join("\n"),
-            [EXECUTED, EXECUTED, BINARY].join("\n"),
-            [
-                EXECUTED,
-                &BINARY.replace("release/git-dupe\"", "release/other\""),
-            ]
-            .join("\n"),
-        ] {
-            assert!(named(&said).is_err(), "{said}");
-        }
-        let escaped = BINARY.replace("/p/target", "/p\\\"q/target");
-        assert!(named(&[EXECUTED, &escaped].join("\n")).is_err());
     }
 }

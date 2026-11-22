@@ -16,6 +16,7 @@ use super::output::{End, Output};
 use super::platform;
 use super::platform::canonical;
 use super::provision::Store;
+use super::release_build::tested_executable;
 use super::releases::{NARROWING_VARIABLE, selection};
 use super::running::Running;
 
@@ -106,7 +107,7 @@ impl Scenario {
             .parent()
             .expect("a directory below the temporary one");
 
-        let built = Path::new(env!("CARGO_BIN_EXE_git-dupe"));
+        let built = tested_executable();
         let callers = std::env::var_os("PATH").unwrap_or_default();
         let mut front = platform::release_programs(&release.directory);
         front.extend(built.parent().map(Path::to_path_buf));

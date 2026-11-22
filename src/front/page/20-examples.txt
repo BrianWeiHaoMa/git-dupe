@@ -15,7 +15,7 @@ A directory is hidden by its line in .gitdupe, and a file by being tracked
 privately, so docs/notes.md alone is hidden and the rest of docs/ stays the
 project's. Whatever is written in scratch/ later is hidden too.
 
-See what changed under the hidden paths, stage all of it, and commit:
+See what changed under the hidden paths, stage it, and commit:
 
     $ git dupe status
     $ git dupe add -A
@@ -24,7 +24,10 @@ See what changed under the hidden paths, stage all of it, and commit:
 git dupe status shows changes under the hidden paths alone, so src/new.py,
 which nothing hides, is left for git add or git dupe add to take. git dupe
 add -A stages every change under the hidden paths and nothing else, from any
-directory of the project.
+directory of the project. It leaves out a file the project ignores that is
+new since its directory was added, as git add -A does: a .vscode/launch.json
+written tomorrow is listed by git dupe status among the ignored files, marked
+!! in its short form, until git dupe add -f <path> stages it.
 
 Take what your other machines pushed, and send what this one committed:
 

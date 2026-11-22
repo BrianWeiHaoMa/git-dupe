@@ -134,7 +134,7 @@ check_digest() {
 }
 
 # Unpacks the archive and runs its executable before anything is installed, so that one
-# built for a newer C library or another architecture fails here and not at the first
+# this machine cannot run, as a Mac's on an older macOS, fails here and not at the first
 # `git dupe`.
 unpack() {
   tar -xf "$work/$archive" -C "$work" ||

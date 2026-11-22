@@ -23,7 +23,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux's scenarios run git-dupe built for the static target its release ships
+          # (P3), which they build themselves; the other runners build for their host.
           - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
             timeout: 60
           # A macOS runner is slower, the Intel one most, and builds the two Git
           # releases itself on a cache miss.
@@ -38,6 +41,8 @@ jobs:
             timeout: 240
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
+    env:
+      RUST_TARGET: ${{ matrix.target }}
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -45,6 +50,9 @@ jobs:
       - name: Install the toolchain rust-toolchain.toml pins
         run: |
           rustup toolchain install
+          if [[ -n $RUST_TARGET ]]; then
+            rustup target add "$RUST_TARGET"
+          fi
           rustup show active-toolchain
 
       # Every file in a private repository stands deeper than its counterpart in .git, and

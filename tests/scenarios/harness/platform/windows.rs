@@ -74,6 +74,12 @@ pub fn word() -> &'static str {
     "windows"
 }
 
+/// The target the release executable is built for, where it is not the host's: none here,
+/// the static C runtime reaching the host's build through `.cargo/config.toml` (P3, S25).
+pub fn release_target() -> Option<&'static str> {
+    None
+}
+
 /// The machine's architecture, `x86_64` here, with no `uname` to ask (P3).
 pub fn architecture() -> String {
     std::env::consts::ARCH.to_owned()

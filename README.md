@@ -81,7 +81,9 @@ the project's `.gitignore` ignores is added with `-f`, as `git add` adds one.
   overwrites yours. Commit first: `git dupe restore .`, from the root, brings back every
   file the dupe tracks as last staged, over the project's file too where the project now
   tracks the path, which a public `git add` then stages; there, read yours with
-  `git dupe show HEAD:<path>` instead, and restore the other paths by name.
+  `git dupe show HEAD:<path>` instead, and restore the other paths by name. `npm pack`
+  and a Docker build never read `.git/info/exclude`, and take them unless their own
+  ignore files leave them out ([Limits](docs/how-it-works.md#limits)).
 - **Each worktree on its own.** A linked worktree is attached by its own `git dupe init`
   or `git dupe clone`, and `git worktree remove` and `git worktree prune` delete its
   dupe with it, whatever files of yours stand there. A push alone misses a file in no

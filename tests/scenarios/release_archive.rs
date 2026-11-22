@@ -12,10 +12,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Scenario, architecture, archive_extension, asking_for_the_page, every_text_shown,
-    hex_digest, holds_a_line_of_the_general_text, install_note, lines_of, note_commands,
-    path_for_an_install, release_archive, under_each_release, windows_install_note,
-    windows_powershell, word, zip_members,
+    End, RunTimeNeeds, Scenario, architecture, archive_extension, asking_for_the_page,
+    every_text_shown, hex_digest, holds_a_line_of_the_general_text, install_note, lines_of,
+    note_commands, path_for_an_install, release_archive, release_target, run_time_needs,
+    tested_executable, under_each_release, windows_install_note, windows_powershell, word,
+    zip_members,
 };
 
 /// The directory every member lies in.
@@ -150,12 +151,50 @@ fn the_archive_holds_exactly_the_release_executable_its_page_and_the_install_not
         "{}",
         release.display()
     );
-    let tested = Path::new(env!("CARGO_BIN_EXE_git-dupe"));
-    assert_ne!(fs::read(release).unwrap(), fs::read(tested).unwrap());
+    assert_ne!(
+        fs::read(release).unwrap(),
+        fs::read(tested_executable()).unwrap()
+    );
     let tested_page = Path::new(env!("OUT_DIR")).join("git-dupe.1");
     assert_eq!(
         fs::read(&made.page).unwrap(),
         fs::read(tested_page).unwrap()
+    );
+}
+
+/// Where the release's executable is built for a target of its own, on Linux the static
+/// `x86_64-unknown-linux-musl`, the one the archive packs and the one every scenario ran are
+/// both of it (P3): neither names a program interpreter or a shared library, so that the
+/// archive starts on a machine whatever its C library holds, and holds a build the checks
+/// ran, whatever target `cargo test` was given. Elsewhere the host's build is the
+/// release's: Windows's C runtime is the zip's check, and a macOS program links the
+/// system's libraries, as every program there does.
+#[test]
+fn the_archive_and_the_scenarios_hold_the_release_target_s_static_build() {
+    let Some(target) = release_target() else {
+        return;
+    };
+    let archive = fs::read(&release_archive().path).unwrap();
+    let executable = format!("{}/git-dupe", leading_directory());
+    let packed = members_of(&archive)
+        .into_iter()
+        .find(|member| member.name == executable)
+        .expect("the archive holds the executable");
+    let static_build = RunTimeNeeds {
+        interpreter: None,
+        shared_libraries: 0,
+    };
+    assert_eq!(
+        run_time_needs("the archive's executable", &packed.content),
+        static_build,
+        "the archive's executable, built for {target}"
+    );
+    let tested = tested_executable();
+    assert_eq!(
+        run_time_needs("the scenarios' executable", &fs::read(tested).unwrap()),
+        static_build,
+        "the scenarios ran {}, which is not a static build for {target}",
+        tested.display()
     );
 }
 

@@ -74,12 +74,36 @@ alone, and [What it is for](use-cases.md) the uses it was made for.
   `git dupe rm --cached -- <path>` gives the project's path up; the warning spells each
   command for the path it names. `git dupe clone` on another machine keeps the project's
   file and names it the same way.
+- **A search from the root misses my notes?** ripgrep, and the search tools of coding
+  agents built on it, skip what `.git/info/exclude` ignores, as they skip whatever Git
+  ignores, so `rg <text>` from the root finds nothing in a hidden path.
+  `git dupe grep <text>` searches the files the dupe tracks, and a search scoped to a
+  hidden directory, `rg --no-ignore --hidden <text> notes/`, finds an untracked draft
+  too, one whose name begins with a dot included.
+- **Git warns of an embedded repository after `git dupe add`?** A hidden directory that
+  holds a repository of its own, a linked worktree an agent harness makes under
+  `.claude/worktrees/` or a skill cloned from its repository, is staged as one link to
+  its commit and not as its files, so another machine's `git dupe clone` writes none of
+  them. The `git rm --cached` Git's warning offers acts on the project and fails;
+  `git dupe rm --cached -f -- <path>` takes the link out of the dupe, leaving the files on
+  disk, and a line naming the path in the dupe's own `info/exclude`,
+  `.git/dupe/info/exclude` in the main worktree, keeps the next `git dupe add` from
+  staging it again.
+- **The project uses Git LFS?** Your files share its working tree, so its
+  `.gitattributes` applies to them. With Git LFS's filters in your global configuration,
+  where `git lfs install` puts them, a private file that matches one of its LFS patterns
+  is committed as a pointer, and `git dupe push` sends its content to the LFS store the
+  project's `.lfsconfig` names, which can be the team's; `git dupe lfs env` shows that
+  store before the first push. Filters set in the project's `.git/config` alone, as
+  `git lfs install --local` sets them, do not reach the dupe, which has a configuration
+  of its own, and the file is committed whole. On another machine without Git LFS,
+  `git dupe clone` writes the pointer and `git dupe status` is clean; once Git LFS is
+  installed there, `git dupe lfs pull` brings the content.
 - **How do I get out?** `git dupe detach` removes the worktree's dupe and its own region
   of `.git/info/exclude`, leaving the rest of that file but the region of a worktree
   whose dupe is gone, leaves every file on disk, `.gitdupe` included, and warns which
   paths the project can now see and which another worktree still hides. Without
   `--force` it refuses while a change is uncommitted or a commit of a branch, a tag, a
   stash entry, or `HEAD` is on no remote; history removed by `detach --force` is gone,
-  since git-dupe keeps no copy. Then delete `~/.local/bin/git-dupe` and
-  `~/.local/share/man/man1/git-dupe.1`, on Windows `~\.local\bin\git-dupe.exe`, or
-  `cargo uninstall git-dupe`, as [Installing](install.md#uninstalling) says.
+  since git-dupe keeps no copy. [Installing](install.md#uninstalling) says how to remove
+  git-dupe itself.

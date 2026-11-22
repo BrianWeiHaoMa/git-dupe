@@ -33,6 +33,19 @@ fn replacement_refused(s: &Scenario, wt: &Worktree, words: &[&str], cause: &str)
     assert!(refused.stdout.is_empty(), "{words:?}: {refused:?}");
     names(refused.only_line("fatal"), b".gitdupe");
     names(refused.only_line("fatal"), cause.as_bytes());
+    // The cause is named in words before its number, `(<words> (os error <n>))`, whichever
+    // C library gave the words.
+    let line = refused.only_line("fatal");
+    let number = line
+        .windows(cause.len())
+        .position(|window| window == cause.as_bytes())
+        .unwrap();
+    let opening = line[..number].iter().rposition(|&byte| byte == b'(');
+    let named = opening.map_or(&b""[..], |at| line[at + 1..number].trim_ascii());
+    assert!(
+        named.iter().any(u8::is_ascii_alphabetic),
+        "{words:?}: the cause is not named in words: {refused:?}"
+    );
     assert_eq!(
         wt.private(s).git(["ls-files", "-s"]).succeeds().stdout,
         index
@@ -148,13 +161,15 @@ fn a_linked_worktree_on_another_filesystem_refuses_hidden_list_replacements() {
                     [as_git_spells(&wt.root).as_bytes(), b"\n"].concat()
                 );
 
-                // Observe this filesystem's rename cause directly, rather than fixing its wording.
+                // Observe this filesystem's rename cause directly, rather than fixing it, and
+                // compare it by its error number: the words for it are the C library's that
+                // git-dupe links, on Linux musl's (P3), not the checks' own.
                 let source = s.dir().join("rename-probe");
                 fs::write(&source, b"probe\n").unwrap();
                 let cause = fs::rename(&source, second_path.join("rename-probe")).unwrap_err();
                 assert_eq!(cause.kind(), ErrorKind::CrossesDevices);
                 fs::remove_file(&source).unwrap();
-                let cause = cause.to_string();
+                let cause = format!("(os error {})", cause.raw_os_error().unwrap());
 
                 write(&root, "unrelated", b"leave this file\n");
                 write(&root, "notes/kept", b"already hidden\n");

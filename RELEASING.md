@@ -21,7 +21,7 @@ it has another name, read that name for `main` in them (`Set once`, below).
 
   | Archive | Made on the workflow's runner | Its executable runs on |
   |---|---|---|
-  | `git-dupe-<version>-linux-x86_64.tar` | `ubuntu-24.04` | x86-64 Linux with the GNU C library 2.39 or newer |
+  | `git-dupe-<version>-linux-x86_64.tar` | `ubuntu-24.04` | x86-64 Linux, whatever C library it has |
   | `git-dupe-<version>-macos-arm64.tar` | `macos-26` | macOS 11.0 or newer on Apple silicon |
   | `git-dupe-<version>-macos-x86_64.tar` | `macos-26-intel` | macOS 10.12 or newer on Intel |
   | `git-dupe-<version>-windows-x86_64.zip` | `windows-2025` | Windows 11 on x86-64 |
@@ -32,16 +32,17 @@ it has another name, read that name for `main` in them (`Set once`, below).
   `git-dupe`, the manual page, and [`INSTALL`](INSTALL), one text for Linux and macOS,
   and the zip `git-dupe.exe`, built with the C runtime linked in by `.cargo/config.toml`,
   and [`INSTALL-windows.txt`](INSTALL-windows.txt), with no page. It is made only by the
-  scenarios of `release_archive`, which build it from the source into `target/release/`
-  and check what it holds, whether `cargo test --test scenarios release_archive` runs
+  scenarios of `release_archive`, which build it from the source into `target/release/`,
+  on Linux `target/x86_64-unknown-linux-musl/release/`, and check what it holds, whether `cargo test --test scenarios release_archive` runs
   them or a wider check does, on a machine of its platform and architecture; it is never packed by
-  hand or built for another machine. Each floor is the making machine's: a Linux
-  executable runs only where the GNU C library is at least as new as the one it was
-  linked against, the runner image's 2.39, so a newer image would raise that floor; a
-  macOS executable runs on the macOS releases the pinned Rust toolchain supports for its
-  architecture, 11.0 on Apple silicon and 10.12 on Intel. Windows has no such floor:
-  git-dupe runs on Windows 11 alone, whatever older release that toolchain's target can
-  start on. The same scenarios write each
+  hand or built for another machine. The Linux executable is built for
+  `x86_64-unknown-linux-musl`, which Rust links statically, so that it needs no C library
+  where it runs and the runner image sets no floor; every scenario there runs git-dupe
+  built for that target too, in the profile `cargo test` builds, so that the checks run
+  the target the archive holds (`Checks` in [`CONTRIBUTING.md`](CONTRIBUTING.md)). A macOS executable runs on the macOS releases the pinned Rust toolchain supports
+  for its architecture, 11.0 on Apple silicon and 10.12 on Intel. Windows has no floor
+  either: git-dupe runs on Windows 11 alone, whatever older release that toolchain's
+  target can start on. The same scenarios write each
   `.sha256`, which names its archive by its bare name, so that
   `shasum -a 256 -c git-dupe-<version>-<platform>-<architecture>.<extension>.sha256`, or
   `sha256sum -c` where that is installed, checks a download in its own directory.
@@ -238,8 +239,8 @@ The log of the run names the step and why.
   re-run it until it passes.
 - **The workflow cannot run or cannot publish**, as when GitHub Actions is unavailable:
   make the Release by hand, from the tagged commit, with each archive made on a machine
-  of its platform and architecture: an x86-64 Linux machine with the GNU C library no
-  newer than the workflow image's 2.39, a Mac with Apple silicon, an Intel Mac, and an
+  of its platform and architecture: an x86-64 Linux machine with the target
+  `x86_64-unknown-linux-musl` installed, a Mac with Apple silicon, an Intel Mac, and an
   x86-64 Windows Server machine, each after the checks of step 5 passed on it, the
   Windows Server machine after `cargo test --test scenarios -- --skip scale` under the
   oldest and the newest listed release, and on a Mac with `MACOSX_DEPLOYMENT_TARGET`
@@ -253,6 +254,17 @@ The log of the run names the step and why.
   $ cd target/release
   $ shasum -a 256 -c git-dupe-<version>-<platform>-<architecture>.<extension>.sha256
   $ cd ../..
+  ```
+
+  On Linux, whose archive is built for `x86_64-unknown-linux-musl` and stands below that
+  target's directory, run these instead:
+
+  ```console
+  $ git switch --detach v<version>
+  $ cargo test --test scenarios release_archive
+  $ cd target/x86_64-unknown-linux-musl/release
+  $ shasum -a 256 -c git-dupe-<version>-linux-x86_64.tar.sha256
+  $ cd ../../..
   ```
 
   On Windows, in place of `shasum`, compare `Get-FileHash -Algorithm SHA256 <archive>`, or

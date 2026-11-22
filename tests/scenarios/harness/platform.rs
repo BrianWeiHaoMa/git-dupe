@@ -117,6 +117,21 @@ mod unix {
         "macos"
     }
 
+    /// The target the release executable is built for, where it is not the host's: on x86-64
+    /// Linux the static one, for which the scenarios' git-dupe is built too; none on another
+    /// Linux, for which no archive is made (P3, N10).
+    #[cfg(target_os = "linux")]
+    pub fn release_target() -> Option<&'static str> {
+        cfg!(target_arch = "x86_64").then_some("x86_64-unknown-linux-musl")
+    }
+
+    /// The target the release executable is built for, where it is not the host's: none on
+    /// macOS, whose executable is the host's build (P3).
+    #[cfg(target_os = "macos")]
+    pub fn release_target() -> Option<&'static str> {
+        None
+    }
+
     /// The machine's architecture as `uname -m` prints it, without its newline: `x86_64`, or
     /// `arm64` on Apple silicon, where the compiler's own name for it is `aarch64` (P3).
     pub fn architecture() -> String {

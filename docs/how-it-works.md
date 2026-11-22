@@ -135,6 +135,11 @@ remote.
   yours. `git dupe clean` cleans the project while sparing them.
   Public `git stash -u`, `git add -A`, and `git add .` leave them alone, as they leave
   any ignored file.
+- **Tools that pack the checkout can take your files.** `npm pack` and a Docker build
+  context made from the checkout read their own ignore files and never
+  `.git/info/exclude`, so a tarball or an image can hold your files, an untracked draft
+  and `.gitdupe` included, while `git status` is clean. See what goes in first, as
+  `npm pack --dry-run` lists it, or pack from a fresh clone of the project.
 - **A private pull can overwrite a file the project ignores.** A file the project
   ignores that the dupe does not track yet on this machine is overwritten without a
   word, as Git overwrites any ignored file, when a private `pull`, `switch`,
@@ -165,7 +170,11 @@ remote.
   covers, the hidden paths not below another one taking at most 128,000 bytes together.
   They are passed to Git on one command line; a list that does not fit is refused,
   naming the count, never truncated. Files below a hidden directory do not count toward
-  the paths: `notes/` is one path.
+  the paths: `notes/` is one path. A file tracked by itself is one, so with hundreds of
+  them in a directory that is wholly yours, `git dupe hide <dir>` makes `git dupe status`
+  several times faster, Git then given the one directory, and hides what is new there;
+  status then also lists what the dupe does not track there, and thousands of such files
+  make it slower instead.
 
 - **An end forced on git-dupe alone leaves Git running.** A terminal's Ctrl-C reaches
   git-dupe and its Git child together and ends both. A signal sent to the git-dupe
@@ -188,7 +197,11 @@ these, where keeping Linux's and macOS's behavior is impossible or out of propor
   Windows PowerShell 5.1's `>` writes is UTF-16: that file cannot be read, every command
   says so in a warning and leaves the exclude rules as they stood, so that what they hid
   stays hidden, and `git dupe hide`, `unhide`, and `clean` refuse until it is saved as
-  UTF-8.
+  UTF-8. Add a path with `git dupe hide <path>`, which writes it as UTF-8, not with
+  PowerShell 5.1's `Add-Content`, which, to a `.gitdupe` with no byte order mark, as
+  git-dupe writes it, writes `?` for each character outside the system's ANSI code page:
+  the path it meant is then not hidden, and `git dupe clean -fdx` deletes what stands
+  there.
 - A name stored in an index or in `.gitdupe` that is not valid UTF-8 cannot stand on a
   command line: a command that would need one there is refused, naming the path, and
   otherwise it is named in a warning.

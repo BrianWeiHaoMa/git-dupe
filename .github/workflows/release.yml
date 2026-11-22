@@ -118,9 +118,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux's executable is built for the static target, so that it needs no C
+          # library where it runs (P3): the scenarios build it there, and the archive
+          # lands below target/<target>/; the other runners build for their host.
           - runner: ubuntu-24.04
             suffix: linux-x86_64
             extension: tar
+            target: x86_64-unknown-linux-musl
             timeout: 60
           # A macOS runner is slower, the Intel one most, and builds the two Git
           # releases itself on a cache miss.
@@ -144,6 +148,7 @@ jobs:
     env:
       VERSION: ${{ needs.check.outputs.version }}
       EXTENSION: ${{ matrix.extension }}
+      RUST_TARGET: ${{ matrix.target }}
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -151,6 +156,9 @@ jobs:
       - name: Install the toolchain rust-toolchain.toml pins
         run: |
           rustup toolchain install
+          if [[ -n $RUST_TARGET ]]; then
+            rustup target add "$RUST_TARGET"
+          fi
           rustup show active-toolchain
 
       # Every file in a private repository stands deeper than its counterpart in .git, and
@@ -201,8 +209,9 @@ jobs:
         run: cargo test --bin git-dupe
 
       # As in ci.yml: every scenario but `scale`, whose counted Git runs among 100,000
-      # files and one-second bound the delivery check runs before the tag. Its
-      # `release_archive` scenarios make target/release/git-dupe-<version>-<suffix>.<extension>
+      # files and one-second bound the delivery check runs before the tag. On Linux every
+      # scenario runs git-dupe built for the runner's target, and its `release_archive`
+      # scenarios make target/[<target>/]release/git-dupe-<version>-<suffix>.<extension>
       # with its .sha256.
       - name: Scenarios under the oldest and the newest listed release
         env:
@@ -213,12 +222,14 @@ jobs:
       # platforms have one source for its line. From the archive's own directory, because
       # the line names it by its bare name; shasum stands in on a Mac without sha256sum.
       - name: Check the archive's checksum
+        id: archive
         run: |
-          cd target/release
+          directory=target/${RUST_TARGET:+$RUST_TARGET/}release
+          cd "$directory"
           archive=git-dupe-$VERSION-${{ matrix.suffix }}.$EXTENSION
           for file in "$archive" "$archive.sha256"; do
             if [[ ! -f $file ]]; then
-              echo "the scenarios left no file at target/release/$file" >&2
+              echo "the scenarios left no file at $directory/$file" >&2
               exit 1
             fi
           done
@@ -227,14 +238,15 @@ jobs:
           else
             shasum -a 256 -c "$archive.sha256"
           fi
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
 
       - name: Keep the archive and its checksum for the publishing job
         uses: actions/upload-artifact@v7
         with:
           name: archive-${{ matrix.suffix }}
           path: |
-            target/release/git-dupe-${{ env.VERSION }}-${{ matrix.suffix }}.${{ matrix.extension }}
-            target/release/git-dupe-${{ env.VERSION }}-${{ matrix.suffix }}.${{ matrix.extension }}.sha256
+            ${{ steps.archive.outputs.directory }}/git-dupe-${{ env.VERSION }}-${{ matrix.suffix }}.${{ matrix.extension }}
+            ${{ steps.archive.outputs.directory }}/git-dupe-${{ env.VERSION }}-${{ matrix.suffix }}.${{ matrix.extension }}.sha256
           if-no-files-found: error
 
   # Runs only when every build passed, and publishes the eight files in one command, so

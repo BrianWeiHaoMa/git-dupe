@@ -32,8 +32,8 @@ one installed.
 When `~/.local/bin` is not on `PATH`, as on macOS by default, the script ends with the
 line to add to your shell's startup file; `man git-dupe` finds the page through the same
 entry. On a machine no archive is built for, or where the downloaded executable does not
-run, as on a Linux whose C library is older than the archive's, the script says so and
-installs nothing: install [from source](#from-source) there. It also warns, and installs
+run, as on a Mac older than its archive's macOS below, the script says so and installs
+nothing: install [from source](#from-source) there. It also warns, and installs
 all the same, when the Git on `PATH` is missing or outside the versions git-dupe
 supports.
 
@@ -59,11 +59,14 @@ name, so that `shasum -a 256 -c <archive>.sha256`, or `sha256sum -c`, checks a d
 in its own directory.
 
 A release has one archive for each kind of machine, its executable built and checked on
-that kind of machine, the Macs' on macOS 26 and Windows's on Windows Server 2025:
+that kind of machine, the Macs' on macOS 26 and Windows's on Windows Server 2025. The
+Linux executable is linked statically, built for `x86_64-unknown-linux-musl`, and needs
+no C library on the machine, so it starts on an older distribution, as Debian 12,
+Ubuntu 22.04, or RHEL 9, and in the container images built on one:
 
 | Archive | For |
 |---|---|
-| `git-dupe-<version>-linux-x86_64.tar` | x86-64 Linux with the GNU C library 2.39 or newer |
+| `git-dupe-<version>-linux-x86_64.tar` | x86-64 Linux, whatever C library it has |
 | `git-dupe-<version>-macos-arm64.tar` | a Mac with Apple silicon, on macOS 11.0 or newer |
 | `git-dupe-<version>-macos-x86_64.tar` | an Intel Mac, on macOS 10.12 or newer |
 | `git-dupe-<version>-windows-x86_64.zip` | x86-64 Windows 11 |
@@ -155,13 +158,20 @@ as well, with the same C runtime.
   target, as Git does for any repository.
 
 The rest of what Windows differs in is under
-[Limits](how-it-works.md#limits). To uninstall, run `git dupe detach` in each project that
-uses it, then delete `~\.local\bin\git-dupe.exe`, or run `cargo uninstall git-dupe` after
-an install from source.
+[Limits](how-it-works.md#limits), and [Uninstalling](#uninstalling) holds for Windows too.
 
 ## Uninstalling
 
-On Linux and macOS, run `git dupe detach` in each project that uses it, then delete
-`~/.local/bin/git-dupe` and `~/.local/share/man/man1/git-dupe.1`, or run
-`cargo uninstall git-dupe` after an install from source. [On Windows](#on-windows) ends
-with its own.
+Deleting the executable leaves every project as it stands: your files stay hidden from
+the project's Git and versioned in its dupe, and an install later takes up where this one
+left off. Delete `~/.local/bin/git-dupe` and `~/.local/share/man/man1/git-dupe.1`, on
+Windows `~\.local\bin\git-dupe.exe`, or run `cargo uninstall git-dupe` after an install
+from source.
+
+To take git-dupe out of a project as well, detach it first. `git dupe detach` removes
+the dupe of the worktree it runs in, with that worktree's exclude rules, and leaves your
+files on disk, naming in a warning each one the project's Git can then see, which a
+`git add -A` would stage, and each one another worktree still hides; it refuses while
+work is uncommitted or on no remote, as [Questions](questions.md) says. Each worktree of
+the project has a dupe of its own, so run it in each one that is attached, then delete
+the executable.
