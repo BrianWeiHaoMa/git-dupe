@@ -359,3 +359,27 @@ fn a_fault_names_the_word_on_one_line_and_the_unguarded_route() {
     assert!(text.starts_with(b"\"a\\n*\" "), "{}", text.escape_ascii());
     assert!(!text.contains(&b'\n'));
 }
+
+#[test]
+fn only_cleans_unheld_word_names_its_help_and_what_the_unguarded_route_deletes() {
+    let word = os(b"--excl=dist/");
+    let text = Fault::NotHeld(word).text(b"clean");
+    assert_eq!(
+        text,
+        b"'--excl=dist/' is not an option git dupe clean reads (git dupe help clean lists \
+          those it reads); git dupe git clean gives it to Git unguarded, whose clean in the \
+          private repository, which does not track the project's files or private files \
+          never staged, deletes them as its options and ignore rules say"
+    );
+    for command in [b"status".as_slice(), b"add"] {
+        let expected = [
+            b"'--excl=dist/' is not an option git dupe ",
+            command,
+            b" reads; git dupe git ",
+            command,
+            b" gives it to Git unguarded",
+        ]
+        .concat();
+        assert_eq!(Fault::NotHeld(word).text(command), expected);
+    }
+}

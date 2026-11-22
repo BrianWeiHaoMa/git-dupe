@@ -17,7 +17,7 @@ use super::git_version;
 use super::help;
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
-use super::places;
+use super::places::{self, Refusing};
 use crate::attachment::{self, Cloned, Kept, NotCloned, Standing, Written};
 use crate::guards::pathspec;
 use crate::guards::quoted::shell_word;
@@ -112,7 +112,9 @@ pub fn run(workspace: &Workspace, words: &[Vec<u8>], url: &[u8], branch: Option<
               then 'git dupe clone' again",
         ),
         Err(NotCloned::Refused(refusal)) => outcome::refuse_to_attach(workspace, refusal),
-        Err(NotCloned::NamesAPublicPlace(word, place)) => places::refuse(&word, &place),
+        Err(NotCloned::NamesAPublicPlace(word, place)) => {
+            places::refuse(Refusing::Clone, &word, &place, workspace.attached())
+        }
         Err(NotCloned::Unresolved(unresolved)) => outcome::unresolved(&unresolved),
         // The steps after the line did not run, which only a new `clone` takes (G2).
         Err(NotCloned::Unwritten(unwritten)) => outcome::unwritten(

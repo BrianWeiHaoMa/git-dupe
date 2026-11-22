@@ -107,7 +107,7 @@ use super::advice::{self, Answer};
 use super::commands::{self, Command};
 use super::lines::{self, Level};
 use super::outcome::{self, Outcome};
-use super::places;
+use super::places::{self, Refusing};
 use crate::guards::places::{Place, Places, Worktree};
 use crate::guards::quoted::shell_word;
 use crate::guards::transfer::{self, Current, DefaultRemote, Record, Repository, Transfer};
@@ -212,17 +212,24 @@ pub enum Refused {
 /// Whether `words`, the command word first, may run against the repository `against`
 /// names where `facts` locate the project, and what follows its run: `Err` with the
 /// refusal of the first thing that names a public place, or with the end of a run the
-/// guard needed.
-pub fn guard(words: &[Vec<u8>], facts: &Facts, against: Against) -> Result<Then, Outcome> {
+/// guard needed. `attached` where the workspace is, where a refusal names `git dupe
+/// remote -v`.
+pub fn guard(
+    words: &[Vec<u8>],
+    facts: &Facts,
+    against: Against,
+    attached: bool,
+) -> Result<Then, Outcome> {
     let (command, after) = words
         .split_first()
         .expect("a guarded command's words begin with its word");
     let after: Vec<&[u8]> = after.iter().map(|word| word.as_slice()).collect();
-    let moving = match commands::named(command.as_slice()) {
-        Some(Command::Push) => Some(Transfer::Push),
-        Some(Command::Pull) => Some(Transfer::Pull),
-        Some(Command::Fetch) => Some(Transfer::Fetch),
-        _ => None,
+    let (moving, refusing) = match commands::named(command.as_slice()) {
+        Some(Command::Push) => (Some(Transfer::Push), Refusing::Push),
+        Some(Command::Pull) => (Some(Transfer::Pull), Refusing::Pull),
+        Some(Command::Fetch) => (Some(Transfer::Fetch), Refusing::Fetch),
+        // The fourth command this guard stands before.
+        _ => (None, Refusing::Remote),
     };
     let places = places::take(facts)?;
     let private = moving.filter(|_| against.private_repository().is_some());
@@ -254,7 +261,7 @@ pub fn guard(words: &[Vec<u8>], facts: &Facts, against: Against) -> Result<Then,
     }
     for word in &after {
         if let Some(place) = places.named_by(word) {
-            return Err(places::refuse(word, place));
+            return Err(places::refuse(refusing, word, place, attached));
         }
     }
     if let (Some(moving), Some(Repository::Default), Some(head)) = (private, repository, &head) {
@@ -262,7 +269,7 @@ pub fn guard(words: &[Vec<u8>], facts: &Facts, against: Against) -> Result<Then,
         if let Some(found) = found
             && let Some(place) = places.named_by_whole(found.value)
         {
-            return Err(refuse_default(command.as_slice(), found, place));
+            return Err(refuse_default(refusing, found, place, attached));
         }
     }
     let current = match &head {
@@ -572,16 +579,24 @@ fn refuse_group(key: &[u8], place: &Place) -> Outcome {
     outcome::refuse(&line)
 }
 
-/// The refusal of `command` given no repository, whose default remote names `place`.
-fn refuse_default(command: &[u8], found: DefaultRemote, place: &Place) -> Outcome {
-    let mut line = command.to_vec();
-    line.extend_from_slice(b" given no repository takes ");
+/// The refusal of `refusing` given no repository, whose default remote names `place`.
+/// The words give no repository as the guard reads them, and Git may still not take
+/// that remote, as `fetch --all` takes every configured one instead: the line says it
+/// may.
+fn refuse_default(
+    refusing: Refusing,
+    found: DefaultRemote,
+    place: &Place,
+    attached: bool,
+) -> Outcome {
+    let mut line = refusing.word().to_vec();
+    line.extend_from_slice(b" given no repository may take ");
     line.extend_from_slice(&lines::typed(found.value));
     line.extend_from_slice(b" from ");
     line.extend_from_slice(found.key);
     line.extend_from_slice(b", which names ");
     line.extend_from_slice(&places::described(place));
-    line.extend_from_slice(b"; 'git dupe git' runs Git unguarded, for a destination you mean");
+    line.extend_from_slice(&places::after_the_place(refusing, attached));
     outcome::refuse(&line)
 }
 

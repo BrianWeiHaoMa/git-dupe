@@ -20,9 +20,16 @@
 //!   is a refusal: the command never runs without its places.
 //! - The refusal of a word is written here and nowhere else; `clone` refuses with it too.
 //!   It names the word as typed (`lines::typed`, on one line whatever it holds), the
-//!   place, and `git dupe git` for a destination the developer means. A place is named
-//!   by `described` in every line that names one: a remote by its name and not by its
-//!   URL, which may hold a credential (G25).
+//!   place, and then `after_the_place`, which the refusal of a default remote says too:
+//!   what its own command would do there; `git dupe remote -v`, which shows the private
+//!   remote a developer may have confused with the project's, where a workspace is
+//!   attached; and `git dupe git` for a destination the developer means. The guard
+//!   compares a word wherever it stands, an option's value, an empty value, and `clone`'s
+//!   branch word among them, and reads a default remote conservatively, so the sentence
+//!   says what would follow if Git took the place as the destination, never what the
+//!   command was doing; `clone`'s says what `clone` takes instead. A place is named by
+//!   `described` in every line that names one: a remote by its name and not by its URL,
+//!   which may hold a credential (G25).
 
 use std::fs;
 use std::io;
@@ -30,6 +37,7 @@ use std::path::Path;
 
 use crate::bytes;
 
+use super::commands::Command;
 use super::lines;
 use super::outcome::{self, Outcome};
 use crate::guards::destination::ReadFrom;
@@ -111,13 +119,78 @@ fn unlisted(directory: &Path, cause: &io::Error) -> Outcome {
     outcome::refuse(&line)
 }
 
-/// The refusal of `word`, which names `place`.
-pub fn refuse(word: &[u8], place: &Place) -> Outcome {
+/// A command whose word, or whose default remote, can name a public place.
+#[derive(Clone, Copy)]
+pub enum Refusing {
+    Push,
+    Fetch,
+    Pull,
+    Remote,
+    Clone,
+}
+
+impl Refusing {
+    /// The command's own word, as its lines name it.
+    pub fn word(self) -> &'static [u8] {
+        match self {
+            Refusing::Push => Command::Push,
+            Refusing::Fetch => Command::Fetch,
+            Refusing::Pull => Command::Pull,
+            Refusing::Remote => Command::Remote,
+            Refusing::Clone => Command::Clone,
+        }
+        .word()
+    }
+}
+
+/// The refusal of `word`, given to `refusing`, which names `place`; `attached` where the
+/// workspace it was given in is attached.
+pub fn refuse(refusing: Refusing, word: &[u8], place: &Place, attached: bool) -> Outcome {
     let mut line = lines::typed(word);
     line.extend_from_slice(b" names ");
     line.extend_from_slice(&described(place));
-    line.extend_from_slice(b"; 'git dupe git' runs Git unguarded, for a destination you mean");
+    line.extend_from_slice(&after_the_place(refusing, attached));
     outcome::refuse(&line)
+}
+
+/// What every refusal of a public place, a word's or a default remote's, says after
+/// naming the place: what its command would do there, each command's own; then
+/// `git dupe remote -v` where the workspace is `attached`, since it is refused where none
+/// is; then `git dupe git`, said to need an attached worktree where none is.
+pub fn after_the_place(refusing: Refusing, attached: bool) -> Vec<u8> {
+    let would: Option<&[u8]> = match refusing {
+        Refusing::Push => Some(b"send private history there"),
+        Refusing::Fetch => Some(b"bring the project's history into the private repository"),
+        Refusing::Pull => Some(
+            b"bring the project's history into the private repository and onto the branch \
+              checked out there",
+        ),
+        Refusing::Remote => Some(b"configure it as a remote of the private repository"),
+        Refusing::Clone => None,
+    };
+    let consequence = match would {
+        Some(would) => [
+            b"if Git took it as the destination, ",
+            refusing.word(),
+            b" would ",
+            would,
+        ]
+        .concat(),
+        // `clone` runs where no private repository is attached, to attach one from what
+        // its word names.
+        None => b"clone takes the URL of the private repository, never the project's".to_vec(),
+    };
+    let routes: &[u8] = match attached {
+        true => {
+            b"; 'git dupe remote -v' lists the private remotes, and 'git dupe git' runs Git \
+              unguarded, for a destination you mean"
+        }
+        false => {
+            b"; 'git dupe git' runs Git unguarded in an attached worktree, for a destination \
+              you mean"
+        }
+    };
+    [b"; ", consequence.as_slice(), routes].concat()
 }
 
 /// `place` as a line names it: what it is, then which, between single quotes.

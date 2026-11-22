@@ -10,6 +10,21 @@ Every change a user of git-dupe would notice, newest first, in the form of
 
 ### Changed
 
+- A dashed word `git dupe clean` does not read, such as an abbreviation of one of its
+  options, gets a usage error that also points at `git dupe help clean` for the spellings
+  it reads and says what `git dupe git clean`, which it names, deletes: the project's
+  files and private files never staged, which the private repository does not track, as
+  Git's clean options and ignore rules say. `git dupe help git` and `git dupe help clean`
+  say the same. `status` and `add` keep their line.
+- The refusal of a `push`, `pull`, `fetch`, or `remote` whose word, or whose default
+  remote, names the project's repository or a remote of it says what Git would do there
+  if it took it as the destination: `push` would send private history there, `fetch` and
+  `pull` would bring the project's history into the private repository, `remote` would
+  configure it as a private remote. In an attached worktree it names `git dupe remote -v`
+  to find the private remote, which both repositories often call `origin`, before
+  `git dupe git`; where no private repository is attached, it says that `git dupe git`
+  runs in an attached worktree. `clone`'s refusal says that `clone` takes the URL of the
+  private repository, never the project's.
 - In a worktree no private repository is attached to, a command is refused naming both
   ways to attach: `git dupe clone <url>` to bring private files kept elsewhere, with
   `git dupe help clone` for the URL a linked worktree gives, and `git dupe init` to start

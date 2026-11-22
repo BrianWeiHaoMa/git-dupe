@@ -22,13 +22,21 @@ URL or path that names one: for push, the first set of
 branch.<name>.pushRemote, remote.pushDefault, and branch.<name>.remote, and
 for pull and fetch, branch.<name>.remote.
 
-The refusal names the place, and git dupe git for a destination you mean:
-git dupe git push runs Git's push unguarded. This is a comparison of names,
-not a proof that a destination is private: a URL Git rewrites through
-url.<base>.insteadOf, a path beginning with ~ and a user's name, a remote
-defined by a file in a remotes or branches directory, and an ssh:// URL whose
-user part holds an encoded /, which Git decodes before it finds the host, are
-not seen through.
+The refusal of a word, or of the default remote, names the place and says
+what Git would do there if it took it as the destination: push would send
+private history there; fetch and pull would bring the project's history into
+the private repository; remote would configure it as a remote of the private
+repository. Where the worktree is attached, it names git dupe remote -v, which
+lists the private remotes, because both repositories often call theirs origin.
+clone, which runs where no private repository is attached yet, says instead
+that it takes the URL of the private repository, never the project's. Each
+names git dupe git for a destination you mean, which runs in an attached
+worktree: git dupe git push runs Git's push unguarded. This is a comparison
+of names, not a proof that a destination is private: a URL Git rewrites
+through url.<base>.insteadOf, a path beginning with ~ and a user's name, a
+remote defined by a file in a remotes or branches directory, and an ssh:// URL
+whose user part holds an encoded /, which Git decodes before it finds the
+host, are not seen through.
 
 git dupe clean is refused, deleting nothing, given a pathspec that is not a
 literal path, one holding *, ?, [, or \, or beginning with : other than :/

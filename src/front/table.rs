@@ -304,20 +304,42 @@ pub enum Fault<'w> {
     Outside(&'w [u8]),
 }
 
+/// Where `clean`'s line for a word its table does not hold points for the spellings it
+/// reads.
+const CLEAN_HELP: &[u8] = b" (git dupe help clean lists those it reads)";
+
+/// What `clean`'s line for a word its table does not hold says after naming `git dupe git
+/// clean`: that route is Git's clean in the private repository, which tracks neither the
+/// project's files nor a private file never staged, so the words a developer copies from
+/// the line would delete them as Git's clean deletes what a repository does not track,
+/// where `git dupe git status` and `git dupe git add` delete nothing.
+const CLEAN_UNGUARDED: &[u8] = b", whose clean in the private repository, which does not track \
+    the project's files or private files never staged, deletes them as its options and ignore \
+    rules say";
+
 impl Fault<'_> {
     /// The text of the `error:` line for a word of `command`. The first three name
-    /// `git dupe git` with the command, the route to Git's own reading of the word.
+    /// `git dupe git` with the command, the route to Git's own reading of the word;
+    /// `clean`'s first also names its help, for the spellings it reads, and what that
+    /// route deletes.
     pub fn text(&self, command: &[u8]) -> Vec<u8> {
         let unguarded = [b"git dupe git ", command].concat();
+        let (help, deletes): (&[u8], &[u8]) = match command {
+            b"clean" => (CLEAN_HELP, CLEAN_UNGUARDED),
+            _ => (b"", b""),
+        };
         let (word, fault): (_, Vec<u8>) = match self {
             Fault::NotHeld(word) => (
                 word,
                 [
                     b"is not an option git dupe ",
                     command,
-                    b" reads; ",
+                    b" reads",
+                    help,
+                    b"; ",
                     &unguarded,
                     b" gives it to Git unguarded",
+                    deletes,
                 ]
                 .concat(),
             ),

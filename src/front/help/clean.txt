@@ -19,5 +19,5 @@ Options, each meaning what it means to Git:
   -e <pattern>, --exclude=<pattern>, the value attached or the next word
 
 Pathspecs are Git's own; any other option and an abbreviation are usage errors.
-"git dupe git clean ..." is Git's clean in the private repository, where every
-file of the project is untracked: it deletes the project's files.
+"git dupe git clean ..." is Git's clean in the private repository, which does
+not track the project's files or private files never staged: it deletes them.

@@ -69,7 +69,9 @@ impl Passed<'_> {
         match self {
             Passed::Stash(words) if stash::refused(&words[1..]) => outcome::refuse(stash::REFUSAL),
             Passed::Transfer(words) => {
-                match facts().map(|facts| transfer::guard(words, &facts, against)) {
+                match facts()
+                    .map(|facts| transfer::guard(words, &facts, against, attached.is_some()))
+                {
                     Some(Err(ended)) => ended,
                     Some(Ok(then)) => {
                         let ended = run(against, words);
