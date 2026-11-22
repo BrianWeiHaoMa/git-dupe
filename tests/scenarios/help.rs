@@ -293,8 +293,10 @@ fn general_help_names_hidden_paths_stash_alternatives_and_recovery() {
             "git add -f makes them public; commit first:",
             r#""git dupe restore ." brings back what was staged."#,
             // Each worktree on its own, what removing a linked one takes with it, and the
-            // order before it, which the page spells out.
-            "Each worktree is attached on its own, and git worktree remove takes its private repository with it: unstash, commit, and push its work first.",
+            // order before it, which the page spells out: Git's own guard there deletes
+            // ignored files without a word, so the look lists them, a warning names a path
+            // only another worktree hides, and the add names -f for an ignored one.
+            r#"Each worktree is attached on its own; git worktree remove deletes its private repository: first, there, commit each file "git dupe status -s -uall" lists or a warning names (add -f if ignored), each stash entry, and push."#,
             // The unguarded route.
             "git dupe git WORDS Git with WORDS as typed, guarded by nothing",
         ] {
@@ -322,16 +324,16 @@ fn general_help_names_every_command_and_the_transfer_refusals() {
                 String::from_utf8_lossy(&general)
             );
         }
-        // The command list holds a row for each of the ten commands, one after another, an
-        // empty line before it; the paragraph after it begins at its own margin, the empty
-        // line there having given way to what the screen must state.
+        // The command list holds a row for each of the ten commands, one after another;
+        // the paragraphs before and after it begin at their own margin, the empty lines
+        // there having given way to what the screen must state.
         let lines: Vec<&[u8]> = general.split(|byte| *byte == b'\n').collect();
         let rows: Vec<usize> = (0..lines.len())
             .filter(|&at| lines[at].starts_with(b"  git dupe "))
             .collect();
         let (first, last) = (rows[0], rows[rows.len() - 1]);
         assert_eq!(rows, (first..=last).collect::<Vec<_>>());
-        assert!(lines[first - 1].is_empty());
+        assert!(!lines[first - 1].is_empty() && !lines[first - 1].starts_with(b" "));
         assert!(lines[last + 1].starts_with(b"Refused: "));
         for word in [
             "init", "clone", "detach", "hide", "unhide", "status", "add", "clean", "git", "help",

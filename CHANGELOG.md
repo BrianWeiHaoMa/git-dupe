@@ -19,11 +19,12 @@ Every change a user of git-dupe would notice, newest first, in the form of
   one's, the hint names `git dupe push <remote> HEAD:refs/heads/<name>` and then
   `git dupe merge <name>` in that worktree, in place of `git dupe pull`, which could not
   help there. `git dupe help clone` shows that route beside the URL.
-- The manual page, the general help, the README, and the documents give the order that
-  saves a linked worktree's private work before `git worktree remove`: the files in no
-  commit, the ignored ones included, a file another worktree alone hides, the stash
-  entries, and the commits no remote-tracking branch holds, which a push alone does not
-  cover.
+- The manual page, the README, and the documents give the order that saves a linked
+  worktree's private work before `git worktree remove`: the files in no commit, the
+  ignored ones included, a file another worktree alone hides, the stash entries, and the
+  commits no remote-tracking branch holds, which a push alone does not cover. The general
+  help gives it in brief: commit each file `git dupe status -s -uall` lists or a warning
+  names, with `git dupe add -f` for an ignored one, then each stash entry, then push.
 - The README's quick start can be pasted into an interactive zsh, macOS's default shell:
   its command lines carry no comment, and a second machine's `git dupe clone` has a block
   of its own. It says before its commands that the private repository is created empty,

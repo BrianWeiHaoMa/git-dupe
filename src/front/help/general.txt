@@ -2,7 +2,6 @@ usage: git dupe [-h | --version] <command> [<args>]
 git-dupe versions your own files: every Git command runs on their repository as
 "git dupe <command>". The project's Git ignores a hidden path: .gitdupe, a path
 it lists ("git dupe hide" or by hand), or a file "git dupe add <path>" tracks.
-
   git dupe init [-b BRANCH]  attach a private repository to this worktree
   git dupe clone URL         attach one from URL, overwriting no file
   git dupe detach [--force]  remove it, leaving every file on disk
@@ -19,5 +18,6 @@ pull, fetch, remote, or clone naming the project's repository or a remote of it
 --unset-all" for a private remote/group). Plain git is not guarded: git clean -x
 deletes private files, git stash -a stashes them, git add -f makes them public;
 commit first: "git dupe restore ." brings back what was staged. Each worktree is
-attached on its own, and git worktree remove takes its private repository with
-it: unstash, commit, and push its work first. Git 2.43.0 or newer, below 3.0.0.
+attached on its own; git worktree remove deletes its private repository: first,
+there, commit each file "git dupe status -s -uall" lists or a warning names (add
+-f if ignored), each stash entry, and push. Git 2.43.0 or newer, below 3.0.0.
