@@ -56,7 +56,7 @@ Lines (F8, G25):
 - A Windows console that refuses a line's bytes for not being UTF-8, having taken the valid prefix before the first such byte, is given the rest of the line with each such byte replaced (S20).
 - A refusal is one `fatal:` line naming the cause and the command to use instead where the product names one, exit 128. A usage error is one `error:` line naming the fault and, for a word a table does not hold, `git dupe git`, then the command's own usage line, exit 129. The wording of each line is the implementation's, within what its guarantee says it names.
 - Requested output of git-dupe's own — help texts, usage on bare `git dupe`, the version line `git-dupe version <package version>` — goes to standard output.
-- A Git child killed by a signal ends git-dupe with 128 plus the signal number on Linux and macOS. On Windows a child's end is its exit code, and git-dupe exits with the low byte of it (F9, S21).
+- A Git child killed by a signal ends git-dupe with 128 plus the signal number on Linux and macOS, the `git version` of `Holds/G1` apart, whose failure of any kind changes nothing. On Windows a child's end is its exit code, and git-dupe exits with the low byte of it (F9, S21).
 
 ### Runner
 
@@ -118,6 +118,7 @@ Operations:
 
   A failed listing is a `warning:` as a failed `check-ignore` is.
 - **Rule** gives the region rule of a path, for `clean`'s patterns.
+- **Replace** writes a file of the private repository whole for the attachment, its `info/attributes` (`Holds/G1`), as `.gitdupe` is written: a fresh file inside the private repository, the existing file's permissions when one exists, renamed onto it.
 - **Hide** and **unhide** take cleaned root-relative paths after their caller has decided the refusals of F5 and G11 over a public listing, rewrite `.gitdupe`, stage it with one private `git add -f -- :(top,literal).gitdupe`, and return the paths they changed. Hide appends one line per path not already listed or below a listed path; unhide removes each line whose cleaned path equals a given path. Both keep every other line byte for byte, its carriage return and a byte order mark before it included; refuse, 128, naming the cause, while the file is set aside as unreadable (F5); rewrite the file only when a line changes; and stage it whenever it exists on disk as a file, so that a retry after a kill stages what the killed run wrote.
 
 A region rule is `/`, then the path with `\` before each `\`, `*`, `?`, `[`, `#`, `!`, and space, and each carriage-return byte written as a bracket expression holding that byte. It has no trailing slash, so that it matches exactly that path whether a file, a directory, or nothing stands there (F3, S5). Rules stand in byte order of their paths. The markers are F3's, each matched as a whole line. The managed region runs from this worktree's first begin marker to the first end marker after it, or to the end of the file when there is none. Every other git-dupe marker pair bounds another worktree's region, whose rules are read back into paths as `Start` reads them.
@@ -136,7 +137,7 @@ It is absent otherwise.
 
 ### Attachment
 
-Responsible for `init`, `clone`, and `detach`. Owns: creation and removal of the worktree's private repository; the keys F2 and G1 require in its configuration, `core.worktree` among them as the **relative work tree** — the lexical relative path from the private Git directory to the root over their canonical forms, written with `/` on every platform, `\` being an escape in Git's configuration, `../..` in the main worktree; the write step of G2. It uses the runner for every Git step, the keeper to remove the region and name what `detach` exposes and for the hidden paths and the public listing of `clone`'s write step, and `Guards` to compare `clone`'s URL.
+Responsible for `init`, `clone`, and `detach`. Owns: creation and removal of the worktree's private repository; the keys F2 and G1 require in its configuration, `core.worktree` among them as the **relative work tree** — the lexical relative path from the private Git directory to the root over their canonical forms, written with `/` on every platform, `\` being an escape in Git's configuration, `../..` in the main worktree; F2's line in its `info/attributes`, written through the keeper's **Replace**; the write step of G2. It uses the runner for every Git step, the keeper to remove the region and name what `detach` exposes and for the hidden paths and the public listing of `clone`'s write step, and `Guards` to compare `clone`'s URL.
 
 ### Guards
 
@@ -207,8 +208,8 @@ Change points:
 - **A command Git runs** takes effect when Git says it does. git-dupe adds nothing before Git's change other than the `.gitdupe` write of a hiding `add`, and, afterward, only the region replacement and the warnings. A kill during Git leaves what Git leaves; a kill before the replacement leaves the previous region; the rename is the single point at which the new region exists, and after it only the warnings can be missing (G21).
 - **`.gitdupe`** changes at its rename; the staging that follows is a separate Git step. A kill between the two leaves a written, unstaged file that a rerun of the same `hide` or `unhide`, any later `hide` or `unhide`, or the developer's own `git dupe add .gitdupe` stages; a rerun of a hiding `add` finds its directory hidden and stages the file only through those. The hidden paths read the file on disk first, so the region follows the write at the next settle whatever the staging.
 - **Region replacement** is the rename under `Keeper`, inside the lock. A failed write or rename, one still refused when the retry of S22 ends included, and a lock that cannot be taken, is a `warning:` naming the cause and that private files may be visible to public Git; the exit status stays the command's (F9). A kill while the lock is held releases it with the process's descriptors or handles (S16) and leaves the file old or new (S1); a command waiting for it in another worktree then proceeds. In `detach`, whose deletion of the region is the first of its two steps, a failed write or rename, or a lock that cannot be taken, refuses, 128, naming the cause, with the region and the private repository as they were (G3).
-- **`init`** takes effect in Git's `init`; the keys follow in separate `git config` runs. A kill between steps leaves an attached workspace missing keys or its region, which the next `init` completes (G1); a lock file Git left behind stops it with Git's message until it is removed (G21).
-- **`clone`** is a sequence of Git steps after its refusals, each leaving the workspace attached with what was done (G2, `Holds/G2`).
+- **`init`** takes effect in Git's `init`; F2's line follows by one rename where `info/attributes` does not hold it, and the keys follow in separate `git config` runs. A kill between steps leaves an attached workspace missing the line, keys, or its region, which the next `init` completes (G1); a kill inside the line's write leaves the file as it was (S1); a lock file Git left behind stops it with Git's message until it is removed (G21).
+- **`clone`** is, after the `git version` of `Holds/G1` and its refusals, a sequence of Git steps and the one write of F2's line, each leaving the workspace attached with what was done (G2, `Holds/G2`).
 - **`detach`** removes the region first and the private repository second, so that a kill after the first step leaves an attached workspace that `detach --force` completes, and a kill during the second leaves a directory the same command removes (G3, G21).
 - **Acknowledgement.** A command that ended without a `fatal:` line and with status 0 did everything it says. An interrupted caller reruns the command: every command G6 covers is idempotent in its region work, `init` and `detach --force` are idempotent as G1 and G21 say, and Git's commands keep Git's retry rules.
 
@@ -223,7 +224,7 @@ Guarantees not listed need no entry:
 
 ### G1. `init`
 
-The refusals of G4 come first, before any Git step:
+First one public `git version` (S26): where its line names a release below 2.43.0, one `warning:` names that version and F4's range; a run that ends any other way than exit 0, a signal's end included, or a line that names no release, gives none; and the command goes on in each case (F4). Then the refusals of G4, before any other Git step:
 
 - a bare repository's own directory, where the locate fails as `Runner` says;
 - a submodule checkout, where the superproject line is not empty;
@@ -234,6 +235,8 @@ The refusals of G4 come first, before any Git step:
 
 Then, unless `HEAD`, `objects`, and `refs` all exist in the private Git directory by `lstat`, `git init` runs in a private run, with `--initial-branch=BRANCH` when given, else with the branch that one public `git symbolic-ref -q HEAD` names under `refs/heads/` when it names one; it copies the template files a kill left missing and keeps those it left (S6, G21), and its standard output is Git's line. A complete repository is left to Git's `init` no more, because a rerun rewrites keys a developer may have edited (S6).
 
+Then F2's line, whether or not Git's `init` ran: where the private repository's `info/attributes` does not hold it, a missing file holding nothing, the line is added after the lines there (S26) and the file replaced whole through the keeper's **Replace**, `info/` made first where nothing stands there. Where something other than a directory stands at `info` by `lstat`, a symbolic link among them, whose target can lie outside the private repository, nothing is written through it (G5, R8): where the line is owed, the command refuses, 128, naming the path, with the steps before it done (G1).
+
 Git's `init` records the work tree in `core.worktree` as an absolute path whenever the Git directory is not the work tree's own `.git`, on a rerun too (S6), and setting it to the relative work tree (`Attachment`) is this command's last step, so that the following read finds an `init` that did not finish. One private `git config -z --show-scope --no-includes --get-all core.worktree` names, for every value in Git's order, the scope of the file it comes from (S12). Only the values of scope `local`, the repository's `config`, and `worktree`, its `config.worktree` — which Git reads after it where `extensions.worktreeConfig` is set, as a sparse checkout sets it, moving the key there — are the repository's record, the values Git takes the work tree from; a value a `-c` before `dupe`, the global or system configuration, or an `include.path` gives is none (S12). The read finds an `init` that did not finish when none of those values is recorded, a repository with no `config` file answering none, exit 1 (S12), or when one is any other value than the relative work tree: among them a linked worktree moved with `git worktree move`, whose root the recorded path no longer names (G1), and a template's `config.worktree` that names it before any key is set, Git's own `init` having recorded its absolute path in the local file (S6).
 
 Where it finds one, two private `git config -z --local --list` runs, one with `--includes` and one with `--no-includes`, name every value the repository's `config` and the files it includes give, in reading order, and the file's own values alone (S12). A key whose last value under `--includes` is missing under `--no-includes`, or differs from its last value there, takes its effective value from an included file and is not written, because a `--replace-all` of a key the file does not hold appends it after the include and would outrank the included value where F2 and G1 give that value the last word. Every other key is set, each by one private `git config --replace-all`, so that a key a template repeated does not fail the run (S12):
@@ -243,7 +246,7 @@ Where it finds one, two private `git config -z --local --list` runs, one with `-
 
 A workspace attached before the command gets one `hint:` saying it was already attached and what was completed.
 
-Held by construction: only the attachment part creates the private repository or writes these keys, and in an attached workspace it runs `git init` only to complete a repository Git cannot open and sets keys only where `core.worktree` shows an `init` that did not finish (S6). The relative work tree is computed lexically over the canonical paths of the private Git directory's parent and the root (R9), so that a `--git-dir` given through a symbolic link does not skew it, and it names the root as long as neither side has moved.
+Held by construction: only the attachment part creates the private repository, adds F2's line, or writes these keys, and in an attached workspace it runs `git init` only to complete a repository Git cannot open, adds the line only where `info/attributes` does not hold it, and sets keys only where `core.worktree` shows an `init` that did not finish (S6). The relative work tree is computed lexically over the canonical paths of the private Git directory's parent and the root (R9), so that a `--git-dir` given through a symbolic link does not skew it, and it names the root as long as neither side has moved.
 
 Failure direction: a failing Git step ends the command with Git's status, the workspace attached to the extent of the steps done; the next `init` completes it.
 
@@ -251,7 +254,8 @@ Limits:
 
 - a template directory that holds a `HEAD` of its own, which Git's `init` copies and whose `HEAD` G1 lets stand;
 - a file of the template that a kill left partly copied, which a rerun of Git's `init` neither finishes nor replaces (S6): where it is the `config`, Git cannot open the repository and every step fails with Git's message naming the file, and G21 names `git dupe detach --force` and `git dupe init` as the way;
-- a file a template's `config` includes, whose value of a key outranks the one written, as F2 admits.
+- a file a template's `config` includes, whose value of a key outranks the one written, as F2 admits;
+- a template's `info/attributes` that holds F2's line and, after it, a line that outranks it for `.gitdupe` (S26): nothing is added, F2 asking only that the file hold the line, and the later line decides.
 
 Outside E3, a template directory holding:
 
@@ -264,7 +268,7 @@ Outside E3, a template directory holding:
 
 ### G2. `clone`
 
-Refuses, 128, before any step: an attached workspace; G4's refusals; a `URL` that `Holds/G18` finds public. Then Git's steps, each in a private run:
+After the `git version` of `Holds/G1`, asked once for the command, and before any step below, refuses, 128: an attached workspace; G4's refusals; a `URL` that `Holds/G18` finds public. Then Git's steps, each in a private run:
 
 1. `init` as G1 does it without `-b`.
 2. `remote add origin URL`.
@@ -325,7 +329,7 @@ Held by construction:
 - the keeper's fresh files and the attachment's repository live in the worktree's private Git directory;
 - the region rename, which carries this worktree's region and leaves out a stale one (G27), and the creation of `.git/info` when it is missing, so that the regions have a home, are the only writes to `.git/info`;
 - the lock file, created when it is missing (`Holds/G28`), is the only other thing written outside the private repository in the common Git directory;
-- the public runs are `rev-parse`, `symbolic-ref -q HEAD`, `ls-files`, `check-ignore --no-index`, `config` with `--get`, `--get-regexp`, or `--list`, `worktree list --porcelain -z`, the `help COMMAND` of G24, which needs no repository, and the `clean` of G16.
+- the public runs are `rev-parse`, `version`, `symbolic-ref -q HEAD`, `ls-files`, `check-ignore --no-index`, `config` with `--get`, `--get-regexp`, or `--list`, `worktree list --porcelain -z`, the `help COMMAND` of G24, which needs no repository, and the `clean` of G16.
 
 R2 keeps it so.
 
@@ -769,6 +773,7 @@ The arrangements above hold inside the product's operating envelope (E1–E9) an
   - On NTFS the rule `/notes` left a directory `Notes` out of `status`, `check-ignore` named the rule for `Notes/draft.md`, and `:(top,literal)notes` listed nothing while the index held that file (observed under Git for Windows 2.43.0, 2.55.0, and 2.56.0 on 2026-10-30);
   - Git for Windows has no `core.precomposeUnicode`; a directory set case-sensitive, which `fsutil file setCaseSensitiveInfo` does, is outside E1.
 - **S19.** `man` on Linux and on macOS shows a page given by a path that holds a slash, fits its output to `MANWIDTH` columns, searches the directories `MANPATH` lists and, when `MANPATH` is unset, a manual path derived from `PATH`, `<dir>/../share/man` for a `<dir>` on it among them, so that `~/.local/share/man/man1/git-dupe.1` is found while `~/.local/bin` is on `PATH`; `git help <command>` under `help.format=man` runs `man git-<command>` on both (S3). Windows has no `man`, in the system or in Git for Windows (observed), and neither has MinGit. man-db on Linux writes plain text when its output is not a terminal and takes `-l`; macOS's `man`, the BSD `man` over mandoc, refuses `-l`, lists `/usr/share/man` and `/usr/local/share/man` in `/etc/man.conf`, and writes bold as overstrikes when its output is not a terminal, which `col -bx` removes, leaving man-db's lines unchanged. (Observed with man-db 2.13.1 and macOS 26.7.1.)
+- **S26.** `git version` prints one line, `git version <version>`, without a repository, the release being the first three dot-separated numbers of `<version>`, whatever a vendor's build adds after them (S21). Git reads the `info/attributes` of a repository's common Git directory, which a private repository's own Git directory is, above every other attributes file, the working tree's `.gitattributes` included, a later line of one file outranking an earlier one for the same attribute; `-text` there keeps Git from converting the path's line endings, under `core.autocrlf=true` too; and `merge=union` there has a `merge` under Git's default strategy, and a `rebase`, merge a text file at the path with Git's built-in union driver, which keeps both sides' lines where both changed the same place and leaves no conflict there, unless the configuration defines a `merge.union.driver`, which Git then runs in its place; a strategy that reads no merge driver, as `-s resolve` is, leaves the conflict it would leave without the line (observed under 2.43.0 and 2.56.0 on 2026-11-22).
 
 ### Windows
 
@@ -787,7 +792,7 @@ R1 and R4 stand with their guarantees above. In addition:
 
 - **R2.** No public run other than the `clean` of G16 is a command that writes: not `add`, `update-index`, `write-tree`, `rm`, `reset`, `checkout-index`, `worktree` other than `list`, or `config` without `--get`, `--get-regexp`, or `--list`. The public index is read only through `ls-files`.
 - **R3.** Every command that ends in an attached workspace, other than `help`, `-h`, `--version`, a usage error, and `detach`, ends with the keeper's `settle`, on success and on failure alike, `init` and `clone` included. A command or refusal added later calls it too.
-- **R5.** git-dupe never parses a Git message meant for humans and never sets `LC_ALL` or `LANG` for a child; every answer it reads from Git is a `-z` listing, a `rev-parse` line, a `check-ignore -v -n -z` record, a `config -z` record, a `--list-cmds` name line, a `for-each-ref --format` line, an `ls-remote --symref` line, a `symbolic-ref` line, a `--porcelain -z` record, a `rev-list` or `stash list --format=%H` hash line, or the bytes of a blob from `cat-file`.
+- **R5.** git-dupe never parses a Git message meant for humans and never sets `LC_ALL` or `LANG` for a child; every answer it reads from Git is a `-z` listing, a `rev-parse` line, a `check-ignore -v -n -z` record, a `config -z` record, a `--list-cmds` name line, a `for-each-ref --format` line, an `ls-remote --symref` line, a `symbolic-ref` line, the line of `git version`, a `--porcelain -z` record, a `rev-list` or `stash list --format=%H` hash line, or the bytes of a blob from `cat-file`.
 - **R6.** Nothing git-dupe gives Git or reads from it — a command, an option, a configuration key, an environment variable, an output format, a pathspec form — is one that Git 2.43.0 lacks or that a later release through the newest listed changes, apart from a difference `Substrate assumptions` states, and a table (P1) holds only what F4 allows; a doubt is settled in the source of both releases, for a fact of Windows in Git for Windows's tree at both, before the code relies on it, and the fact is added to `Substrate assumptions`.
 - **R7.** A new own command, option, environment variable, configuration key, file, or crate dependency is an amendment to `PRODUCT_SPECIFICATION.md` first (F6, F7, N6); the help text and the manual page's source change together with any behavior they describe, on any platform, in the same change, whether or not that platform's build ships the page (F10).
 - **R8.** Of git-dupe's own accord nothing is written outside the worktree's private repository, the region rename, `.git/info` and the lock file when they are missing, `.gitdupe`, and the files `clone` writes as G2 describes, and nothing is deleted except the private repository by `detach` and a stale region by the rename (G27); a command passed to Git writes and deletes where the developer's words tell Git to, and the user's own `clean` deletes what G16 says (G3, G5, G16).
