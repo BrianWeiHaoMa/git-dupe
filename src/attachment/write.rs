@@ -1,16 +1,29 @@
 //! The write step of `clone` (G2, `Holds/G2`): every privately tracked file absent from
-//! the working tree is written, and nothing that is there is touched.
+//! the working tree is written, except one at a path the project tracks, and nothing that
+//! is there is touched.
 //!
-//! The order is the guarantee. `ls-files --deleted` names the files absent from disk; a
-//! path with an ancestor that exists and is not a directory, by `lstat`, a symbolic link
-//! included, is dropped, because Git would write through the link or stop at the file;
-//! the rest are fed to one `checkout-index` without `--force`, which never overwrites a
-//! file and stops at the first path it cannot create, so that it meets none (S7). What is
-//! present is looked at only afterwards, by `diff`, whose paths minus the dropped ones are
-//! the files kept as they were. Every run is private and made from the root, because
-//! `ls-files` lists and `checkout-index` reads paths relative to the directory it runs
-//! from. Three runs, whatever the repository holds (G22, R4); the only per-path work is
-//! `lstat` of the paths Git named.
+//! The order is the guarantee. First the hidden paths, from the keeper, and one public
+//! listing under them, which says which of `clone`'s paths the project tracks, the absent
+//! ones and the kept ones alike, before anything is written. Its query is the region
+//! paths, each replaced by its outermost proper ancestor that exists and is not a
+//! directory, by `lstat`, where one stands: never more paths or bytes than settle's region
+//! paths (E8, G23), and every path a line could offer to restore lies at or below one of
+//! them, so that the one listing answers both questions asked of it: for a path to write,
+//! whether the project tracks that path; for a path a restore would name, whether the
+//! project tracks any path at or below it (`Written::project_tracks`).
+//!
+//! Then `ls-files --deleted` names the files absent from disk; a path with an ancestor
+//! that exists and is not a directory, by `lstat`, a symbolic link included, is dropped,
+//! because Git would write through the link or stop at the file; one the project tracks is
+//! left unwritten, because the private version written there would be a change to the
+//! project's file that a public `git add` stages (N9); the rest are fed to one
+//! `checkout-index` without `--force`, which never overwrites a file and stops at the
+//! first path it cannot create, so that it meets none (S7). What is present is looked at
+//! only afterwards, by `diff`, whose paths minus the dropped and unwritten ones are the
+//! files kept as they were. Every run is made from the root, because `ls-files` lists and
+//! `checkout-index` reads paths relative to the directory it runs from. Its runs are the
+//! same whatever the repository holds (G22, R4); the only per-path work is `lstat` of the
+//! paths Git named and of the region paths' ancestors.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -19,9 +32,9 @@ use std::path::Path;
 use super::step;
 use crate::bytes;
 use crate::guards::operand;
-use crate::keeper::Failed;
+use crate::keeper::{self, Failed};
 use crate::runner::Run;
-use crate::runner::locate::directory_at;
+use crate::runner::locate::{Workspace, directory_at};
 use crate::runner::records;
 
 /// What the write step left as it was, each path relative to the root.
@@ -32,6 +45,20 @@ pub struct Written {
     /// Each file present before the step that differs from the checked-out version, in
     /// content or in kind, in byte order, with why.
     pub kept: BTreeMap<Vec<u8>, Kept>,
+    /// Each absent file that was not written because the project tracks its path, in
+    /// byte order.
+    pub unwritten: BTreeSet<Vec<u8>>,
+    /// The paths the project tracks at or below the listing's query.
+    publicly_tracked: BTreeSet<Vec<u8>>,
+}
+
+impl Written {
+    /// Whether the project tracks `path` or a path below it: where it does, a restore
+    /// that names `path` would write private files over the project's, or in place of
+    /// what holds them.
+    pub fn project_tracks(&self, path: &[u8]) -> bool {
+        operand::any_at_or_below(&self.publicly_tracked, path)
+    }
 }
 
 /// Something at a path that is not a directory, by `lstat`.
@@ -53,21 +80,42 @@ pub enum Kept {
     BeyondALink(Vec<u8>),
 }
 
-/// The write step in the private repository at `private`, whose working tree is `root`,
-/// once its index is the checked-out branch's tree.
-pub fn write(private: &Path, root: &Path) -> Result<Written, Failed> {
-    let run = |words: &[&str]| Run::private(private, root, words).from(root);
+/// The write step in the workspace's private repository, once its index is the
+/// checked-out branch's tree.
+pub fn write(workspace: &Workspace) -> Result<Written, Failed> {
+    let private = workspace.private_directory();
+    let root = workspace.root();
+    let run = |words: &[&str]| Run::private(&private, root, words).from(root);
+
+    let hidden = keeper::hidden(workspace)?;
+    let mut known = HashMap::new();
+    let publicly_tracked = keeper::publicly_tracked(
+        workspace,
+        &query(root, &hidden.paths.region, &mut known, |path| {
+            hidden.paths.named(path)
+        }),
+    )?;
 
     let deleted = step(run(&["ls-files", "-z", "--deleted"]).capture_output(), &[0])?;
     let mut obstructions = BTreeMap::new();
     let mut dropped = BTreeSet::new();
+    let mut unwritten = BTreeSet::new();
     let mut absent = Vec::new();
-    let mut known = HashMap::new();
     for path in records::paths(&deleted.stdout) {
+        // A path the project tracks is named as such whatever stands above it, so that
+        // the line naming an obstruction does not stand in for it.
+        let tracked = publicly_tracked.contains(&path);
         match obstruction(root, &path, &mut known) {
             Some((ancestor, standing)) => {
                 obstructions.insert(ancestor.to_vec(), standing);
-                dropped.insert(path);
+                if tracked {
+                    unwritten.insert(path);
+                } else {
+                    dropped.insert(path);
+                }
+            }
+            None if tracked => {
+                unwritten.insert(path);
             }
             None => {
                 absent.extend_from_slice(&path);
@@ -92,7 +140,7 @@ pub fn write(private: &Path, root: &Path) -> Result<Written, Failed> {
     let mut kept = BTreeMap::new();
     let mut known = HashMap::new();
     for path in records::paths(&differing.stdout) {
-        if dropped.contains(&path) {
+        if dropped.contains(&path) || unwritten.contains(&path) {
             continue;
         }
         let why = match obstruction(root, &path, &mut known) {
@@ -103,7 +151,31 @@ pub fn write(private: &Path, root: &Path) -> Result<Written, Failed> {
         kept.insert(path, why);
     }
 
-    Ok(Written { obstructions, kept })
+    Ok(Written {
+        obstructions,
+        kept,
+        unwritten,
+        publicly_tracked,
+    })
+}
+
+/// The public listing's query: each of the `region` paths that `named` admits, a
+/// command line being unable to carry the rest (G30), replaced by its outermost proper
+/// ancestor that exists and is not a directory where one stands, each once. A path a
+/// line offers to restore is a privately tracked file, or the outermost such ancestor of
+/// one, so it lies at or below one of these.
+fn query(
+    root: &Path,
+    region: &[Vec<u8>],
+    known: &mut HashMap<Vec<u8>, Option<Standing>>,
+    named: impl Fn(&[u8]) -> bool,
+) -> Vec<Vec<u8>> {
+    let mut query = BTreeSet::new();
+    for path in region.iter().filter(|path| named(path)) {
+        let outermost = obstruction(root, path, known).map_or(&path[..], |(above, _)| above);
+        query.insert(outermost.to_vec());
+    }
+    query.into_iter().collect()
 }
 
 /// The outermost proper ancestor of `path` that exists and is not a directory, by
@@ -208,6 +280,35 @@ mod tests {
         // The path itself is no ancestor of its own.
         assert_eq!(asked(b"file"), None);
         assert_eq!(asked(b"link"), None);
+    }
+
+    #[test]
+    fn the_query_is_the_region_paths_each_at_its_outermost_obstruction() {
+        let scratch = Scratch::new("query");
+        let root = &scratch.0;
+        fs::create_dir_all(root.join("dir")).unwrap();
+        fs::write(root.join("file"), "a file\n").unwrap();
+        symlink("dir", root.join("link")).unwrap();
+        let region: Vec<Vec<u8>> = [
+            &b".gitdupe"[..],
+            b"dir/a",
+            b"file/x",
+            b"file/y/z",
+            b"link/b",
+            b"notes",
+            b"unnamed",
+        ]
+        .iter()
+        .map(|path| path.to_vec())
+        .collect();
+        let mut known = HashMap::new();
+        let query = query(root, &region, &mut known, |path| path != b"unnamed");
+        // Never more paths, and never more bytes, than the region paths it was made from.
+        let expected: Vec<Vec<u8>> = [&b".gitdupe"[..], b"dir/a", b"file", b"link", b"notes"]
+            .iter()
+            .map(|path| path.to_vec())
+            .collect();
+        assert_eq!(query, expected);
     }
 
     #[test]

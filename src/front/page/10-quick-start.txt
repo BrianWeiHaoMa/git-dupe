@@ -35,5 +35,10 @@ On a second machine, clone the project as usual, and from its root run:
 
 The files committed privately on the first machine appear where they stood
 there, .gitdupe among them, so that the same paths are hidden. A file already
-in place is kept as it is, and named in a warning when it differs. From then
-on, git dupe pull and git dupe push move private work between the two.
+in place is kept as it is, and named in a warning when it differs, which
+gives, run from the root, the git dupe commit that keeps that file and the
+git dupe restore that replaces it. Where the private version would be written
+over the project's own, at a path the project tracks or in a directory
+holding one, nothing is written, and the warning gives the git dupe show
+HEAD:<path> that prints the private version instead. From then on, git dupe
+pull and git dupe push move private work between the two.

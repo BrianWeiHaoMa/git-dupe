@@ -1,4 +1,5 @@
-//! `clone` runs a fixed Git sequence at either private file count (G22, R4), and a
+//! `clone` runs a fixed Git sequence at either private file count (G22, R4), the one
+//! public listing before its write step among it, and a
 //! caller's index reaches neither private runs nor public tracking queries (G10,
 //! `Composition/Runner`).
 
@@ -95,6 +96,11 @@ fn clone_git_run_sequences_do_not_follow_private_file_counts() {
                     "branch",
                     "symbolic-ref",
                     "reset",
+                    // The hidden paths, `.gitdupe` not yet on disk, and the one public
+                    // listing under them, before anything is written.
+                    "cat-file",
+                    "ls-files",
+                    "ls-files",
                     "ls-files",
                     "checkout-index",
                     "diff",
@@ -117,6 +123,30 @@ fn clone_git_run_sequences_do_not_follow_private_file_counts() {
                     own.words().iter().any(|words| words.ends_with(&fetch)),
                     "{own:?}"
                 );
+                // The one public listing before the write step asks under the region
+                // paths alone, `notes` once, whatever number of files lies below it.
+                let runs = own.words();
+                let checkout = runs
+                    .iter()
+                    .position(|words| words.iter().any(|word| word == b"checkout-index"))
+                    .expect("the write step's checkout-index");
+                let listing = runs[..checkout]
+                    .iter()
+                    .rev()
+                    .find(|words| words.iter().any(|word| word.starts_with(b":(top,literal)")))
+                    .expect("the public listing before the write step");
+                let query: Vec<&[u8]> = listing
+                    .iter()
+                    .filter_map(|word| word.strip_prefix(b":(top,literal)"))
+                    .collect();
+                let region: [&[u8]; 5] = [
+                    b".env.local",
+                    b".gitdupe",
+                    b".vscode",
+                    b"docs/notes.md",
+                    b"notes",
+                ];
+                assert_eq!(query, region, "{own:?}");
                 sequences.push(sequence);
             }
             assert_eq!(sequences[0], sequences[1]);

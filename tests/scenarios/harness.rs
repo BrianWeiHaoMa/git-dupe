@@ -87,7 +87,7 @@ pub use release_site::ReleaseSite;
 pub use releases::oldest_supported;
 pub use remotes::{
     Everything, MANY_URLS, PROJECT_URL, SecondMachine, Transfer, commit_here, committing, diverged,
-    dupe_clone, remote_moves_on,
+    dupe_clone, remote_moves_on, the_fetch_hint_after,
 };
 pub use repository::locate_words;
 pub use scenario::{Git, Scenario, report, under_each_release};

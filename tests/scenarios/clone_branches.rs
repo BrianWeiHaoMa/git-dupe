@@ -2,8 +2,9 @@
 //! out (G2, `Holds/G2`, S12): `-b BRANCH`, else the remote's default branch; a remote with
 //! no branch attaches with nothing checked out; a remote whose `HEAD` names no branch it
 //! has is refused naming `-b`; a `BRANCH` the remote lacks, a `URL` that is no repository,
-//! and a `remotes.origin` group of the developer's end with Git's status, attached; and
-//! from each, `git dupe detach --force` and `git dupe clone` start over.
+//! and a `remotes.origin` group of the developer's end with Git's status, attached, the
+//! last two, whose fetch failed, with one hint after Git's lines; and from each,
+//! `git dupe detach --force` and `git dupe clone` start over.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -11,7 +12,7 @@ use std::path::Path;
 
 use crate::harness::{
     End, Scenario, dupe_clone, names, private_add, private_commit, region_rules, text,
-    under_each_release, usage_line, write,
+    the_fetch_hint_after, under_each_release, usage_line, write,
 };
 
 /// `git dupe detach --force` from `dir`, which must succeed.
@@ -365,7 +366,10 @@ fn a_url_that_is_no_repository_ends_with_fetchs_status_attached_and_starts_over(
         let gits = s.private(second).git(["fetch", "origin"]).run();
         assert_ne!(gits.end, End::Code(0), "{gits:?}");
         assert_eq!(failed.end, gits.end, "{failed:?}");
-        assert!(failed.stderr.ends_with(&gits.stderr), "{failed:?}");
+        names(
+            the_fetch_hint_after(&failed, &gits.stderr),
+            b"the fetch failed",
+        );
 
         detached(s, second);
         let again = dupe_clone(s, second, &[m.first.private_remote.as_os_str()]);
@@ -416,7 +420,10 @@ fn a_remotes_origin_group_is_gits_refusal_of_the_refspec_attached_and_starts_ove
             ])
             .run();
         assert_eq!(failed.end, gits.end, "{gits:?}");
-        assert!(failed.stderr.ends_with(&gits.stderr), "{failed:?}");
+        names(
+            the_fetch_hint_after(&failed, &gits.stderr),
+            b"the fetch failed",
+        );
 
         s.git(["config", "--global", "--unset", "remotes.origin"])
             .succeeds();

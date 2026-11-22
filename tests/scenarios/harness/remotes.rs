@@ -33,6 +33,25 @@ pub fn dupe_clone(s: &Scenario, dir: &Path, words: &[&OsStr]) -> Output {
     s.git(dupe.iter().chain(words)).from(dir).run()
 }
 
+/// The text of the one `hint:` a `clone` whose fetch failed prints, where settle names
+/// nothing after it: the last line of its standard error, right after `gits`, the fetch's
+/// own lines as Git prints them when run alone, with no line of git-dupe's between them.
+pub fn the_fetch_hint_after<'o>(failed: &'o Output, gits: &[u8]) -> &'o [u8] {
+    let body = failed
+        .stderr
+        .strip_suffix(b"\n")
+        .unwrap_or_else(|| panic!("no last line: {failed:?}"));
+    let start = body
+        .iter()
+        .rposition(|&byte| byte == b'\n')
+        .map_or(0, |at| at + 1);
+    let hint = body[start..]
+        .strip_prefix(b"hint: ")
+        .unwrap_or_else(|| panic!("the last line is no hint: {failed:?}"));
+    assert!(body[..start].ends_with(gits), "{failed:?}");
+    hint
+}
+
 /// A transfer workspace's paths, all canonical.
 pub struct Transfer {
     /// The root: `daily_state`, settled once by `git dupe status`. Its public repository

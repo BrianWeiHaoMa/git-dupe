@@ -46,6 +46,22 @@ opening an editor; a refusal of git-dupe's own exits 128, and a usage error
 
     $ git dupe status --porcelain
 
+A setup script that attaches a worktree from a private remote, with url
+holding its URL, acts on the exit status of the git dupe clone it ran: a
+clone that fails after attaching, at its fetch or later, leaves the
+worktree attached with what was done, so the script removes what that
+clone attached, nothing in it being the developer's yet, and its next run
+starts over. It then asks for a private commit, because the dupe
+directory says only that the worktree is attached, as git dupe init and a
+clone of a remote with no branch leave it too:
+
+    dupe="$(git rev-parse --git-dir)/dupe"
+    if ! test -d "$dupe" && ! git dupe clone "$url"; then
+        test -d "$dupe" && git dupe detach --force
+        exit 1
+    fi
+    git dupe rev-parse -q --verify HEAD
+
 The help of one command, which needs nothing but the executable:
 
     $ git dupe help add

@@ -9,15 +9,15 @@ be "$(git rev-parse --git-common-dir)/dupe", the main one's: then
 "git dupe merge <name>" in the main worktree takes it.
 
 It writes every private file missing from the working tree, .gitdupe among them,
-so the same paths are hidden. A file or directory already present is kept: a
-warning names each one that differs, and "git dupe status" shows it modified;
-"git dupe commit -a" keeps it, "git dupe restore <path>" replaces it. Below a
-file or symbolic link at a private directory's path, nothing is written.
+so the same paths are hidden, but none the project tracks or below a file or
+link at a private directory. A file present is kept, a warning naming each that
+differs: "git dupe commit -- <path>" keeps it, "git dupe restore <path>"
+replaces it; if the project tracks it, "git dupe show HEAD:<path>" reads ours.
 
 Unlike "git clone", it makes no new directory, takes no option but -b, and never
 overwrites a file. It is refused in a workspace already attached, where "git
 dupe init" is refused, and when a word names the project's repository, a working
-tree, or a remote of it. When the remote has no branch yet, it attaches with
-origin configured and no commit. After any other failure the workspace stays
-attached: "git dupe detach", or "git dupe detach --force" where it refuses, as
-after an interrupted clone, then "git dupe clone" start over.
+tree, or a remote of it. From a remote with no branch yet, it attaches with
+origin configured and no commit. Any other failure, a failed fetch too, leaves
+it attached: "git dupe detach", or "git dupe detach --force" where it refuses,
+then "git dupe clone" start over.

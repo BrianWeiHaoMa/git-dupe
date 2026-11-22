@@ -17,13 +17,16 @@
 //! `ls-remote --symref origin HEAD`, whose `ref:` line for `HEAD` names the branch, and
 //! whose lack of one refuses; `branch --track` from `refs/remotes/origin/BRANCH`,
 //! `symbolic-ref HEAD`, and `reset -q`, which sets the index and touches no file (S7);
-//! then the write step (`write`). No step passes `--force` or runs `checkout`, `switch`, or
-//! `restore`. The standard output of every step other than `init` and `fetch` is captured
-//! and dropped, `branch --track`'s line among it.
+//! then the write step (`write`), which first asks the hidden paths and one public listing.
+//! No step passes `--force` or runs `checkout`, `switch`, or `restore`. The standard output
+//! of every step other than `init` and `fetch` is captured and dropped, `branch --track`'s
+//! line among it.
 //!
 //! A failing step ends `clone` with Git's message and status, the workspace attached with
 //! what was done, and the steps after it do not run: `git dupe detach --force` and `clone`
-//! start over. Neither `URL` nor `BRANCH` begins with `-`: the front reports such a word
+//! start over. The fetch's failure is told apart from every other (`FetchFailed`), because
+//! the workspace this invocation attached then holds nothing of the remote's, and the front
+//! says so. Neither `URL` nor `BRANCH` begins with `-`: the front reports such a word
 //! as a misuse, because each reaches a step as a plain word that Git would read as an
 //! option. `clone` never settles: the sequence does, after it, wherever it ends attached.
 
@@ -58,6 +61,9 @@ pub enum NotCloned {
     /// No `BRANCH` was given, and the remote's `HEAD` names no branch it has; the
     /// workspace is attached with `origin` configured and fetched.
     NoDefaultBranch,
+    /// The fetch failed: the workspace is attached with `origin` configured, no private
+    /// file was written, and the steps after it did not run.
+    FetchFailed(Failed),
     /// A Git step failed, and the steps after it did not run.
     Failed(Failed),
 }
@@ -115,7 +121,8 @@ pub fn clone(
             word("+refs/heads/*:refs/remotes/origin/*"),
         ]),
         &[0],
-    )?;
+    )
+    .map_err(NotCloned::FetchFailed)?;
     let branches = quiet(&[
         word("for-each-ref"),
         word("--format=%(refname)"),
@@ -159,5 +166,5 @@ pub fn clone(
     ])?;
     quiet(&[word("symbolic-ref"), word("HEAD"), &head])?;
     quiet(&[word("reset"), word("-q")])?;
-    Ok(Cloned::CheckedOut(write::write(&private, root)?))
+    Ok(Cloned::CheckedOut(write::write(workspace)?))
 }

@@ -29,6 +29,21 @@ Every change a user of git-dupe would notice, newest first, in the form of
   its command lines carry no comment, and a second machine's `git dupe clone` has a block
   of its own. It says before its commands that the private repository is created empty,
   with no README, license, or ignore file, and how `-b` names the project's branch.
+- `git dupe clone` writes no private file at a path the project tracks: one missing from
+  disk stays missing and is named in a warning, and the warning for a kept file the
+  project tracks names `git dupe show HEAD:<path>` to read the private version, where it
+  offered `git dupe restore`, which wrote it over the project's file. A kept file the
+  project does not track is offered `git dupe commit -- <path>`, which commits that file
+  alone, in place of `git dupe commit -a`, and no restore is offered through a file,
+  directory, or link at or below which the project tracks a path.
+- The warning for a path both repositories track names the path in the command that
+  releases it from each, says which repository each releases it from, and that a public
+  `git add` stages whatever stands there.
+- When the fetch of a `git dupe clone` fails, a hint after Git's message says that the
+  worktree is attached with nothing checked out and no private file written, and names
+  `git dupe detach`, or `git dupe detach --force` where it refuses, and then
+  `git dupe clone <url>` to start over. The manual page's examples give a setup script
+  that acts on `clone`'s exit status and asks for a private commit.
 
 ## [0.4.1] - 2026-11-03
 

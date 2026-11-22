@@ -1,6 +1,6 @@
 //! A command a line offers acts on the path or name it names, and on nothing else, when run
-//! by a shell as the line shows it (G25): `clone`'s lines for a path it kept or a file in
-//! the way, `hide`'s hint, the route by which a path the project's Git tracks becomes
+//! by a shell as the line shows it (G25): `clone`'s lines for a path it kept, to keep it or
+//! replace it, or a file in the way, `hide`'s hint, the route by which a path the project's Git tracks becomes
 //! private, and the alias G19 refuses. Each is offered for a path holding a space and a
 //! `$`, which a shell would split or expand if written raw, `hide`'s also for one holding
 //! `!` and `'`, which an interactive shell would expand inside double quotes, and, where
@@ -13,8 +13,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::harness::{
-    End, Output, Scenario, holds, name_accepted, names, offered, private_commit, privately_tracked,
-    publicly_tracked, symlink, under_each_release, write,
+    End, Output, Scenario, committing, holds, name_accepted, names, offered, private_commit,
+    privately_tracked, publicly_tracked, symlink, under_each_release, write,
 };
 
 /// The part a name this filesystem refuses leaves out.
@@ -161,6 +161,86 @@ fn clone_restores(s: &Scenario, name: &str, setting: Option<&str>) {
         for other in kept[at + 1..].iter().chain(&near) {
             assert_eq!(fs::read(second.join(other)).unwrap(), b"mine\n", "{other}");
         }
+    }
+}
+
+#[test]
+fn clones_commit_offers_take_a_kept_path_alone() {
+    under_each_release(|s| {
+        for (at, setting) in SETTINGS.into_iter().enumerate() {
+            clone_commits(s, &format!("committed-{at}"), setting);
+        }
+    });
+}
+
+/// `clone`'s offers to keep a kept file on a second machine named `name`, typed under
+/// `setting`: each commits its path alone, and every other kept file stays as it was and
+/// uncommitted.
+fn clone_commits(s: &Scenario, name: &str, setting: Option<&str>) {
+    let machines = s.second_machine(name);
+    let first = &machines.first.root;
+    let spaced = format!("{SPACED}.txt");
+    let mut kept = vec![spaced.as_str(), ":(exclude)keep", "star*.txt"];
+    kept.retain(|path| name_accepted(first, path.as_bytes(), OFFERED));
+    let near = ["keep", "other", "starX.txt"];
+    for path in kept.iter().chain(&near) {
+        write(first, path, b"private\n");
+        s.private(first)
+            .git(["add", "-f", "--", &format!(":(literal){path}")])
+            .succeeds();
+    }
+    private_commit(s, first);
+    s.private(first)
+        .git(["push", "-q", "origin", "main"])
+        .succeeds();
+
+    let second = &machines.root;
+    for path in kept.iter().chain(&near) {
+        write(second, path, b"mine\n");
+    }
+    let remote = machines.first.private_remote.to_str().unwrap();
+    let cloned = git_under(s, &["dupe", "clone", remote], second, setting);
+    assert_eq!(cloned.end, End::Code(0), "{cloned:?}");
+    committing(s, second);
+    let warnings = cloned.lines("warning");
+    for path in &kept {
+        let start = format!("{path} was kept as it was and differs");
+        let differs = warnings
+            .iter()
+            .find(|line| line.starts_with(start.as_bytes()))
+            .unwrap_or_else(|| panic!("no line for {path}: {cloned:?}"));
+        let keep = offered(differs, b"version; '", b"' run from the root keeps it");
+        let command = std::str::from_utf8(keep).expect("a UTF-8 command");
+        let shell = s
+            .program(s.shell(), ["-c", command])
+            .from(second)
+            .variable("GIT_EDITOR", "printf 'Keep it\\n' >");
+        let output = match setting {
+            Some(variable) => shell.variable(variable, "1").run(),
+            None => shell.run(),
+        };
+        assert_eq!(output.end, End::Code(0), "{setting:?} {output:?}");
+        let committed = s
+            .private(second)
+            .git(["show", "--name-only", "--format=", "HEAD"])
+            .succeeds()
+            .stdout;
+        assert_eq!(committed, format!("{path}\n").as_bytes(), "{setting:?}");
+    }
+    // Every other kept file is still the second machine's, and still uncommitted.
+    let differing = s
+        .private(second)
+        .git(["diff", "--name-only", "-z"])
+        .succeeds()
+        .stdout;
+    let differing: BTreeSet<&[u8]> = differing
+        .split(|&byte| byte == 0)
+        .filter(|path| !path.is_empty())
+        .collect();
+    let expected: BTreeSet<&[u8]> = near.iter().map(|path| path.as_bytes()).collect();
+    assert_eq!(differing, expected, "{setting:?}");
+    for path in kept.iter().chain(&near) {
+        assert_eq!(fs::read(second.join(path)).unwrap(), b"mine\n", "{path}");
     }
 }
 

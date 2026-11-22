@@ -33,6 +33,7 @@ use super::region::{self, StartingRegion};
 use super::{Failed, listing};
 use crate::guards::hide as decision;
 use crate::guards::operand::{self, Cleaned};
+use crate::guards::pathspec;
 use crate::runner::locate::{Workspace, present};
 
 /// What settle leaves for the front: its warnings, in order, and the count of a list
@@ -230,11 +231,21 @@ fn unreadable_line(cause: &io::Error) -> Vec<u8> {
     .concat()
 }
 
+/// G8's warning: the path, that a public `git add` stages whatever stands there, and the
+/// command that stops each repository tracking it, run from the root as the path is
+/// spelled. Git's `rm --cached` refuses, without `-f`, while what its index holds for the
+/// path differs both from the file and from its last commit, so the line says when each
+/// command does what it names.
 fn tracked_by_both_line(path: &[u8]) -> Vec<u8> {
     [
         path,
-        b" is tracked by both the public and the private repository; \
-          'git rm --cached' or 'git dupe rm --cached' releases it from one",
+        b" is tracked by both the public and the private repository, and a public \
+          'git add' stages whatever stands there; from the root, '",
+        &pathspec::offered_command(b"dupe rm --cached", path),
+        b"' stops the private repository tracking it and '",
+        &pathspec::offered_command(b"rm --cached", path),
+        b"' stops the public one, each while what that repository has staged for it \
+          matches the file or its last commit",
     ]
     .concat()
 }

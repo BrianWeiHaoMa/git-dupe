@@ -455,7 +455,7 @@ fn foreign_warning_coexists_with_hidden_dual_tracked_and_released_warnings() {
             foreign("directory", b"the main worktree", false),
             foreign("notes", b"the main worktree", true),
             foreign("user", b"the main worktree", true),
-            b"both is tracked by both the public and the private repository; 'git rm --cached' or 'git dupe rm --cached' releases it from one".to_vec(),
+            b"both is tracked by both the public and the private repository, and a public 'git add' stages whatever stands there; from the root, 'git dupe rm --cached -- both' stops the private repository tracking it and 'git rm --cached -- both' stops the public one, each while what that repository has staged for it matches the file or its last commit".to_vec(),
         ]);
         assert_eq!(
             wt.private(s)

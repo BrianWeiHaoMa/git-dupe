@@ -79,7 +79,9 @@ the project's `.gitignore` ignores is added with `-f`, as `git add` adds one.
   `git clean -x` deletes them, `git stash -a` stashes them, `git add -f` makes them
   public, and a public pull or checkout that brings a file to one of their paths
   overwrites yours. Commit first: `git dupe restore .`, from the root, brings back every
-  file the dupe tracks as last staged.
+  file the dupe tracks as last staged, over the project's file too where the project now
+  tracks the path, which a public `git add` then stages; there, read yours with
+  `git dupe show HEAD:<path>` instead, and restore the other paths by name.
 - **Each worktree on its own.** A linked worktree is attached by its own `git dupe init`
   or `git dupe clone`, and `git worktree remove` and `git worktree prune` delete its
   dupe with it, whatever files of yours stand there. A push alone misses a file in no

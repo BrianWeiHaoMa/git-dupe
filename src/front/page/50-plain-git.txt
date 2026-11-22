@@ -19,6 +19,18 @@ committed content or, where an edit was staged, the staged one. An edit never
 staged is gone. git dupe status shows what differs. Commit private work
 before a public pull or checkout, and before git clean -x.
 
+At a path both repositories track, the file on disk is the project's, and a
+public git add stages whatever stands there: git dupe restore . writes the
+private version over it too, as git dupe restore of that path does, a change
+to the project's file that git status then shows. There, git dupe show
+HEAD:<path> prints the private version instead, to keep under another path,
+and the other paths are restored by naming them. The warning names the ways
+out, each run from the root: git dupe rm --cached -- <path> stops the private
+repository tracking the path, and git rm --cached -- <path> stops the
+project's, which a public commit then records as the file's removal from the
+project, each while what that repository has staged for the path matches the
+file or its last commit.
+
 Under git dupe, Git's own messages are printed as Git wrote them, and some of
 them name a plain git command to run next: git add and git rebase --continue
 after a rebase stops, git push --set-upstream after a push from a branch with

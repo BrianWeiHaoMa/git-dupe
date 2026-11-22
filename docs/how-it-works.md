@@ -120,7 +120,9 @@ remote.
   file: `git clean -x` deletes it, `git stash -a` stashes it, `git add -f` makes it
   public, and a public pull or checkout that brings a file to its path overwrites it.
   Commit first; `git dupe restore .`, from the root, brings back every file the dupe
-  tracks as last staged, and `git dupe clean` cleans the project while sparing them.
+  tracks as last staged, over the project's file too where the project now tracks the
+  path, which a public `git add` then stages: there `git dupe show HEAD:<path>` reads
+  yours. `git dupe clean` cleans the project while sparing them.
   Public `git stash -u`, `git add -A`, and `git add .` leave them alone, as they leave
   any ignored file.
 - **A private pull can overwrite a file the project ignores.** A file the project

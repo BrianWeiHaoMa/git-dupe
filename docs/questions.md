@@ -36,8 +36,8 @@ alone, and [What it is for](use-cases.md) the uses it was made for.
   stash entry is on no remote, but it sees no untracked file, nor one the project ignores.
 - **Does the dupe come along when someone clones the project?** No. `.git` is not part
   of a clone, so nothing of yours is in the project. In a fresh clone,
-  `git dupe clone <url>` writes the files that are missing, keeps any already there, and
-  names the ones that differ.
+  `git dupe clone <url>` writes the files that are missing, but none at a path the
+  project tracks, keeps any already there, and names the ones that differ.
 - **Two people on the same project?** Each clone has its own `.git/dupe`, its own
   `.gitdupe`, and its own remote, one person per clone; nothing shows in the project for
   anyone else. What a team shares, it shares through a remote, as the kit under
@@ -54,8 +54,15 @@ alone, and [What it is for](use-cases.md) the uses it was made for.
   not read it. Nothing is lost, but until then a public `git add -A` would stage it, so
   move the path or change the rule.
 - **What if the project later adds a file at my path?** A public pull or checkout
-  overwrites yours. Commit first; `git dupe restore <path>` brings it back; then one
-  repository has to give the path up.
+  overwrites yours, and both repositories then track the path: `git dupe status` and the
+  other commands warn of it, naming the command that releases it from each. The file
+  there is now the project's, and a public `git add` stages whatever stands there, so
+  `git dupe restore` would put yours where the project's next commit takes it. Commit
+  first. Then, from the root, `git dupe show HEAD:<path> > <new path>` saves yours under
+  another path, `git dupe add -f -- <new path>` makes that one private, and
+  `git dupe rm --cached -- <path>` gives the project's path up; the warning spells each
+  command for the path it names. `git dupe clone` on another machine keeps the project's
+  file and names it the same way.
 - **How do I get out?** `git dupe detach` removes the worktree's dupe and its own region
   of `.git/info/exclude`, leaving the rest of that file but the region of a worktree
   whose dupe is gone, leaves every file on disk, `.gitdupe` included, and warns which
