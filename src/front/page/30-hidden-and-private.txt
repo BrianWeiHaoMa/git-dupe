@@ -23,6 +23,20 @@ lists it or a path above it, it is no longer hidden. Where public Git can then
 see a path that was hidden, a warning names it, and names git dupe hide, run
 from the root, where that command would hide it again.
 
+To rename a hidden directory, hide the new name first, then move, then unhide
+the old name, each run from the root: git dupe hide journal/, then git dupe mv
+notes journal, then git dupe unhide notes. No step lets the project's Git see
+a file of yours, unless a rule of the project's re-includes the new name, which
+a warning then names with its file and line; where git dupe hide refuses the
+new name, stop there: nothing has moved. git dupe mv alone leaves .gitdupe
+listing the old name, so that what the private repository does not track
+under the new one is visible to the project's Git; a hint then names the two
+commands that move the listing with it, or, where the project tracks a path
+under the new name, the move back. A public git mv of a directory that holds
+private files moves them too, to paths nothing hides, and needs the same care:
+hide each one's new path before the move; git dupe add -A then records it,
+with git dupe add -f for a moved file the project ignores.
+
 A path is tracked by one repository or the other. A file the project's Git
 tracks stays visible to it under a hidden directory, because ignore rules do
 not apply to a tracked file. git dupe add never stages a file only the

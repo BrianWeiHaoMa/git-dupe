@@ -11,16 +11,20 @@
 //! reword whose editor failed, or a todo list Git cannot read, draws the line of a stopped
 //! rebase, because Git's advice there names plain `git commit --amend`, where its advice at
 //! a conflict names only commands that fail in the project's repository (`Holds/G19`).
-//! The hints `transfer_advice` pins, and the autostash's (`autostash_hint`), stay as they
-//! are.
+//! A merge-mode pull stopped at its merge's conflicts, and a pull Git refused because that
+//! merge stands, draw the line of a private merge in progress instead of any other, after
+//! one question, `MERGE_HEAD`, that every pull that did not exit 0 puts unless a rebase
+//! stands stopped. The hints `transfer_advice` pins, and the autostash's
+//! (`autostash_hint`), stay as they are.
 
 use std::fs;
 
 use crate::harness::{
-    End, STOPPED_REBASE_HINT as STOPPED_REBASE, Scenario, Transfer, commit_here, committing,
-    diverged, dupe_succeeds, gits_then_one_hint, hinted, holds, private_add, private_commit,
-    remote_moves_on, sequence_editor, succeeded_without_a_hint, text, transfer_asked_after,
-    under_each_release, unhinted, without_maintenance, write,
+    End, MERGE_HEAD, MERGE_IN_PROGRESS_HINT as MERGE, STOPPED_REBASE_HINT as STOPPED_REBASE,
+    Scenario, Transfer, commit_here, committing, diverged, dupe_succeeds, gits_then_one_hint,
+    hinted, holds, private_add, private_commit, remote_moves_on, sequence_editor,
+    succeeded_without_a_hint, text, transfer_asked_after, under_each_release, unhinted,
+    without_maintenance, write,
 };
 
 const DETACHED: &[u8] = b"'git dupe pull <remote> <branch>'";
@@ -93,9 +97,11 @@ fn a_pull_on_a_detached_head_names_the_pull_of_a_remotes_branch() {
             assert_eq!(ours.end, End::Code(1), "{words:?}: {ours:?}");
             assert!(!holds(&ours.stderr, NOT_TRACKING), "{ours:?}");
         }
-        // Neither adds a run, and the one given no repository reads `HEAD`.
-        transfer_asked_after(s, root, &["pull"], End::Code(1), true, &[]);
-        transfer_asked_after(s, root, &["pull", "origin"], End::Code(1), true, &[]);
+        // Neither adds a run but the question of a merge in progress, which follows every
+        // pull that did not exit 0, and the one given no repository reads `HEAD`.
+        transfer_asked_after(s, root, &["pull"], End::Code(1), true, &[MERGE_HEAD]);
+        let origin = &["pull", "origin"];
+        transfer_asked_after(s, root, origin, End::Code(1), true, &[MERGE_HEAD]);
         // A help request: Git's output alone.
         for words in [
             &["pull", "-h"][..],
@@ -162,14 +168,15 @@ fn a_pull_told_to_fast_forward_only_that_cannot_names_the_merge_and_rebase_of_wh
             assert_eq!(ours.end, End::Code(128), "{words:?}: {ours:?}");
             assert!(!holds(&ours.stderr, UNRECONCILED), "{ours:?}");
         }
-        transfer_asked_after(s, root, &["pull", "--ff-only"], End::Code(128), true, &[]);
+        let ff_only = &["pull", "--ff-only"];
+        transfer_asked_after(s, root, ff_only, End::Code(128), true, &[MERGE_HEAD]);
         transfer_asked_after(
             s,
             root,
             &["pull", "--ff-only", "origin", "main"],
             End::Code(128),
             false,
-            &[],
+            &[MERGE_HEAD],
         );
         for words in [
             &["pull", "--ff-only", "-h"][..],
@@ -264,14 +271,15 @@ fn the_fast_forward_only_hint_follows_a_128_that_got_no_other_hint() {
         fs::rename(&t.private_remote, &aside).unwrap();
         assert_eq!(unhinted(s, root, &["pull", "--ff-only"]).end, End::Code(1));
         fs::rename(&aside, &t.private_remote).unwrap();
-        // Over unmerged entries Git refuses before it fetches, exit 128, the branches not
-        // diverged: the hint follows, its condition false, as exit 128 alone cannot tell.
+        // Over unmerged entries Git refuses before it fetches, exit 128: a merge stands in
+        // progress, and its line follows instead of the fast-forward-only one.
         conflicted(s, &t);
-        let ours = hinted(s, root, &["pull", "--ff-only"], &FAST_FORWARD_ONLY);
+        let ours = hinted(s, root, &["pull", "--ff-only"], &MERGE);
         assert_eq!(ours.end, End::Code(128), "{ours:?}");
-        // On a detached `HEAD` there, given no repository, Git refuses with 128: the
-        // divergent-branches hint follows, true as its condition reads, and with a way
-        // chosen none does, the detached one following exit 1 alone.
+        assert!(!holds(&ours.stderr, FAST_FORWARD_ONLY[0]), "{ours:?}");
+        // On a detached `HEAD` there, given no repository, Git refuses with 128: the merge's
+        // line again, neither the divergent-branches nor the detached one, with a way
+        // chosen or not.
         dupe_succeeds(s, root, &["merge", "--abort"]);
         dupe_succeeds(s, root, &["checkout", "-q", "--detach"]);
         let merged = s
@@ -279,11 +287,12 @@ fn the_fast_forward_only_hint_follows_a_128_that_got_no_other_hint() {
             .from(root)
             .run();
         assert_eq!(merged.end, End::Code(1), "{merged:?}");
-        let ours = hinted(s, root, &["pull"], &[UNRECONCILED]);
+        let ours = hinted(s, root, &["pull"], &MERGE);
         assert_eq!(ours.end, End::Code(128), "{ours:?}");
+        assert!(!holds(&ours.stderr, UNRECONCILED), "{ours:?}");
         assert!(!holds(&ours.stderr, DETACHED), "{ours:?}");
         dupe_succeeds(s, root, &["config", "pull.rebase", "false"]);
-        let ours = unhinted(s, root, &["pull"]);
+        let ours = hinted(s, root, &["pull"], &MERGE);
         assert_eq!(ours.end, End::Code(128), "{ours:?}");
     });
 }
@@ -387,5 +396,38 @@ fn a_pull_whose_rebase_stops_with_nothing_unmerged_names_the_private_rebase() {
 
         // A help request: Git's output alone.
         unhinted(s, root, &["pull", "--rebase=interactive", "-h"]);
+    });
+}
+
+#[test]
+fn a_pull_stopped_at_its_merges_conflict_names_the_private_merge() {
+    under_each_release(|s| {
+        without_maintenance(s);
+        let t = s.pushed_workspace("workspace");
+        let root = &t.root;
+        committing(s, root);
+        remote_moves_on(s, &t, "shared");
+        write(root, "notes/shared.md", b"here\n");
+        dupe_succeeds(s, root, &["add", "notes/shared.md"]);
+        dupe_succeeds(s, root, &["commit", "-m", "shared here"]);
+        let merging = ["pull", "--no-rebase", "--no-edit"];
+        let stopped = hinted(s, root, &merging, &MERGE);
+        assert_eq!(stopped.end, End::Code(1), "{stopped:?}");
+        // Refused while the merge stands: its line, not the divergent-branches one.
+        for words in [&["pull"][..], &["pull", "--no-rebase"], &["pull", "origin"]] {
+            let refused = hinted(s, root, words, &MERGE);
+            assert_eq!(refused.end, End::Code(128), "{words:?}: {refused:?}");
+            assert!(!holds(&refused.stderr, UNRECONCILED), "{refused:?}");
+        }
+        transfer_asked_after(s, root, &["pull"], End::Code(128), true, &[MERGE_HEAD]);
+        unhinted(s, root, &["pull", "-h"]);
+        // The commands the line names conclude it.
+        write(root, "notes/shared.md", b"both\n");
+        dupe_succeeds(s, root, &["add", "notes/shared.md"]);
+        dupe_succeeds(s, root, &["config", "core.editor", "true"]);
+        dupe_succeeds(s, root, &["merge", "--continue"]);
+        assert!(holds_the_remotes_main(s, &t));
+        let asked = s.private(root).git(MERGE_HEAD).run();
+        assert_eq!(asked.end, End::Code(1), "{asked:?}");
     });
 }

@@ -34,6 +34,17 @@ alone, and [What it is for](use-cases.md) the uses it was made for.
   in that worktree takes it, as the hint after a refused push there says.
   `git dupe detach` without `--force` refuses while a change is staged or a commit or a
   stash entry is on no remote, but it sees no untracked file, nor one the project ignores.
+- **How do I rename a hidden directory?** Hide the new name first, then move, then
+  unhide the old one, each from the root: `git dupe hide journal/`, then
+  `git dupe mv notes journal`, then `git dupe unhide notes`. No step lets the project's
+  Git see a file of yours, unless a rule of the project's re-includes the new name, which
+  a warning then names; where `git dupe hide` refuses the new name, because the project
+  tracks a file under it, stop there: nothing has moved. `git dupe mv` alone leaves
+  `.gitdupe` listing `notes`, and what the dupe does not track under `journal` is then
+  visible to the project; its hint names the two commands that list `journal` instead.
+  A public `git mv` of a directory that holds private files moves them too, to paths
+  nothing hides: hide each one's new path first; `git dupe add -A` then records the move,
+  with `git dupe add -f` for a moved file the project ignores.
 - **Does the dupe come along when someone clones the project?** No. `.git` is not part
   of a clone, so nothing of yours is in the project. In a fresh clone,
   `git dupe clone <url>` writes the files that are missing, but none at a path the

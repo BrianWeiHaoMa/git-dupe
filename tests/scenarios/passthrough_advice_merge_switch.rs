@@ -3,14 +3,18 @@
 //! as a stash entry and names plain `git stash drop`, `git stash pop`, and `git reset
 //! --hard`, where earlier releases keep none. The same one line follows under every release,
 //! conditioned on that entry, which no question here proves; what Git printed, and whether
-//! the private stash holds an entry, is read from no scenario. The run's one question is
-//! `ls-files -u -z` after a run that exited 0 (G22).
+//! the private stash holds an entry, is read from no scenario. A `checkout -m` given paths,
+//! which re-creates their conflicts and switches nothing, carried no change and kept no
+//! entry, so it gets none, however the paths are spelled; changes carried to another commit
+//! get it whatever branch `HEAD` names. Where `HEAD` stands, the branch it names and the
+//! commit, is asked before the run and after one that exited 0, and the index,
+//! `ls-files -u -z`, only where `HEAD` moved (G22).
 
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Scenario, dupe_succeeds, hinted, private_add, private_alias, private_commit, run_traced,
-    run_words, under_each_release, unhinted, write,
+    End, Scenario, asked_around, dupe_succeeds, hinted, private_add, private_alias, private_commit,
+    run_traced, run_words, under_each_release, unhinted, write,
 };
 
 const MERGED_CHANGES: [&[u8]; 4] = [
@@ -112,7 +116,7 @@ fn a_switch_that_leaves_nothing_unmerged_or_is_refused_gets_no_hint() {
 }
 
 #[test]
-fn the_one_question_is_asked_after_a_run_that_exited_0() {
+fn where_head_stands_is_asked_around_the_run_and_the_index_after_it() {
     under_each_release(|s| {
         let root = fixture(s);
         let (output, runs) = run_traced(
@@ -121,18 +125,92 @@ fn the_one_question_is_asked_after_a_run_that_exited_0() {
         );
         assert_eq!(output.end, End::Code(0), "{output:?}");
         let own = runs.own();
-        let expected: [&[u8]; 9] = [
+        let expected: [&[u8]; 11] = [
             b"rev-parse",
             b"config",
             b"symbolic-ref",
+            b"rev-parse",
             b"switch",
             b"symbolic-ref",
+            b"rev-parse",
             b"ls-files",
             b"ls-files",
             b"ls-files",
             b"check-ignore",
         ];
         assert_eq!(own.commands(), expected, "{runs:?}");
-        assert_eq!(own.words()[5], run_words(&["ls-files", "-u", "-z"]));
+        let commit = run_words(&["rev-parse", "-q", "--verify", "HEAD"]);
+        assert_eq!(own.words()[3], commit);
+        assert_eq!(own.words()[6], commit);
+        assert_eq!(own.words()[7], run_words(&["ls-files", "-u", "-z"]));
+    });
+}
+
+#[test]
+fn a_checkout_given_paths_during_a_conflicted_merge_gets_no_hint_under_every_release() {
+    under_each_release(|s| {
+        let root = fixture(s);
+        s.private(&root).git(["reset", "-q", "--hard"]).succeeds();
+        write(&root, "notes.txt", b"main\n");
+        private_add(s, &root, "notes.txt");
+        private_commit(s, &root);
+        let merge = s.private(&root).git(["merge", "--no-edit", "side"]).run();
+        assert_eq!(merge.end, End::Code(1), "{merge:?}");
+        for words in [
+            &["checkout", "-m", "--", "notes.txt"][..],
+            &["checkout", "-m", "notes.txt"],
+            &["checkout", "--merge", "notes.txt"],
+            &["checkout", "-qm", "--", "notes.txt"],
+        ] {
+            let ours = unhinted(s, &root, words);
+            assert_eq!(ours.end, End::Code(0), "{words:?}: {ours:?}");
+        }
+        // Where `HEAD` stands, before and after; the index is not asked.
+        let head: &[&str] = &["symbolic-ref", "-q", "HEAD"];
+        let commit: &[&str] = &["rev-parse", "-q", "--verify", "HEAD"];
+        let words = &["checkout", "-m", "notes.txt"];
+        asked_around(
+            s,
+            &root,
+            words,
+            End::Code(0),
+            &[head, commit],
+            &[head, commit],
+        );
+        // Going to another branch still draws it, the index asked once `HEAD` moved.
+        s.private(&root).git(["merge", "--abort"]).succeeds();
+        edited(&root);
+        let unmerged: &[&str] = &["ls-files", "-u", "-z"];
+        let words = &["checkout", "-mq", "side"];
+        let after = [head, commit, unmerged];
+        asked_around(s, &root, words, End::Code(0), &[head, commit], &after);
+    });
+}
+
+#[test]
+fn changes_carried_to_another_commit_get_the_hint_whatever_head_names() {
+    under_each_release(|s| {
+        let root = fixture(s);
+        // From a detached `HEAD` to another commit, and on `main` reset to `side`'s commit:
+        // the branch `HEAD` names stays, the commit moves, and the changes are carried.
+        for (setup, words) in [
+            (
+                &["checkout", "-q", "--detach", "main"][..],
+                &["checkout", "-m", "side^0"][..],
+            ),
+            (
+                &["switch", "-q", "main"],
+                &["checkout", "-m", "-B", "main", "side"],
+            ),
+        ] {
+            again(s, &root);
+            s.private(&root).git(["reset", "-q", "--hard"]).succeeds();
+            s.private(&root).git(setup).succeeds();
+            edited(&root);
+            let ours = hinted(s, &root, words, &MERGED_CHANGES);
+            assert_eq!(ours.end, End::Code(0), "{words:?}: {ours:?}");
+            s.private(&root).git(["reset", "-q", "--hard"]).succeeds();
+            s.private(&root).git(["stash", "clear"]).succeeds();
+        }
     });
 }

@@ -44,11 +44,12 @@ status are unchanged:
   a rebase or am that ends with one stopped
   a pull whose rebase stops, at a conflict or at an edit
   a merge, rebase, or pull whose autostash comes back with conflicts
+  a merge, or a pull, that fails and leaves a merge in progress
   a cherry-pick or revert without -n that fails, leaving one stopped
   a commit that exits 1 while a cherry-pick is stopped
   a commit --amend without --allow-empty that exits 1, as empty ones do
   a checkout or switch without --detach or -q that detaches HEAD
-  a checkout -m or switch -m whose local changes come back with conflicts
+  a checkout -m or switch -m to another branch whose changes conflict
   a branch -d, in any spelling, that exits 1
   a failed push that names no remote while the configuration chooses none
   a push or pull on a branch with no upstream, even one with no commit
@@ -85,3 +86,18 @@ While a rebase stands stopped, a cherry-pick or revert gets no hint, and a
 commit that exits 1 while a cherry-pick is stopped gets the rebase's, as
 where the rebase stopped at a pick that became empty. A stopped am is no
 rebase: beside one, each gets its hint as anywhere else.
+
+A merge that stops at its conflicts, and a second merge or a pull that Git
+refuses while it stands, get the hint that names git dupe add <path>, git dupe
+merge --continue, and git dupe merge --abort, where Git's own message says only
+to fix the conflicts and commit; for a pull it comes in place of any other. A merge Git refuses before
+starting, over a local change or a commit it cannot find, leaves none in
+progress and gets none. A checkout -m given paths re-creates their conflicts
+and switches no branch: it gets no hint.
+
+One hint answers no message of Git's: after a git dupe mv that moves a
+directory .gitdupe lists to a place nothing hides, it names git dupe hide of
+the new name and then git dupe unhide of the old, run from the root, which
+move the listing with it, or, where a name holds *, ?, or [, the edit of
+.gitdupe that does; where the project tracks a path under the new name, which
+git dupe hide refuses, it names the git dupe mv that moves it back.

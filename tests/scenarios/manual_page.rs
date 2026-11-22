@@ -456,6 +456,11 @@ fn the_page_explains_what_the_general_text_has_no_room_for() {
                 "A path is tracked by one repository or the other.",
                 "git dupe add never stages a file only the project's Git tracks",
                 "git rm --cached README.md, which stages its deletion from the project, a deletion every other clone receives once it is committed and pushed, and then git dupe add README.md, with -f where the project ignores it, which tracks it privately.",
+                // The rename's order, which `rename_recipe` follows.
+                "To rename a hidden directory, hide the new name first, then move, then unhide the old name, each run from the root: git dupe hide journal/, then git dupe mv notes journal, then git dupe unhide notes.",
+                "where git dupe hide refuses the new name, stop there: nothing has moved.",
+                "No step lets the project's Git see a file of yours, unless a rule of the project's re-includes the new name, which a warning then names with its file and line",
+                "A public git mv of a directory that holds private files moves them too, to paths nothing hides, and needs the same care: hide each one's new path before the move; git dupe add -A then records it, with git dupe add -f for a moved file the project ignores.",
             ],
         ),
         (
@@ -515,6 +520,11 @@ fn the_page_explains_what_the_general_text_has_no_room_for() {
                 "a push into another worktree's private repository that exits 1",
                 "names the private repository of another worktree of the project, gets in place of the hint that names git dupe pull the one that names git dupe push <remote> HEAD:refs/heads/<name>",
                 "a branch of a name no branch or tag there has, and git dupe merge <name>, run in that worktree, which takes it",
+                "a merge, or a pull, that fails and leaves a merge in progress",
+                "a checkout -m or switch -m to another branch whose changes conflict",
+                "get the hint that names git dupe add <path>, git dupe merge --continue, and git dupe merge --abort",
+                "A checkout -m given paths re-creates their conflicts and switches no branch: it gets no hint.",
+                "after a git dupe mv that moves a directory .gitdupe lists to a place nothing hides, it names git dupe hide of the new name and then git dupe unhide of the old",
             ],
         ),
         (

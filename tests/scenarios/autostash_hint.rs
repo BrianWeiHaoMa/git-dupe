@@ -4,19 +4,20 @@
 //! under `--quit`, which `pull` lacks. One `hint:` follows Git's output, naming
 //! `git dupe add`, `git dupe stash drop`, `git dupe reset --hard`, and `git dupe stash pop`,
 //! whether `--autostash` or the configuration asked for the autostash. A merge stopped by
-//! its own conflicts exits 1 and gets none, as does a pull stopped by its merge's
-//! conflicts; a stopped rebase, a pull's included, gets its own line; a `--quit`, which exits 0
-//! leaving its conflicts unmerged and any autostash unapplied in the stash, gets none. The
-//! question is one `ls-files -u -z` after a run that exited 0 and left no stop, and none
-//! after any other end (G22).
+//! its own conflicts exits 1 and gets the line of a merge in progress, not this one, as does
+//! a pull stopped by its merge's conflicts; a stopped rebase, a pull's included, gets its own
+//! line; a `--quit`, which exits 0 leaving its conflicts unmerged and any autostash
+//! unapplied in the stash, gets none. The question is one `ls-files -u -z` after a run that
+//! exited 0 and left no stop, and none after any other end, where a merge or a pull asks
+//! about a merge in progress instead (G22).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, STOPPED_REBASE_HINT, Scenario, asked_after, dupe_succeeds, gits_then_one_hint, hinted,
-    private_add, private_alias, private_commit, text, transfer_asked_after, under_each_release,
-    unhinted, write,
+    End, MERGE_HEAD, MERGE_IN_PROGRESS_HINT as MERGE, STOPPED_REBASE_HINT, Scenario, asked_after,
+    dupe_succeeds, gits_then_one_hint, hinted, holds, private_add, private_alias, private_commit,
+    text, transfer_asked_after, under_each_release, unhinted, write,
 };
 
 /// The commands the hint after an autostash that came back with conflicts names.
@@ -204,16 +205,20 @@ fn a_merge_or_rebase_that_stops_or_brings_nothing_back_gets_no_autostash_hint() 
             .succeeds();
         let clean = unhinted(s, &root, &["merge", "--no-edit", "side"]);
         assert_eq!(clean.end, End::Code(0), "{clean:?}");
-        // A merge stopped by its own conflicts leaves unmerged entries and exits 1: Git's
-        // advice there names a bare commit, and the rule owes no hint.
+        // A merge stopped by its own conflicts leaves unmerged entries and exits 1: the line
+        // of a merge in progress, not the autostash's.
         s.private(&root)
             .git(["reset", "-q", "--hard", "start"])
             .succeeds();
         write(&root, "notes.txt", b"main\n");
         private_add(s, &root, "notes.txt");
         private_commit(s, &root);
-        let conflicted = unhinted(s, &root, &["merge", "--no-edit", "side"]);
+        let conflicted = hinted(s, &root, &["merge", "--no-edit", "side"], &MERGE);
         assert_eq!(conflicted.end, End::Code(1), "{conflicted:?}");
+        assert!(
+            !holds(&conflicted.stderr, b"'git dupe stash drop'"),
+            "{conflicted:?}"
+        );
         assert!(unmerged(s, &root));
         let aborted = unhinted(s, &root, &["merge", "--abort"]);
         assert_eq!(aborted.end, End::Code(0), "{aborted:?}");
@@ -262,7 +267,8 @@ fn the_unmerged_entries_are_asked_about_once_after_a_run_that_exited_0() {
         write(&root, "notes.txt", b"main\n");
         private_add(s, &root, "notes.txt");
         private_commit(s, &root);
-        asked_after(s, &root, &merge, End::Code(1), &[]);
+        // Stopped by its own conflicts, exit 1: asked whether a merge is in progress.
+        asked_after(s, &root, &merge, End::Code(1), &[MERGE_HEAD]);
         asked_after(
             s,
             &root,
@@ -326,15 +332,16 @@ fn a_pull_whose_autostash_comes_back_with_conflicts_ends_with_the_same_hint() {
             &["pull", "--autostash", "--no-rebase", "--no-edit"],
         );
         assert_eq!(clean.end, End::Code(0), "{clean:?}");
-        // A pull stopped by its merge's conflicts exits 1: none, Git's advice there naming
-        // a bare commit. Stopped by its rebase's, it gets the stop's line (`Holds/G18`).
+        // A pull stopped by its merge's conflicts exits 1: the line of a merge in progress.
+        // Stopped by its rebase's, it gets the stop's line (`Holds/G18`).
         s.private(&root)
             .git(["reset", "-q", "--hard", "start"])
             .succeeds();
         write(&root, "notes.txt", b"main\n");
         private_add(s, &root, "notes.txt");
         private_commit(s, &root);
-        let conflicted = unhinted(s, &root, &["pull", "--no-rebase", "--no-edit"]);
+        let words = ["pull", "--no-rebase", "--no-edit"];
+        let conflicted = hinted(s, &root, &words, &MERGE);
         assert_eq!(conflicted.end, End::Code(1), "{conflicted:?}");
         assert!(unmerged(s, &root));
         s.git(["dupe", "merge", "--abort"]).from(&root).succeeds();
@@ -355,13 +362,13 @@ fn the_unmerged_entries_are_asked_about_once_after_a_pull_that_exited_0() {
         // Given a refspec, `HEAD` is not read; the words after it are options to Git.
         let refspec = ["pull", "origin", "main", "--no-rebase", "--no-edit"];
         transfer_asked_after(s, &root, &refspec, End::Code(0), false, &[unmerged_entries]);
-        // Stopped by its merge's conflicts, exit 1: nothing asked.
+        // Stopped by its merge's conflicts, exit 1: asked whether a merge is in progress.
         s.private(&root)
             .git(["reset", "-q", "--hard", "start"])
             .succeeds();
         write(&root, "notes.txt", b"main\n");
         private_add(s, &root, "notes.txt");
         private_commit(s, &root);
-        transfer_asked_after(s, &root, &pull, End::Code(1), true, &[]);
+        transfer_asked_after(s, &root, &pull, End::Code(1), true, &[MERGE_HEAD]);
     });
 }

@@ -81,6 +81,13 @@ pub fn read(workspace: &Workspace) -> Listed {
     reading(workspace, staged)
 }
 
+/// The paths `.gitdupe` lists, read as `read` reads it, for a line that names them: none
+/// where it is unreadable. It runs Git only where `read` does, for the staged version
+/// (G22).
+pub fn listed_paths(workspace: &Workspace) -> Vec<Vec<u8>> {
+    read(workspace).paths
+}
+
 /// What the file on disk lists, the staged version never asked for: what `detach --force`
 /// reads where the private repository cannot be listed (`Holds/G3`).
 pub fn on_disk(workspace: &Workspace) -> Listed {

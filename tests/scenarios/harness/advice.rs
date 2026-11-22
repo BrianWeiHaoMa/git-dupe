@@ -23,6 +23,18 @@ pub const IGNORED_HINT: [&[u8]; 2] = [
     b"'git dupe config advice.addIgnoredFile false'",
 ];
 
+/// The commands the hint after a private `merge` or `pull` that left a merge in progress
+/// names, and the plain one it says acts on the project's repository.
+pub const MERGE_IN_PROGRESS_HINT: [&[u8]; 4] = [
+    b"'git dupe add <path>'",
+    b"'git dupe merge --continue'",
+    b"'git dupe merge --abort'",
+    b"plain 'git add'",
+];
+
+/// The question of a merge in progress, after a `merge` or a `pull` that did not exit 0.
+pub const MERGE_HEAD: &[&str] = &["rev-parse", "-q", "--verify", "MERGE_HEAD"];
+
 /// The commands the hint after a private rebase that stopped names, at a conflict, an
 /// `edit` or `break` stop, a reword whose editor failed, or a todo list Git could not read.
 pub const STOPPED_REBASE_HINT: [&[u8]; 7] = [
@@ -194,18 +206,35 @@ pub fn succeeded_without_a_hint(output: &Output) {
 /// each with exactly its words, and settle's three: the questions its hint put to the
 /// private repository, fixed for the words and the end (G22).
 pub fn asked_after(s: &Scenario, root: &Path, words: &[&str], ended: End, questions: &[&[&str]]) {
+    asked_around(s, root, words, ended, &[], questions);
+}
+
+/// As `asked_after`, with `before` the questions its hint put to the private repository
+/// before the run, between the alias lookup and the run of the words.
+pub fn asked_around(
+    s: &Scenario,
+    root: &Path,
+    words: &[&str],
+    ended: End,
+    before: &[&[&str]],
+    after: &[&[&str]],
+) {
     let (output, runs) = run_traced(
         s.git(["dupe"].iter().chain(words)).from(root),
         &s.dir().join("trace"),
     );
     assert_eq!(output.end, ended, "{words:?}: {output:?}");
     let runs = runs.own();
-    let mut commands = vec![&b"rev-parse"[..], b"config", words[0].as_bytes()];
-    commands.extend(questions.iter().map(|question| question[0].as_bytes()));
+    let questions: Vec<&[&str]> = before.iter().chain(after).copied().collect();
+    let mut commands = vec![&b"rev-parse"[..], b"config"];
+    commands.extend(before.iter().map(|question| question[0].as_bytes()));
+    commands.push(words[0].as_bytes());
+    commands.extend(after.iter().map(|question| question[0].as_bytes()));
     commands.extend([&b"ls-files"[..], b"ls-files", b"check-ignore"]);
     assert_eq!(runs.commands(), commands, "{words:?}");
     for (at, question) in questions.iter().enumerate() {
-        assert_eq!(runs.words()[3 + at], run_words(question), "{words:?}");
+        let at = if at < before.len() { 2 + at } else { 3 + at };
+        assert_eq!(runs.words()[at], run_words(question), "{words:?}");
     }
 }
 

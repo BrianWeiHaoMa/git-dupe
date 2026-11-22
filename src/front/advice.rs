@@ -1,10 +1,12 @@
 //! The hint after a word passed through whose outcome Git's advice names a plain `git`
 //! command for (`Holds/G19`, G25): `rebase` and `am` stopped, `rebase` and `merge` whose
-//! autostash came back with conflicts, `cherry-pick` and `revert` stopped, `commit
-//! --amend` refusing and `commit` refusing while a cherry-pick or a rebase's pick stands,
-//! `checkout` and `switch` leaving a branch for a detached `HEAD` or `-m` leaving
-//! conflicts, and `branch -d` refusing. Copied under `git dupe`, Git's command would act on the project's repository;
-//! the hint names the `git dupe` form.
+//! autostash came back with conflicts, a `merge` that left a merge in progress,
+//! `cherry-pick` and `revert` stopped, `commit --amend` refusing and `commit` refusing
+//! while a cherry-pick or a rebase's pick stands, `checkout` and `switch` leaving a branch
+//! for a detached `HEAD` or, given `-m`, going to another branch with conflicts, and
+//! `branch -d` refusing. Copied under `git dupe`, Git's command would act on the project's
+//! repository; the hint names the `git dupe` form. The hint after a `mv` of a directory
+//! `.gitdupe` lists, which answers no advice of Git's, is `rename`'s.
 //!
 //! What the code below cannot show:
 //!
@@ -44,24 +46,33 @@
 //!   it have not held, and a question that answers with any status but its two ends the
 //!   decision with no hint, the command's status as it was.
 //! - The runs an entry adds are fixed for its words (G22, R4): `checkout` and `switch` ask
-//!   the private `symbolic-ref -q HEAD` before the run and, after one that exited 0, again,
-//!   both only where the words admit the hint; `cherry-pick` and `revert` ask `rev-parse
-//!   -q --verify` of their pseudo-reference after a run that did not exit 0, and `commit`
-//!   without `--amend` asks it of `CHERRY_PICK_HEAD` alone after a run that exited 1;
-//!   `merge`, `rebase` where it left no stop, and `checkout` and `switch` given `-m` where
-//!   no detached `HEAD` decided, ask one `ls-files -u -z` after a run that exited 0, from
-//!   the root, because `ls-files` lists only what lies below its
-//!   directory; `am`, `branch`, and `commit --amend` add none. The `symbolic-ref` before
-//!   the run decides nothing about the run (N8).
+//!   the private `symbolic-ref -q HEAD` before the run and, after one that exited 0, once
+//!   again, both only where the words admit a hint, the one answer after the run serving
+//!   the detached `HEAD` and `-m` alike; `cherry-pick` and `revert` ask `rev-parse -q
+//!   --verify` of their pseudo-reference, and `merge` of `MERGE_HEAD`, after a run that did
+//!   not exit 0, and `commit` without `--amend` asks it of `CHERRY_PICK_HEAD` alone after a
+//!   run that exited 1; `merge`, `rebase` where it left no stop, and `checkout` and
+//!   `switch` given `-m` where no detached `HEAD` decided and `HEAD` moved, ask one
+//!   `ls-files -u -z` after a run that exited 0, from the root, because `ls-files` lists
+//!   only what lies below its directory; `am`, `branch`, and `commit --amend` add none. The
+//!   `symbolic-ref` before the run decides nothing about the run (N8).
 //! - An index entry left unmerged by a `rebase` or `merge` that exited 0 has one cause, an
 //!   autostash that came back with conflicts and stays a stash entry (S12), whether
 //!   `--autostash` or the configuration asked for it, so the index is asked and not the
 //!   words; but for `--quit`, which ends the operation leaving its conflicts in the index
 //!   and an autostash, where there is one, unapplied in the stash, so that the line and its
-//!   `stash drop` would be false there. `merge` keeps no stop of its own, so its entry reads
-//!   no directory. After `checkout -m` or `switch -m` such an entry is a local change whose
-//!   merge conflicted, which only from 2.55.0 Git keeps as a stash entry (S12): its line is
-//!   conditioned on that entry, which nothing it reads can prove.
+//!   `stash drop` would be false there. `merge` keeps no stop directory of its own, so its
+//!   autostash entry reads none. After `checkout -m` or `switch -m` such an entry is a local
+//!   change whose merge conflicted, which only from 2.55.0 Git keeps as a stash entry (S12):
+//!   its line is conditioned on that entry, which nothing it reads can prove. It follows
+//!   only where `HEAD` names another branch after the run than before it, or moved onto or
+//!   off a branch: a `checkout -m` given paths, which re-creates their conflicts and
+//!   switches nothing, carried no change and kept no entry, however its words are spelled.
+//! - A `merge` that did not exit 0 has left a merge in progress exactly where `MERGE_HEAD`
+//!   names a commit after it (S12): a conflict, and a second `merge` Git refused because
+//!   the first stands; one Git refused before starting, over local changes or a word that
+//!   names no commit, and a `--squash`, write none. A rebase stopped beside it is the
+//!   rebase's to go on with.
 //! - `CHERRY_PICK_HEAD` and `REVERT_HEAD` are asked of Git, because they live in the
 //!   reference store, which may hold no file for them (S15); a rebase's stop is in the
 //!   Git directory in every store, read by `lstat` (S12), after the pseudo-reference, so
@@ -87,7 +98,7 @@ use std::fs;
 use std::path::Path;
 
 use super::lines::{self, Level};
-use super::outcome::Outcome;
+use super::outcome::{self, Outcome};
 use crate::runner::{Against, End, Run};
 
 // `--skip` is described by the commit it leaves out: at an `edit`, `break`, or reword
@@ -130,6 +141,13 @@ const UNMERGED: &[u8] = b"'git dupe branch -D <branch>' deletes a private branch
     'git dupe branch -d' keeps because it is not fully merged; plain 'git branch -D' acts on \
     the project's repository";
 
+/// The line after a run that left a private merge in progress: its one text, which a
+/// `pull` that stopped the same way shares.
+pub(super) const MERGE: &[u8] = b"a private merge is in progress: once 'git dupe add <path>' \
+    has marked each conflict resolved, 'git dupe merge --continue' concludes it, and \
+    'git dupe merge --abort' gives it up; plain 'git add', 'git commit', and 'git merge' act \
+    on the project's repository";
+
 /// The line after a run whose autostash came back with conflicts: its one text.
 pub(super) const AUTOSTASH: &[u8] = b"the private changes Git stashed before merging or \
     rebasing came back with conflicts, and the stash entry still holds them: once \
@@ -155,7 +173,7 @@ const MERGED_CHANGES: &[u8] = b"the private changes carried across the switch ca
 
 /// The entries of the table, in its order: where a word has several, the first whose
 /// words, end, and state hold decides.
-const FAMILIES: [Family; 13] = [
+const FAMILIES: [Family; 14] = [
     Family {
         word: b"rebase",
         excluding: None,
@@ -178,6 +196,13 @@ const FAMILIES: [Family; 13] = [
         line: AUTOSTASH,
     },
     Family {
+        word: b"merge",
+        excluding: None,
+        requiring: None,
+        trigger: Trigger::InProgress("MERGE_HEAD"),
+        line: MERGE,
+    },
+    Family {
         word: b"am",
         excluding: None,
         requiring: None,
@@ -188,14 +213,14 @@ const FAMILIES: [Family; 13] = [
         word: b"cherry-pick",
         excluding: Some(reads_as_no_commit),
         requiring: None,
-        trigger: Trigger::Picking("CHERRY_PICK_HEAD"),
+        trigger: Trigger::InProgress("CHERRY_PICK_HEAD"),
         line: CHERRY_PICK,
     },
     Family {
         word: b"revert",
         excluding: Some(reads_as_no_commit),
         requiring: None,
-        trigger: Trigger::Picking("REVERT_HEAD"),
+        trigger: Trigger::InProgress("REVERT_HEAD"),
         line: REVERT,
     },
     Family {
@@ -237,14 +262,14 @@ const FAMILIES: [Family; 13] = [
         word: b"checkout",
         excluding: None,
         requiring: Some(reads_as_merge),
-        trigger: Trigger::Unmerged,
+        trigger: Trigger::Carried,
         line: MERGED_CHANGES,
     },
     Family {
         word: b"switch",
         excluding: None,
         requiring: Some(reads_as_merge),
-        trigger: Trigger::Unmerged,
+        trigger: Trigger::Carried,
         line: MERGED_CHANGES,
     },
 ];
@@ -285,9 +310,9 @@ const AN_AM_STOPPED: &[Marker] = &[Marker::Holding("rebase-apply", "applying")];
 enum Trigger {
     /// A run of any end, while one of these markers stands.
     Stopped(&'static [Marker]),
-    /// A run that did not exit 0, while `rev-parse -q --verify` of this name exits 0 and
-    /// no rebase stands stopped.
-    Picking(&'static str),
+    /// A run that did not exit 0, while `rev-parse -q --verify` of this name exits 0 — a
+    /// pick, a revert, or a merge in progress — and no rebase stands stopped.
+    InProgress(&'static str),
     /// A run that exited 1, while `rev-parse -q --verify` of this name exits 0: the
     /// rebase's line where a rebase stands stopped, and the family's otherwise.
     ExitedOneWhile(&'static str),
@@ -296,6 +321,9 @@ enum Trigger {
     /// A run that exited 0 and left a branch for a detached `HEAD`: `symbolic-ref -q HEAD`
     /// exited 0 before it and exits 1 after it.
     Detached,
+    /// A run that exited 0 and moved `HEAD`, `symbolic-ref -q HEAD` answering otherwise
+    /// after it than before it, while `ls-files -u -z` lists an unmerged entry.
+    Carried,
     /// A run that exited 1.
     ExitedOne,
 }
@@ -309,6 +337,8 @@ enum Question {
     Verifies(&'static str),
     /// Whether `symbolic-ref -q HEAD` finds `HEAD` on a branch, or detached.
     OnABranch,
+    /// Whether `symbolic-ref -q HEAD` answers otherwise after the run than before it.
+    Moved,
     /// Whether `ls-files -u -z` lists an unmerged entry.
     Unmerged,
 }
@@ -321,39 +351,115 @@ pub(super) enum Answer {
     Unanswered,
 }
 
-/// What may follow a run, decided from its words, and for a detached `HEAD` from the
-/// state, before it starts: the entries the words admit, in the table's order.
-pub struct Then(Vec<&'static Family>);
+/// Where `HEAD` stands, as `symbolic-ref -q HEAD` answers (S12): the branch it names, an
+/// unborn one included, or detached; and, where an entry asks, the commit it names, as
+/// `rev-parse -q --verify HEAD` answers, none on an unborn branch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Standing {
+    head: Head,
+    commit: Option<Option<Vec<u8>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Head {
+    On(Vec<u8>),
+    Detached,
+}
+
+/// What may follow a run, decided from its words, and for the entries that read `HEAD`
+/// from the state, before it starts: the entries the words admit, in the table's order,
+/// and where `HEAD` stood when one of them reads it.
+pub struct Then {
+    families: Vec<&'static Family>,
+    standing: Option<Standing>,
+}
+
+impl Then {
+    /// Whether an entry reads the commit `HEAD` names: one for changes carried across
+    /// a move of `HEAD`, which a branch's line alone does not show (`checkout -m` to
+    /// another commit from a detached `HEAD`, or with `-B` of the branch it is on).
+    fn reads_the_commit(&self) -> bool {
+        self.families
+            .iter()
+            .any(|family| family.trigger == Trigger::Carried)
+    }
+}
 
 /// What may follow the run of `words`, the command word first, against the repository
 /// `against` names.
 pub fn before(words: &[Vec<u8>], against: Against) -> Then {
     if against.private_repository().is_none() {
-        return Then(Vec::new());
+        return Then {
+            families: Vec::new(),
+            standing: None,
+        };
     }
-    Then(before_asking(words, |question| asked(question, against)))
+    before_asking(words, |commit| standing(against, commit))
 }
 
 /// Writes the hint, after a run that ended as `ended`, of the first entry whose end and
-/// state hold.
+/// state hold. Where `HEAD` stands after the run is asked once, whichever entries read it.
 pub fn after(then: Then, ended: &Outcome, against: Against) {
     let Outcome::Git(end) = ended else {
         return;
     };
-    if let Some(line) = decided(&then.0, end, |question| asked(question, against)) {
+    let commit = then.reads_the_commit();
+    let mut after_the_run: Option<Option<Standing>> = None;
+    let line = decided(&then.families, end, |question| {
+        let mut now = || {
+            after_the_run
+                .get_or_insert_with(|| standing(against, commit))
+                .clone()
+        };
+        match question {
+            Question::OnABranch => match now() {
+                Some(Standing {
+                    head: Head::On(_), ..
+                }) => Answer::Yes,
+                Some(_) => Answer::No,
+                None => Answer::Unanswered,
+            },
+            Question::Moved => match (now(), &then.standing) {
+                (Some(now), Some(before)) if now == *before => Answer::No,
+                (Some(_), Some(_)) => Answer::Yes,
+                _ => Answer::Unanswered,
+            },
+            other => asked(other, against),
+        }
+    });
+    if let Some(line) = line {
         lines::write(Level::Hint, line);
     }
 }
 
-/// The entries `words` admit, those for a detached `HEAD` only where `ask` finds `HEAD` on
-/// a branch before the run.
-fn before_asking(words: &[Vec<u8>], ask: impl FnOnce(Question) -> Answer) -> Vec<&'static Family> {
-    let mut families = admitted(words);
-    let detached = |family: &&Family| family.trigger == Trigger::Detached;
-    if families.iter().any(detached) && ask(Question::OnABranch) != Answer::Yes {
-        families.retain(|family| !detached(family));
+/// The entries `words` admit, and, where one of them reads `HEAD`, where `standing` finds
+/// it before the run, the commit too where an entry reads it: those for a detached `HEAD`
+/// only where it is on a branch, and none that reads it where `standing` answers nothing.
+fn before_asking(words: &[Vec<u8>], standing: impl FnOnce(bool) -> Option<Standing>) -> Then {
+    let mut then = Then {
+        families: admitted(words),
+        standing: None,
+    };
+    let reads_head =
+        |family: &&Family| matches!(family.trigger, Trigger::Detached | Trigger::Carried);
+    if !then.families.iter().any(reads_head) {
+        return then;
     }
-    families
+    let found = standing(then.reads_the_commit());
+    then.families
+        .retain(|family| match (family.trigger, &found) {
+            (
+                Trigger::Detached,
+                Some(Standing {
+                    head: Head::On(_), ..
+                }),
+            )
+            | (Trigger::Carried, Some(_)) => true,
+            (Trigger::Detached | Trigger::Carried, _) => false,
+            _ => true,
+        });
+    then.standing = found;
+    then
 }
 
 /// The entries whose word begins `words` and whose hint the rest admit, in the table's
@@ -464,7 +570,7 @@ fn follows(
     let exited_1 = *end == End::Code(1);
     let holds = match family.trigger {
         Trigger::Stopped(markers) => ask(Question::Stopped(markers)) == Answer::Yes,
-        Trigger::Picking(name) => {
+        Trigger::InProgress(name) => {
             !exited_0
                 && ask(Question::Verifies(name)) == Answer::Yes
                 && ask(Question::Stopped(A_REBASE_STOPPED)) == Answer::No
@@ -481,23 +587,72 @@ fn follows(
         }
         Trigger::Unmerged => exited_0 && ask(Question::Unmerged) == Answer::Yes,
         Trigger::Detached => exited_0 && ask(Question::OnABranch) == Answer::No,
+        Trigger::Carried => {
+            exited_0
+                && ask(Question::Moved) == Answer::Yes
+                && ask(Question::Unmerged) == Answer::Yes
+        }
         Trigger::ExitedOne => exited_1,
     };
     holds.then_some(family.line)
 }
 
-/// The answer of the private repository `against` names.
+/// The answer of the private repository `against` names to a question that is not where
+/// `HEAD` stands, which `after` answers.
 fn asked(question: Question, against: Against) -> Answer {
-    let words = match question {
+    let name = match question {
         Question::Stopped(markers) => return stopped(against, markers),
         Question::Unmerged => return unmerged(against),
-        Question::Verifies(name) => ["rev-parse", "-q", "--verify", name].to_vec(),
-        Question::OnABranch => ["symbolic-ref", "-q", "HEAD"].to_vec(),
+        Question::Verifies(name) => name,
+        Question::OnABranch | Question::Moved => return Answer::Unanswered,
     };
-    match Run::against(against, words).capture_output().start() {
+    match Run::against(against, ["rev-parse", "-q", "--verify", name])
+        .capture_output()
+        .start()
+    {
         Ok(finished) if finished.end == End::Code(0) => Answer::Yes,
         Ok(finished) if finished.end == End::Code(1) => Answer::No,
         _ => Answer::Unanswered,
+    }
+}
+
+/// Where `HEAD` stands in the private repository `against` names, the commit it names too
+/// where `commit` asks: any answer of either run but its two answers nothing.
+fn standing(against: Against, commit: bool) -> Option<Standing> {
+    let head = match head_line(against) {
+        Ok(Some(line)) => Head::On(line),
+        Ok(None) => Head::Detached,
+        Err(_) => return None,
+    };
+    let commit = match commit {
+        false => None,
+        true => {
+            let finished = Run::against(against, ["rev-parse", "-q", "--verify", "HEAD"])
+                .capture_output()
+                .start()
+                .ok()?;
+            match finished.end {
+                End::Code(0) => Some(Some(finished.stdout)),
+                End::Code(1) => Some(None),
+                _ => return None,
+            }
+        }
+    };
+    Some(Standing { head, commit })
+}
+
+/// The line of one private `symbolic-ref -q HEAD` in the repository `against` names: the
+/// branch `HEAD` is on, an unborn one included, exit 0, or none where it is detached, exit
+/// 1 (S12); an empty line on a branch cannot be read. The one reader of where `HEAD`
+/// stands, `transfer`'s too.
+pub(super) fn head_line(against: Against) -> Result<Option<Vec<u8>>, Outcome> {
+    let run = Run::against(against, ["symbolic-ref", "-q", "HEAD"]).capture_output();
+    let finished = run.start().map_err(outcome::not_started)?;
+    match finished.end {
+        End::Code(0) if finished.stdout.is_empty() => Err(outcome::unreadable()),
+        End::Code(0) => Ok(Some(finished.stdout)),
+        End::Code(1) => Ok(None),
+        end => Err(Outcome::Git(end)),
     }
 }
 

@@ -36,6 +36,7 @@ mod lines;
 mod outcome;
 mod passthrough;
 mod places;
+mod rename;
 mod sequence;
 mod stash;
 mod status;

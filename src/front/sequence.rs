@@ -274,7 +274,7 @@ fn answered_unlocated(
     let passed = help_request(&read)?;
     Some(match obstruction {
         Some(obstruction) => outcome::obstructed(obstruction),
-        None => passed.run(against, || unlocated.facts()),
+        None => passed.run(against, None, || unlocated.facts()),
     })
 }
 
@@ -398,7 +398,8 @@ fn run_passed(passed: Passed, workspace: &Workspace) -> Outcome {
         git_directory: &private,
         root: workspace.root(),
     };
-    passed.run(against, || Some(workspace.facts()))
+    let attached = workspace.attached().then_some(workspace);
+    passed.run(against, attached, || Some(workspace.facts()))
 }
 
 /// How a command ends where the workspace was not located: with Git's message and status,

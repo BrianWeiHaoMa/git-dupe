@@ -19,8 +19,9 @@
 //!   `push` or `pull`, decided from the guard's records and the private repository's
 //!   state (`transfer`), and after a word passed through (`advice`), which reads the
 //!   words Git runs for its help request, an alias's expansion included, and asks
-//!   nothing where no private repository stands; never after `stash` or `git dupe git`
-//!   (G20).
+//!   nothing where no private repository stands; after a `mv` that moved a directory
+//!   `.gitdupe` lists, in an attached workspace (`rename`), which answers no advice of
+//!   Git's; never after `stash` or `git dupe git` (G20).
 //! - Where no workspace is attached, a help request after a word passed through, after
 //!   `stash`, or after one of the four is the only thing that runs, unread, after the
 //!   same guard (`Holds/G24`). The four's guard compares there too, from the facts of
@@ -31,9 +32,10 @@
 
 use super::advice;
 use super::outcome::{self, Outcome};
+use super::rename;
 use super::stash;
 use super::transfer;
-use crate::runner::locate::Facts;
+use crate::runner::locate::{Facts, Workspace};
 use crate::runner::{Against, Run};
 
 /// A command Git runs as itself once its guard has passed, with the words its run is
@@ -56,8 +58,14 @@ impl Passed<'_> {
     /// Its guard, then its run against the repository `against` names. `facts` gives
     /// where the command stands, for a guard that compares destinations, and nothing
     /// outside any repository; it is asked only by such a guard, which also asks the
-    /// repository `against` names for its remotes where that is a private one.
-    pub fn run(self, against: Against, facts: impl FnOnce() -> Option<Facts>) -> Outcome {
+    /// repository `against` names for its remotes where that is a private one. `attached`
+    /// is the workspace where one is attached, whose list a word's hint may read.
+    pub fn run(
+        self,
+        against: Against,
+        attached: Option<&Workspace>,
+        facts: impl FnOnce() -> Option<Facts>,
+    ) -> Outcome {
         match self {
             Passed::Stash(words) if stash::refused(&words[1..]) => outcome::refuse(stash::REFUSAL),
             Passed::Transfer(words) => {
@@ -73,8 +81,13 @@ impl Passed<'_> {
             }
             Passed::Word(words, read) => {
                 let then = advice::before(read, against);
+                let renaming =
+                    attached.map(|workspace| (rename::before(read, workspace), workspace));
                 let ended = run(against, words);
                 advice::after(then, &ended, against);
+                if let Some((renaming, workspace)) = renaming {
+                    rename::after(renaming, &ended, workspace);
+                }
                 ended
             }
             Passed::Stash(words) | Passed::Git(words) => run(against, words),

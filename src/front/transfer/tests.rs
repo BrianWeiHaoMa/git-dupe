@@ -198,19 +198,21 @@ fn holds_bytes(text: &[u8], part: &[u8]) -> bool {
     text.windows(part.len()).any(|window| window == part)
 }
 
+/// After a `pull` that did not exit 0, the questions that find no merge in progress: a
+/// rebase stopped, by `lstat`, and then `MERGE_HEAD`.
+const NO_MERGE: [(Question, Answer); 2] = [
+    (Question::RebaseStopped, Answer::No),
+    (Question::Merging, Answer::No),
+];
+
 /// In the table's order, the first that holds: a branch with no upstream after 1, an
 /// unchosen way after 128, a detached `HEAD` after 1, fast-forward only after 128; after 0
-/// alone, the one question.
+/// alone, the one question. Each after no merge in progress was found.
 #[test]
 fn a_pull_hints_in_the_tables_order_the_first_that_holds() {
     // Given a URL or a path, Git has the remote's `HEAD` to merge, and its advice after 128
     // is the divergent-branches or the fast-forward-only one.
-    let others = [
-        git(2),
-        git(129),
-        Outcome::Git(End::Signal(1)),
-        Outcome::Refused,
-    ];
+    let others = [git(2), git(129), Outcome::Git(End::Signal(1))];
     for (unnamed, line) in [
         (Unnamed::NoUpstream, NOT_TRACKING),
         (Unnamed::Detached, DETACHED_PULL),
@@ -221,11 +223,13 @@ fn a_pull_hints_in_the_tables_order_the_first_that_holds() {
             (Some(Diverging::FastForwardOnly), Some(FAST_FORWARD_ONLY)),
         ] {
             let then = pull(Some(unnamed), diverging);
-            assert_eq!(unasked(&then, &git(1)).as_deref(), Some(line), "{then:?}");
-            assert_eq!(unasked(&then, &git(128)).as_deref(), after_128, "{then:?}");
+            let after = |ended| answering(&then, &ended, &NO_MERGE);
+            assert_eq!(after(git(1)).as_deref(), Some(line), "{then:?}");
+            assert_eq!(after(git(128)).as_deref(), after_128, "{then:?}");
             for ended in &others {
-                assert_eq!(unasked(&then, ended), None, "{then:?}");
+                assert_eq!(answering(&then, ended, &NO_MERGE), None, "{then:?}");
             }
+            assert_eq!(unasked(&then, &Outcome::Refused), None, "{then:?}");
         }
     }
     for (diverging, line) in [
@@ -233,16 +237,68 @@ fn a_pull_hints_in_the_tables_order_the_first_that_holds() {
         (Diverging::FastForwardOnly, FAST_FORWARD_ONLY),
     ] {
         let then = pull(None, Some(diverging));
-        assert_eq!(unasked(&then, &git(128)).as_deref(), Some(line));
+        assert_eq!(
+            answering(&then, &git(128), &NO_MERGE).as_deref(),
+            Some(line)
+        );
         // Exit 1 with no rebase stopped, a signal numbered 128, or no run: none.
-        let not_stopped = [(Question::RebaseStopped, Answer::No)];
+        let not_stopped = [
+            NO_MERGE[0],
+            NO_MERGE[1],
+            (Question::RebaseStopped, Answer::No),
+        ];
         assert_eq!(answering(&then, &git(1), &not_stopped), None);
-        for ended in [git(129), Outcome::Git(End::Signal(128)), Outcome::Refused] {
-            assert_eq!(unasked(&then, &ended), None, "{then:?}");
+        for ended in [git(129), Outcome::Git(End::Signal(128))] {
+            assert_eq!(answering(&then, &ended, &NO_MERGE), None, "{then:?}");
         }
+        assert_eq!(unasked(&then, &Outcome::Refused), None, "{then:?}");
     }
     for ended in [git(128), git(2), Outcome::Git(End::Signal(2))] {
-        assert_eq!(unasked(&pull(None, None), &ended), None);
+        assert_eq!(answering(&pull(None, None), &ended, &NO_MERGE), None);
+    }
+}
+
+/// A merge in progress after a `pull` that did not exit 0 draws `advice`'s line for it ahead
+/// of every other: a merge-mode pull stopped at its conflicts, exit 1, and a pull Git refused
+/// because a merge stands, exit 128, whatever else the words admit. A rebase stopped is
+/// asked first, by `lstat`, and keeps its own line; exit 0 never asks.
+#[test]
+fn a_pull_that_left_a_merge_in_progress_draws_the_merge_line_first() {
+    let merging = [
+        (Question::RebaseStopped, Answer::No),
+        (Question::Merging, Answer::Yes),
+    ];
+    for then in [
+        pull(None, None),
+        pull(Some(Unnamed::NoUpstream), Some(Diverging::Unchosen)),
+        pull(Some(Unnamed::Detached), Some(Diverging::FastForwardOnly)),
+    ] {
+        let ends = [git(1), git(128), git(2), Outcome::Git(End::Signal(9))];
+        for (at, ended) in ends.iter().enumerate() {
+            assert_eq!(
+                answering(&then, ended, &merging).as_deref(),
+                Some(advice::MERGE),
+                "{then:?} end {at}"
+            );
+            // A question that answers nothing gives no hint at all.
+            let unanswered = [merging[0], (Question::Merging, Answer::Unanswered)];
+            assert_eq!(
+                answering(&then, ended, &unanswered),
+                None,
+                "{then:?} end {at}"
+            );
+        }
+    }
+    // Beside a stopped rebase, `MERGE_HEAD` is not asked, and exit 1 gets the rebase's line,
+    // the stop asked again where `after_the_pull` reads it.
+    let stopped = (Question::RebaseStopped, Answer::Yes);
+    assert_eq!(
+        answering(&pull(None, None), &git(1), &[stopped, stopped]).as_deref(),
+        Some(advice::REBASE)
+    );
+    // Neither `push` nor any other command asks it.
+    for then in [Then::Nothing, Then::NoRemoteChosen, push(None, None)] {
+        unasked(&then, &git(2));
     }
 }
 
@@ -265,16 +321,22 @@ fn answering(then: &Then, ended: &Outcome, answers: &[(Question, Answer)]) -> Op
 fn a_pull_left_stopped_draws_the_rebases_line_whatever_the_index_holds() {
     let then = pull(None, None);
     let stopped = (Question::RebaseStopped, Answer::Yes);
-    // The stop decides at either end: nothing is asked of the index.
-    for end in [git(0), git(1)] {
-        assert_eq!(
-            answering(&then, &end, &[stopped]).as_deref(),
-            Some(advice::REBASE)
-        );
-    }
-    // No rebase stopped, after exit 1: nothing more is asked, and no hint.
+    // The stop decides at either end: nothing is asked of the index, nor, after exit 1,
+    // of `MERGE_HEAD`.
+    assert_eq!(
+        answering(&then, &git(0), &[stopped]).as_deref(),
+        Some(advice::REBASE)
+    );
+    assert_eq!(
+        answering(&then, &git(1), &[stopped, stopped]).as_deref(),
+        Some(advice::REBASE)
+    );
+    // No rebase stopped and no merge in progress, after exit 1: no hint.
     let none = (Question::RebaseStopped, Answer::No);
-    assert_eq!(answering(&then, &git(1), &[none]), None);
+    assert_eq!(
+        answering(&then, &git(1), &[NO_MERGE[0], NO_MERGE[1], none]),
+        None
+    );
     let unanswered = (Question::RebaseStopped, Answer::Unanswered);
     assert_eq!(answering(&then, &git(1), &[unanswered]), None);
 }
@@ -297,9 +359,10 @@ fn a_pull_that_exited_0_asks_about_unmerged_entries_once() {
         assert_eq!(unmerged(Answer::No), None);
         assert_eq!(unmerged(Answer::Unanswered), None);
     }
-    for ended in [git(128), Outcome::Git(End::Signal(9)), Outcome::Refused] {
-        assert_eq!(unasked(&pull(None, None), &ended), None);
+    for ended in [git(128), Outcome::Git(End::Signal(9))] {
+        assert_eq!(answering(&pull(None, None), &ended, &NO_MERGE), None);
     }
+    assert_eq!(unasked(&pull(None, None), &Outcome::Refused), None);
     // Neither `push` nor any other command asks it.
     for then in [
         Then::Nothing,

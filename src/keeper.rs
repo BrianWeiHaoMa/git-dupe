@@ -49,7 +49,7 @@ mod settle;
 pub use edit::{Edited, Hidden, NotEdited, hidden, hide, hiding, unhide};
 pub use exposure::{Answered, beyond_a_link, ignored as publicly_ignored, link_above};
 pub use failed::Failed;
-pub use gitdupe::NAME as GITDUPE;
+pub use gitdupe::{NAME as GITDUPE, listed_paths};
 pub use listing::{
     public as publicly_tracked, staged_deletions, users_index as tracked_in_the_users_index,
 };

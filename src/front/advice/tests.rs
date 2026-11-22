@@ -252,21 +252,58 @@ fn branch_reads_as_delete_every_spelling_git_reads_so() {
 }
 
 #[test]
-fn a_detached_head_is_asked_about_before_the_run_only_where_the_words_admit_it() {
+fn head_is_asked_about_before_the_run_only_where_the_words_admit_an_entry_reading_it() {
+    let on_main = |commit: bool| {
+        Some(Standing {
+            head: Head::On(b"refs/heads/main\n".to_vec()),
+            commit: commit.then(|| Some(b"c0ffee\n".to_vec())),
+        })
+    };
+    let detached = |commit: bool| {
+        Some(Standing {
+            head: Head::Detached,
+            commit: commit.then(|| Some(b"c0ffee\n".to_vec())),
+        })
+    };
+    // The detached entry alone reads the branch's line, not the commit.
     let typed = words(&["checkout", "HEAD~1"]);
     for (before, admitted) in [
-        (Answer::Yes, true),
+        (on_main(false), true),
         // Already detached: Git prints no advice for a move between commits.
-        (Answer::No, false),
-        (Answer::Unanswered, false),
+        (detached(false), false),
+        (None, false),
     ] {
         let mut asked = Vec::new();
-        let found = before_asking(&typed, |question| {
-            asked.push(question);
-            before
+        let then = before_asking(&typed, |commit| {
+            asked.push(commit);
+            before.clone()
         });
-        assert_eq!(!found.is_empty(), admitted, "{before:?}");
-        assert_eq!(asked, [Question::OnABranch]);
+        assert_eq!(!then.families.is_empty(), admitted, "{before:?}");
+        assert_eq!(asked, [false]);
+    }
+    // `-m` reads where `HEAD` stands from a detached one too, the commit with it, and keeps
+    // both; under `-q` the detached entry is kept away and the `-m` one is not.
+    for typed in [
+        &["checkout", "-m", "side"][..],
+        &["switch", "-q", "-m", "side"],
+    ] {
+        for before in [on_main(true), detached(true)] {
+            let mut asked = Vec::new();
+            let then = before_asking(&words(typed), |commit| {
+                asked.push(commit);
+                before.clone()
+            });
+            assert_eq!(asked, [true], "{typed:?}");
+            assert!(
+                then.families
+                    .iter()
+                    .any(|family| family.trigger == Trigger::Carried),
+                "{typed:?} {before:?}"
+            );
+            assert_eq!(then.standing, before, "{typed:?}");
+        }
+        let then = before_asking(&words(typed), |_| None);
+        assert!(then.families.is_empty(), "{typed:?}");
     }
     // Words that keep the hint away, and every other family, put no question first.
     for (typed, admitted) in [
@@ -276,15 +313,17 @@ fn a_detached_head_is_asked_about_before_the_run_only_where_the_words_admit_it()
         (&["rebase", "side"], true),
         (&["cherry-pick", "side"], true),
         (&["branch", "-d", "side"], true),
+        (&["merge", "side"], true),
     ] {
-        let found = before_asking(&words(typed), unasked);
-        assert_eq!(!found.is_empty(), admitted, "{typed:?}");
+        let then = before_asking(&words(typed), |_| panic!("asked where HEAD stands"));
+        assert_eq!(!then.families.is_empty(), admitted, "{typed:?}");
+        assert_eq!(then.standing, None, "{typed:?}");
     }
 }
 
 #[test]
 fn each_trigger_follows_its_end_and_state() {
-    let picking = Trigger::Picking("CHERRY_PICK_HEAD");
+    let picking = Trigger::InProgress("CHERRY_PICK_HEAD");
     let stopped = Trigger::Stopped(A_REBASE_STOPPED);
     for end in [End::Code(1), End::Code(128), End::Signal(9)] {
         for (answer, hinted) in [
@@ -442,9 +481,15 @@ fn a_merge_is_asked_about_its_autostash_only_after_exit_0() {
             "{answer:?}"
         );
     }
-    // A merge that stops on its own conflicts exits 1 with unmerged entries: no question.
+    // A merge that did not exit 0 is asked about a merge in progress instead, and never
+    // about an autostash.
+    let merging = Question::Verifies("MERGE_HEAD");
     for end in [End::Code(1), End::Code(128), End::Signal(9)] {
-        assert_eq!(decision(merge, &end, &[]), (None, vec![]), "{end:?}");
+        assert_eq!(
+            decision(merge, &end, &[(merging, Answer::No)]),
+            (None, vec![merging]),
+            "{end:?}"
+        );
     }
     for typed in [&["merge", "--quit"][..], &["merge", "-q", "--quit"]] {
         assert_eq!(
@@ -461,6 +506,49 @@ fn a_merge_is_asked_about_its_autostash_only_after_exit_0() {
             "{typed:?}"
         );
     }
+}
+
+#[test]
+fn a_merge_that_did_not_exit_0_and_left_one_in_progress_gets_its_line() {
+    let merging = Question::Verifies("MERGE_HEAD");
+    let rebase = Question::Stopped(A_REBASE_STOPPED);
+    for typed in [
+        &["merge", "side"][..],
+        &["merge", "--no-edit", "side"],
+        &["merge", "--continue"],
+        &["merge", "--no-commit", "side"],
+    ] {
+        for end in [End::Code(1), End::Code(128), End::Signal(9)] {
+            let stopped = [(merging, Answer::Yes), (rebase, Answer::No)];
+            assert_eq!(
+                decision(typed, &end, &stopped),
+                (Some(MERGE), vec![merging, rebase]),
+                "{typed:?} {end:?}"
+            );
+            // Refused before starting: no merge in progress, and nothing more is asked.
+            assert_eq!(
+                decision(typed, &end, &[(merging, Answer::No)]),
+                (None, vec![merging]),
+                "{typed:?} {end:?}"
+            );
+            // Beside a stopped rebase, the merge in progress is the rebase's.
+            let beside = [(merging, Answer::Yes), (rebase, Answer::Yes)];
+            assert_eq!(decision(typed, &end, &beside).0, None, "{typed:?} {end:?}");
+            let failed = [(merging, Answer::Unanswered)];
+            assert_eq!(decision(typed, &end, &failed).0, None, "{typed:?} {end:?}");
+        }
+    }
+    // A help request admits nothing, and exit 0 asks only about an autostash.
+    assert_eq!(
+        decision(&["merge", "-h"], &End::Code(129), &[]),
+        (None, vec![])
+    );
+    let (_, asked) = decision(
+        &["merge", "side"],
+        &End::Code(0),
+        &[(Question::Unmerged, Answer::No)],
+    );
+    assert_eq!(asked, [Question::Unmerged]);
 }
 
 #[test]
@@ -587,7 +675,16 @@ fn a_detached_head_follows_a_run_that_exited_0_and_symbolic_ref_answering_1() {
 
 #[test]
 fn each_hint_names_the_git_dupe_commands_and_the_plain_ones_project() {
-    let named: [(&[u8], &[&str]); 9] = [
+    let named: [(&[u8], &[&str]); 10] = [
+        (
+            MERGE,
+            &[
+                "'git dupe add <path>'",
+                "'git dupe merge --continue'",
+                "'git dupe merge --abort'",
+                "plain 'git add'",
+            ],
+        ),
         (
             REBASE,
             &[
@@ -681,6 +778,7 @@ fn each_hint_names_the_git_dupe_commands_and_the_plain_ones_project() {
 fn a_word_git_reads_as_merge_admits_the_entry_of_its_command_after_the_detached_one() {
     let unmerged = [
         (Question::OnABranch, Answer::Yes),
+        (Question::Moved, Answer::Yes),
         (Question::Unmerged, Answer::Yes),
     ];
     for typed in [
@@ -698,9 +796,23 @@ fn a_word_git_reads_as_merge_admits_the_entry_of_its_command_after_the_detached_
         assert_eq!(decision(typed, &End::Code(1), &unmerged).0, None);
         let clean = [
             (Question::OnABranch, Answer::Yes),
+            (Question::Moved, Answer::Yes),
             (Question::Unmerged, Answer::No),
         ];
         assert_eq!(decision(typed, &End::Code(0), &clean).0, None, "{typed:?}");
+        // `HEAD` where it stood: paths checked out, no branch left, and the index not asked.
+        let stayed = [
+            (Question::OnABranch, Answer::Yes),
+            (Question::Moved, Answer::No),
+        ];
+        let (line, asked) = decision(typed, &End::Code(0), &stayed);
+        assert_eq!(line, None, "{typed:?}");
+        assert_eq!(asked.last(), Some(&Question::Moved), "{typed:?}");
+        let unanswered = [
+            (Question::OnABranch, Answer::Yes),
+            (Question::Moved, Answer::Unanswered),
+        ];
+        assert_eq!(decision(typed, &End::Code(0), &unanswered).0, None);
     }
     for typed in [
         &["switch", "side"][..],

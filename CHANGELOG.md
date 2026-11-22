@@ -44,6 +44,20 @@ Every change a user of git-dupe would notice, newest first, in the form of
   `git dupe detach`, or `git dupe detach --force` where it refuses, and then
   `git dupe clone <url>` to start over. The manual page's examples give a setup script
   that acts on `clone`'s exit status and asks for a private commit.
+- A `git dupe merge`, or a `git dupe pull` that merges, that stops on a conflict ends
+  with a hint naming `git dupe add <path>`, `git dupe merge --continue`, and
+  `git dupe merge --abort`, and saying that plain `git add` acts on the project's
+  repository; so does a merge or pull Git refuses while that merge stands, where a pull
+  named `git dupe config pull.rebase` or the fast-forward-only commands.
+- `git dupe checkout -m` given paths, which re-creates their conflicts and switches no
+  branch, no longer gets the hint for changes carried across a switch, whose
+  `git dupe stash drop` would drop a stash entry it did not make.
+- After a `git dupe mv` of a directory `.gitdupe` lists, a hint names
+  `git dupe hide -- <new>` and then `git dupe unhide -- <old>`, which list the new name in
+  its place: until then, what the private repository does not track there is visible to
+  the project's Git. The manual page and the questions give the order that exposes
+  nothing, hide the new name, move, unhide the old, and say that a public `git mv` of a
+  directory holding private files needs the same care.
 
 ## [0.4.1] - 2026-11-03
 

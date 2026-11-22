@@ -75,7 +75,10 @@
 //!   whose editor failed or a todo list Git cannot read, which exit 1, the line of a stopped
 //!   rebase, Git's advice there naming plain `git commit --amend`, where at a conflict it
 //!   names only commands that fail in the project's repository; and after one that exited
-//!   0 whose autostash came back with conflicts, `advice`'s line for it. Of the `pull` hints,
+//!   0 whose autostash came back with conflicts, `advice`'s line for it. Ahead of them all,
+//!   after a `pull` that did not exit 0 while `MERGE_HEAD` names a commit and no rebase
+//!   stands stopped, `advice`'s line for a merge in progress, a merge-mode pull stopped at
+//!   its conflicts and one Git refused because a merge stands alike. Of the `pull` hints,
 //!   the first that holds in that order follows, and the exits keep them apart: Git's
 //!   advice for no branch to merge comes with exit 1, and a pull given a URL or a path has
 //!   the remote's `HEAD` to merge, Git's advice where it cannot being the divergent-branches
@@ -425,6 +428,8 @@ enum Question {
     Unmerged,
     /// Whether a rebase stands stopped, read by `lstat`.
     RebaseStopped,
+    /// Whether a merge is in progress: `MERGE_HEAD` names a commit.
+    Merging,
 }
 
 /// Writes what follows a run that ended as `ended` against the repository `against`
@@ -434,6 +439,7 @@ pub fn after(then: Then, ended: &Outcome, against: Against) {
         Question::HeadVerifies => advice::verifies("HEAD", against),
         Question::Unmerged => advice::unmerged(against),
         Question::RebaseStopped => advice::rebase_stopped(against),
+        Question::Merging => advice::verifies("MERGE_HEAD", against),
     };
     if let Some(hint) = hint(&then, ended, ask) {
         lines::write(Level::Hint, &hint);
@@ -444,13 +450,25 @@ pub fn after(then: Then, ended: &Outcome, against: Against) {
 /// decided `then`: "did not exit 0" is any end but exit 0, a signal included, and an end
 /// named by its number is never a signal's. A run that did not start is no run. `ask`
 /// is put a question only where the hint it decides is due: whether `HEAD` names a commit
-/// after a `push` that exited 128 owed the no-upstream hint, and after a `pull` that exited
-/// 0 or 1 owed no other, what `after_the_pull` asks (G22).
+/// after a `push` that exited 128 owed the no-upstream hint; whether a merge is in progress
+/// after a `pull` that did not exit 0, where no rebase stands stopped; and after a `pull`
+/// that exited 0 or 1 owed no other, what `after_the_pull` asks (G22).
 fn hint(then: &Then, ended: &Outcome, mut ask: impl FnMut(Question) -> Answer) -> Option<Vec<u8>> {
     let Outcome::Git(end) = ended else {
         return None;
     };
     let failed = *end != End::Code(0);
+    // A merge in progress decides before the rest (`Holds/G18`): a merge-mode pull stopped
+    // at its conflicts, and a pull Git refused because one stands, whatever the words and
+    // the end admit besides; beside a stopped rebase, the rebase's line follows instead. A
+    // question that answers nothing gives no hint.
+    if matches!(then, Then::Pull { .. }) && failed {
+        match merging(&mut ask) {
+            Answer::Yes => return Some(advice::MERGE.to_vec()),
+            Answer::Unanswered => return None,
+            Answer::No => {}
+        }
+    }
     match then {
         Then::NoRemoteChosen if failed => Some(NO_REMOTE_CHOSEN.to_vec()),
         Then::Push {
@@ -486,6 +504,17 @@ fn hint(then: &Then, ended: &Outcome, mut ask: impl FnMut(Question) -> Answer) -
     }
 }
 
+/// Whether a merge is in progress after a `pull`, no rebase standing stopped: the rebase,
+/// read by `lstat`, first, so that a pull stopped at a rebase's conflict runs nothing more
+/// and goes on to the rebase's line.
+fn merging(ask: &mut impl FnMut(Question) -> Answer) -> Answer {
+    match ask(Question::RebaseStopped) {
+        Answer::Yes => Answer::No,
+        Answer::No => ask(Question::Merging),
+        Answer::Unanswered => Answer::Unanswered,
+    }
+}
+
 /// The hint after a `pull` that exited 0, or 1 where `exited_0` is false, and owed no other.
 /// A rebase stopped draws its line whatever the index holds: at a conflict too, because Git's
 /// advice names plain `git rebase --continue`, `--skip`, and `--abort`, which act in the
@@ -515,19 +544,11 @@ fn refusal(refused: &Refused, head_verifies: impl FnOnce() -> Answer) -> Option<
 }
 
 /// The answer of the private `symbolic-ref -q HEAD`: its line on a branch, nothing on a
-/// detached `HEAD`, which exits 1 (S12). An empty answer on a branch cannot be read.
+/// detached `HEAD`, which exits 1 (S12), as `advice` reads it.
 fn current_branch(against: Against) -> Result<Vec<u8>, Outcome> {
-    let run = Run::against(against, ["symbolic-ref", "-q", "HEAD"]).capture_output();
-    let finished = run.start().map_err(outcome::not_started)?;
-    match finished.end {
-        End::Code(0) if finished.stdout.is_empty() => Err(outcome::unreadable()),
-        End::Code(0) => Ok(finished.stdout),
-        End::Code(1) => Ok(Vec::new()),
-        end => Err(Outcome::Git(end)),
-    }
+    advice::head_line(against).map(Option::unwrap_or_default)
 }
 
-/// The refusal of the private remote `name`, a URL of which names `place`.
 fn refuse_remote(name: &[u8], place: &Place) -> Outcome {
     let mut line = b"a URL of the private remote ".to_vec();
     line.extend_from_slice(&lines::typed(name));
