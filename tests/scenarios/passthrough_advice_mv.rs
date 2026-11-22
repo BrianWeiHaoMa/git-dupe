@@ -15,8 +15,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::harness::{
-    End, Output, Scenario, asked_after, dupe_succeeds, hinted, private_add, private_alias,
-    private_commit, under_each_release, unhinted, write,
+    End, Output, Scenario, asked_after, dupe_succeeds, hinted, name_accepted, private_add,
+    private_alias, private_commit, under_each_release, unhinted, write,
 };
 
 /// The attached workspace `name` whose `.gitdupe` lists `notes`, holding a committed `notes/saved.md`
@@ -148,22 +148,26 @@ fn moved_into_a_directory_that_stood_the_hint_names_where_it_now_stands() {
 #[test]
 fn every_command_a_hint_names_is_one_hide_and_unhide_accept() {
     under_each_release(|s| {
-        // Two listed sources into one directory, one of them beginning with `:`.
+        // Two listed sources into one directory, one of them beginning with `:`, a name
+        // Windows cannot hold.
         let root = fixture(s, "workspace-3");
-        write(&root, ":plans/p.md", b"p\n");
-        dupe_succeeds(s, &root, &["add", "--", "./:plans/"]);
-        write(&root, "box/kept.md", b"kept\n");
-        let moved = hinted(
-            s,
-            &root,
-            &["mv", "notes", ":plans", "box"],
-            &[
-                b"'git dupe hide -- box/notes box/:plans'",
-                b"'git dupe unhide -- notes ./:plans'",
-            ],
-        );
-        run_as_written(s, &root, &named_commands(&hint_line(&moved)));
-        assert_eq!(gitdupe_lines(&root), ["box/notes", "box/:plans"]);
+        let colon = "passthrough_advice_mv: a listed directory named :plans";
+        if name_accepted(&root, b":plans", colon) {
+            write(&root, ":plans/p.md", b"p\n");
+            dupe_succeeds(s, &root, &["add", "--", "./:plans/"]);
+            write(&root, "box/kept.md", b"kept\n");
+            let moved = hinted(
+                s,
+                &root,
+                &["mv", "notes", ":plans", "box"],
+                &[
+                    b"'git dupe hide -- box/notes box/:plans'",
+                    b"'git dupe unhide -- notes ./:plans'",
+                ],
+            );
+            run_as_written(s, &root, &named_commands(&hint_line(&moved)));
+            assert_eq!(gitdupe_lines(&root), ["box/notes", "box/:plans"]);
+        }
 
         // A `mv -k` that skipped a source it could not move: only what moved is named.
         let root = fixture(s, "workspace-4");

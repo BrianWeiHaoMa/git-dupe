@@ -59,10 +59,11 @@ fn refused(
 }
 
 /// `git dupe remote -v` runs from the root as the refusals say: it lists the private
-/// remote `origin`, the bare repository beside the root.
+/// remote `origin`, the bare repository beside the root. Git prints a remote's URL as it
+/// was configured, which `pushed_workspace` gave with this platform's separators.
 fn lists_the_private_remotes(s: &Scenario, t: &Transfer) {
     let listed = s.git(["dupe", "remote", "-v"]).from(&t.root).succeeds();
-    let private = as_git_spells(&t.private_remote);
+    let private = t.private_remote.to_str().expect("a UTF-8 path");
     names(
         &listed.stdout,
         format!("origin\t{private} (push)").as_bytes(),
