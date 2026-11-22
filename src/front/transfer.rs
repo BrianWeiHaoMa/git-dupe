@@ -549,6 +549,7 @@ fn current_branch(against: Against) -> Result<Vec<u8>, Outcome> {
     advice::head_line(against).map(Option::unwrap_or_default)
 }
 
+/// The refusal of the private remote `name`, a URL of which names `place`.
 fn refuse_remote(name: &[u8], place: &Place) -> Outcome {
     let mut line = b"a URL of the private remote ".to_vec();
     line.extend_from_slice(&lines::typed(name));
